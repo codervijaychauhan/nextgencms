@@ -1,0 +1,502 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Global Helpers ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function getProfile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function isSuperAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'vijaychauhanofficial01@gmail.com' ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && getProfile().role == 'super_admin')
+      );
+    }
+
+    function isStaff() {
+      return isSignedIn() && (
+        isSuperAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getProfile().role in ['super_admin', 'admin', 'manager', 'volunteer'])
+      );
+    }
+
+    function hasRight(module, right) {
+      return isSignedIn() && (
+        isSuperAdmin() || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         getProfile().permissions != null && 
+         getProfile().permissions[module] != null && 
+         getProfile().permissions[module].matches('.*' + right + '.*'))
+      );
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 64 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isNumeric(val) {
+      return val is int || val is float;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Module: Users ---
+    match /users/{userId} {
+      function isValidUser(data) {
+        return data.keys().hasAll(['uid', 'username', 'email', 'role', 'createdAt']) &&
+               data.uid is string && data.uid.size() <= 128 &&
+               data.username is string && data.username.size() <= 100 &&
+               data.email is string && data.email.size() <= 100 &&
+               data.role in ['super_admin', 'admin', 'manager', 'volunteer', 'guest'] &&
+               data.createdAt is timestamp &&
+               (!('stateId' in data) || data.stateId is string) &&
+               (!('districtId' in data) || data.districtId is string) &&
+               (!('constituencyId' in data) || data.constituencyId is string) &&
+               (!('boothId' in data) || data.boothId is string);
+      }
+
+      allow get: if isSignedIn();
+      allow list: if isSignedIn();
+      
+      allow create: if isSignedIn() && (
+        // Self-registration (forced to guest, except superadmin vijaychauhanofficial01@gmail.com)
+        (request.auth.uid == userId && (
+          incoming().role == 'guest' ||
+          (incoming().role == 'super_admin' && request.auth.token.email == 'vijaychauhanofficial01@gmail.com')
+        ) && isValidUser(incoming())) ||
+        // Admin registration
+        (hasRight('users', 'c') && isValidUser(incoming()))
+      );
+
+      allow update: if isSignedIn() && (
+        // Admin update
+        (hasRight('users', 'u') && isValidUser(incoming()) && (
+          // Prevent regular admins from modifying super_admin or owner
+          isSuperAdmin() || (existing().role != 'super_admin' && incoming().role != 'super_admin')
+        )) ||
+        // Self update (limited fields)
+        (request.auth.uid == userId && 
+         incoming().diff(existing()).affectedKeys().hasOnly(['username', 'bio', 'profilePicture', 'updatedAt']) &&
+         incoming().updatedAt == request.time)
+      );
+
+      allow delete: if isSuperAdmin() && existing().email != 'vijaychauhanofficial01@gmail.com';
+    }
+
+    // --- Module: Demographics ---
+    match /demographics/india/states/{stateId} {
+      function isValidState(data) {
+        return data.keys().hasAll(['name', 'code', 'createdAt']) &&
+               data.name is string && data.name.size() <= 50 &&
+               data.code is string && data.code.size() <= 5 &&
+               data.createdAt is timestamp;
+      }
+
+      allow read: if isSignedIn();
+      allow create: if hasRight('demographics', 'c') && isValidId(stateId) && isValidState(incoming());
+      allow update: if hasRight('demographics', 'u') && isValidId(stateId) && isValidState(incoming());
+      allow delete: if hasRight('demographics', 'd');
+
+      // Sub-module: Districts
+      match /districts/{districtId} {
+        function isValidDistrict(data) {
+          return data.keys().hasAll(['name', 'stateId', 'createdAt']) &&
+                 data.name is string && data.name.size() <= 50 &&
+                 data.stateId == stateId &&
+                 data.createdAt is timestamp;
+        }
+
+        allow read: if isSignedIn();
+        allow create: if hasRight('demographics', 'c') && isValidId(districtId) && isValidDistrict(incoming());
+        allow update: if hasRight('demographics', 'u') && isValidId(districtId) && isValidDistrict(incoming());
+        allow delete: if hasRight('demographics', 'd');
+
+        // Sub-module: Constituencies
+        match /constituencies/{constituencyId} {
+          function isValidConstituency(data) {
+            return data.keys().hasAll(['name', 'stateId', 'districtId', 'createdAt']) &&
+                   data.name is string && data.name.size() <= 100 &&
+                   data.stateId == stateId &&
+                   data.districtId == districtId &&
+                   data.createdAt is timestamp;
+          }
+
+          allow read: if isSignedIn();
+          allow create: if hasRight('demographics', 'c') && isValidId(constituencyId) && isValidConstituency(incoming());
+          allow update: if hasRight('demographics', 'u') && isValidId(constituencyId) && isValidConstituency(incoming());
+          allow delete: if hasRight('demographics', 'd');
+
+          // Sub-module: Booths
+          match /booths/{boothId} {
+            function isValidBooth(data) {
+              return data.keys().hasAll(['name', 'boothNumber', 'stateId', 'districtId', 'constituencyId', 'createdAt']) &&
+                     data.name is string && data.name.size() <= 200 &&
+                     data.boothNumber is string && data.boothNumber.size() <= 20 &&
+                     data.stateId == stateId &&
+                     data.districtId == districtId &&
+                     data.constituencyId == constituencyId &&
+                     data.createdAt is timestamp;
+            }
+
+            allow read: if isSignedIn();
+            allow create: if hasRight('demographics', 'c') && isValidId(boothId) && isValidBooth(incoming());
+            allow update: if hasRight('demographics', 'u') && isValidId(boothId) && isValidBooth(incoming());
+            allow delete: if hasRight('demographics', 'd');
+          }
+        }
+      }
+    }
+
+    // --- Collection Group Rules for Demographics Queries ---
+    match /{path=**}/districts/{districtId} {
+      allow read: if isSignedIn();
+    }
+    match /{path=**}/constituencies/{constituencyId} {
+      allow read: if isSignedIn();
+    }
+    match /{path=**}/booths/{boothId} {
+      allow read: if isSignedIn();
+    }
+
+    // --- Module: Voters ---
+    match /voters/{voterUid} {
+      function isValidVoter(data) {
+        return data.keys().hasAll(['voterId', 'name', 'stateId', 'districtId', 'constituencyId', 'boothId', 'createdAt']) &&
+               data.voterId is string && data.voterId.size() <= 50 &&
+               data.name is string && data.name.size() <= 100 &&
+               data.boothId is string &&
+               data.createdAt is timestamp;
+      }
+
+      allow read: if isSignedIn();
+      allow create: if hasRight('voters', 'c') && isValidVoter(incoming());
+      allow update: if hasRight('voters', 'u') && isValidVoter(incoming());
+      allow delete: if hasRight('voters', 'd');
+    }
+
+    // --- Module: Elections & Parties ---
+    match /elections/{electionId} {
+      function isValidElection(data) {
+        return data.keys().hasAll(['year', 'status', 'createdAt']) &&
+               isNumeric(data.year) &&
+               data.status in ['Upcoming', 'Active', 'Completed'] &&
+               data.createdAt is timestamp;
+      }
+      allow read: if isSignedIn();
+      allow create: if hasRight('elections', 'c') && isValidElection(incoming());
+      allow update: if hasRight('elections', 'u') && isValidElection(incoming());
+      allow delete: if hasRight('elections', 'd');
+    }
+
+    match /parties/{partyId} {
+      function isValidParty(data) {
+        return data.keys().hasAll(['name', 'abbreviation', 'createdAt']) &&
+               data.name is string && data.name.size() <= 100 &&
+               data.abbreviation is string && data.abbreviation.size() <= 20 &&
+               data.createdAt is timestamp;
+      }
+      allow read: if isSignedIn();
+      allow create: if hasRight('elections', 'c') && isValidParty(incoming());
+      allow update: if hasRight('elections', 'u') && isValidParty(incoming());
+      allow delete: if hasRight('elections', 'd');
+    }
+
+    // --- Module: Voter Sentiments (Surveys) ---
+    match /sentiments/{sentimentId} {
+      function isValidSentiment(data) {
+        return data.keys().hasAll(['voterDocId', 'electionId', 'favoredPartyId', 'sentimentScore', 'recordedBy', 'createdAt']) &&
+               data.voterDocId is string &&
+               data.electionId is string &&
+               data.favoredPartyId is string &&
+               data.sentimentScore >= 1 && data.sentimentScore <= 5 &&
+               data.createdAt is timestamp;
+      }
+
+      allow read: if isSignedIn() && (hasRight('surveys', 'v') || isStaff());
+      
+      allow create: if (hasRight('surveys', 'c') || isSignedIn()) && 
+                    isValidSentiment(incoming()) && 
+                    incoming().recordedBy == request.auth.uid;
+                    
+      allow update: if (hasRight('surveys', 'u') || (isSignedIn() && existing().recordedBy == request.auth.uid)) && 
+                    isValidSentiment(incoming()) && 
+                    incoming().recordedBy == existing().recordedBy;
+                    
+      allow delete: if hasRight('surveys', 'd') || (isSignedIn() && existing().recordedBy == request.auth.uid);
+    }
+
+    // --- Module: Campaign Political Sentiments ---
+    match /political_sentiments/{sentimentId} {
+      function isValidCampaignSentiment(data) {
+        return data.keys().hasAll(['adminId', 'voterDocId', 'sentiment', 'updatedBy', 'updatedAt']) &&
+               data.adminId is string &&
+               data.voterDocId is string &&
+               data.sentiment in ['Support', 'Neutral', 'Oppose', 'Other Party'] &&
+               data.updatedBy is string &&
+               data.updatedAt is timestamp &&
+               (!('notes' in data) || data.notes is string) &&
+               (!('strength' in data) || isNumeric(data.strength)) &&
+               (!('isKaryakarta' in data) || data.isKaryakarta is bool) &&
+               (!('updatedByName' in data) || data.updatedByName is string);
+      }
+
+      allow read: if isSignedIn();
+      allow write: if isSignedIn() && isValidCampaignSentiment(incoming());
+    }
+
+    // --- Module: Survey Campaigns ---
+    match /surveys/{surveyId} {
+      function isValidSurvey(data) {
+        return data.keys().hasAll(['title', 'description', 'electionId', 'electionYear', 'assignedTo', 'status', 'createdAt']) &&
+               data.title is string && data.title.size() <= 200 &&
+               data.description is string && data.description.size() <= 2000 &&
+               data.electionId is string &&
+               isNumeric(data.electionYear) &&
+               data.assignedTo is list &&
+               data.status in ['Draft', 'Active', 'Completed'] &&
+               data.createdAt is timestamp &&
+               (!('templateId' in data) || data.templateId is string) &&
+               (!('linkedPartyIds' in data) || data.linkedPartyIds is list);
+      }
+
+      allow read: if isSignedIn() && (hasRight('survey_campaigns', 'v') || hasRight('surveys', 'c') || isStaff());
+      allow create: if (hasRight('survey_campaigns', 'c') || isSuperAdmin()) && isValidSurvey(incoming());
+      allow update: if (hasRight('survey_campaigns', 'u') || isSuperAdmin()) && isValidSurvey(incoming());
+      allow delete: if hasRight('survey_campaigns', 'd') || isSuperAdmin();
+    }
+
+    // --- Module: Survey Templates ---
+    match /survey_templates/{templateId} {
+      function isValidTemplate(data) {
+        return data.keys().hasAll(['name', 'fields']) &&
+               data.name is string && data.name.size() <= 100 &&
+               data.fields is list &&
+               (!('description' in data) || data.description is string) &&
+               (!('isSystem' in data) || data.isSystem is bool) &&
+               (!('createdAt' in data) || data.createdAt is timestamp) &&
+               (!('updatedAt' in data) || data.updatedAt is timestamp);
+      }
+
+      allow read: if isSignedIn();
+      allow create: if hasRight('survey_campaigns', 'c') && isValidTemplate(incoming());
+      allow update: if hasRight('survey_campaigns', 'u') && isValidTemplate(incoming());
+      allow delete: if hasRight('survey_campaigns', 'd') && (!('isSystem' in existing()) || !existing().isSystem);
+    }
+
+    // --- Module: Admin Volunteers ---
+    match /benefits/{benefitId} {
+      function isValidBenefit(data) {
+        return data.keys().hasAll(['voterDocId', 'voterId', 'voterName', 'aadharNumber', 'amount', 'benefitName', 'benefitType', 'date', 'adminId', 'createdAt']) &&
+               data.voterDocId is string && data.voterDocId.size() <= 64 &&
+               data.voterId is string && data.voterId.size() <= 64 &&
+               data.voterName is string && data.voterName.size() <= 200 &&
+               data.aadharNumber is string && (data.aadharNumber == "" || (data.aadharNumber.size() == 12 && data.aadharNumber.matches('^\\d{12}$'))) &&
+               isNumeric(data.amount) && data.amount >= 0 &&
+               data.benefitName is string && data.benefitName.size() <= 200 &&
+               data.benefitType in ['Government', 'Party'] &&
+               data.date is string && data.date.size() <= 30 &&
+               data.adminId is string && data.adminId.size() <= 128 &&
+               data.createdAt is timestamp &&
+               (!('notes' in data) || (data.notes is string && data.notes.size() <= 2000)) &&
+               (!('witnessName' in data) || (data.witnessName is string && data.witnessName.size() <= 500)) &&
+               (!('witnessVoterId' in data) || (data.witnessVoterId is string && data.witnessVoterId.size() <= 64)) &&
+               (!('witnessVoterDocId' in data) || (data.witnessVoterDocId is string && data.witnessVoterDocId.size() <= 128)) &&
+               (!('witnesses' in data) || data.witnesses is list) &&
+               (!('stateId' in data) || data.stateId is string) &&
+               (!('districtId' in data) || data.districtId is string) &&
+               (!('constituencyId' in data) || data.constituencyId is string) &&
+               (!('boothId' in data) || data.boothId is string);
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid || hasRight('benefits', 'v'));
+      allow create: if isSignedIn() && isValidBenefit(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow update: if isSignedIn() && isValidBenefit(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+    }
+
+    // --- Module: Admin Volunteers ---
+    match /admin_volunteers/{volunteerId} {
+      function isValidVolunteer(data) {
+        return data.keys().hasAll(['voterDocId', 'voterId', 'name', 'adminId', 'status', 'createdAt']) &&
+               data.voterDocId is string &&
+               data.voterId is string &&
+               data.name is string && data.name.size() <= 200 &&
+               data.adminId is string && data.adminId.size() <= 128 &&
+               data.status in ['Active', 'Inactive'] &&
+               data.createdAt is timestamp &&
+               (!('stateId' in data) || data.stateId is string) &&
+               (!('districtId' in data) || data.districtId is string) &&
+               (!('constituencyId' in data) || data.constituencyId is string) &&
+               (!('boothId' in data) || data.boothId is string);
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid || hasRight('volunteers', 'v') || isStaff());
+      allow create: if isSignedIn() && isValidVolunteer(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow update: if isSignedIn() && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+    }
+
+    // --- Module: Admin Polling Booth Assignments ---
+    match /admin_booth_assignments/{assignmentId} {
+      function isValidBoothAssignment(data) {
+        return data.keys().hasAll(['adminId', 'boothId', 'boothNumber', 'boothName', 'agentVolunteerDocId', 'agentName']) &&
+               data.adminId is string && data.adminId.size() <= 128 &&
+               data.boothId is string &&
+               data.boothNumber is string &&
+               data.boothName is string &&
+               data.agentVolunteerDocId is string &&
+               data.agentName is string;
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid || hasRight('booths', 'v') || isStaff());
+      allow create: if isSignedIn() && isValidBoothAssignment(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow update: if isSignedIn() && isValidBoothAssignment(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+    }
+
+    // --- Module: Finance Tracker ---
+    match /finance_budgets/{budgetId} {
+      function isValidBudget(data) {
+        return data.keys().hasAll(['id', 'adminId', 'totalBudget', 'electionYear', 'allocations']) &&
+               data.id is string &&
+               data.adminId is string &&
+               isNumeric(data.totalBudget) &&
+               data.electionYear is string &&
+               data.allocations is map;
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid || hasRight('finance', 'v'));
+      allow create: if isSignedIn() && isValidBudget(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid || hasRight('finance', 'c'));
+      allow update: if isSignedIn() && isValidBudget(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid || hasRight('finance', 'u'));
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid || hasRight('finance', 'd'));
+    }
+
+    match /finance_transactions/{transactionId} {
+      function isValidTransaction(data) {
+        return data.keys().hasAll(['id', 'adminId', 'type', 'title', 'amount', 'category', 'date', 'paymentMethod', 'createdAt']) &&
+               data.id is string &&
+               data.adminId is string &&
+               data.type in ['expense', 'income'] &&
+               data.title is string && data.title.size() <= 300 &&
+               isNumeric(data.amount) &&
+               data.category is string &&
+               data.date is string &&
+               data.paymentMethod in ['Cash', 'Bank Transfer', 'Cheque', 'Online'] &&
+               data.createdAt is timestamp &&
+               (!('donorName' in data) || data.donorName is string) &&
+               (!('notes' in data) || data.notes is string) &&
+               (!('updatedAt' in data) || data.updatedAt is timestamp);
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid || hasRight('finance', 'v'));
+      allow create: if isSignedIn() && isValidTransaction(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid || hasRight('finance', 'c'));
+      allow update: if isSignedIn() && isValidTransaction(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid || hasRight('finance', 'u'));
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid || hasRight('finance', 'd'));
+    }
+
+    // --- Module: WhatsApp Sender ---
+    match /whatsapp_configs/{configId} {
+      function isValidWhatsAppConfig(data) {
+        return data.keys().hasAll(['id', 'adminId', 'tenantType', 'vendorName', 'phoneNumber', 'status', 'createdAt']) &&
+               data.id is string &&
+               data.adminId is string &&
+               data.tenantType in ['shared', 'vendor'] &&
+               data.vendorName is string &&
+               data.phoneNumber is string &&
+               data.status in ['connected', 'disconnected'] &&
+               data.createdAt is timestamp;
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+      allow create: if isSignedIn() && isValidWhatsAppConfig(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow update: if isSignedIn() && isValidWhatsAppConfig(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+    }
+
+    match /whatsapp_broadcasts/{broadcastId} {
+      function isValidWhatsAppBroadcast(data) {
+        return data.keys().hasAll(['id', 'adminId', 'campaignName', 'senderConfigId', 'senderPhone', 'templateName', 'status', 'totalCount', 'successCount', 'failedCount', 'createdAt']) &&
+               data.id is string &&
+               data.adminId is string &&
+               data.campaignName is string &&
+               data.senderConfigId is string &&
+               data.senderPhone is string &&
+               data.templateName is string &&
+               data.status in ['Draft', 'Sending', 'Completed', 'Failed', 'Paused'] &&
+               isNumeric(data.totalCount) &&
+               isNumeric(data.successCount) &&
+               isNumeric(data.failedCount) &&
+               data.createdAt is timestamp;
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+      allow create: if isSignedIn() && isValidWhatsAppBroadcast(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow update: if isSignedIn() && isValidWhatsAppBroadcast(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+    }
+
+    match /whatsapp_templates/{templateId} {
+      function isValidWhatsAppTemplate(data) {
+        return data.keys().hasAll(['id', 'adminId', 'name', 'category', 'language', 'bodyText', 'status', 'createdAt']) &&
+               data.id is string &&
+               data.adminId is string &&
+               data.name is string &&
+               data.category in ['UTILITY', 'MARKETING', 'AUTHENTICATION'] &&
+               data.language is string &&
+               data.bodyText is string &&
+               data.status in ['APPROVED', 'PENDING', 'REJECTED'] &&
+               data.createdAt is timestamp;
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+      allow create: if isSignedIn() && isValidWhatsAppTemplate(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow update: if isSignedIn() && isValidWhatsAppTemplate(incoming()) && (isSuperAdmin() || incoming().adminId == request.auth.uid);
+      allow delete: if isSignedIn() && (isSuperAdmin() || existing().adminId == request.auth.uid);
+    }
+
+    // --- Module: Mandal Management ---
+    match /mandals/{mandalId} {
+      function isValidMandal(data) {
+        return data.keys().hasAll(['id', 'name', 'mandalCode', 'stateId', 'districtId', 'constituencyId', 'createdAt']) &&
+               data.id is string &&
+               data.name is string &&
+               data.mandalCode is string &&
+               data.stateId is string &&
+               data.districtId is string &&
+               data.constituencyId is string &&
+               data.createdAt is timestamp &&
+               (!('presidentName' in data) || data.presidentName is string) &&
+               (!('presidentPhone' in data) || data.presidentPhone is string) &&
+               (!('voterCount' in data) || isNumeric(data.voterCount)) &&
+               (!('population' in data) || isNumeric(data.population)) &&
+               (!('updatedAt' in data) || data.updatedAt is timestamp);
+      }
+
+      allow read: if isSignedIn() && (isSuperAdmin() || hasRight('mandals', 'v'));
+      allow create: if isSignedIn() && isValidMandal(incoming()) && (isSuperAdmin() || hasRight('mandals', 'c'));
+      allow update: if isSignedIn() && isValidMandal(incoming()) && (isSuperAdmin() || hasRight('mandals', 'u'));
+      allow delete: if isSignedIn() && (isSuperAdmin() || hasRight('mandals', 'd'));
+
+      match /members/{memberId} {
+        allow read: if isSignedIn() && (isSuperAdmin() || hasRight('mandals', 'v'));
+        allow write: if isSignedIn() && (isSuperAdmin() || hasRight('mandals', 'u') || hasRight('mandals', 'c'));
+      }
+    }
+  }
+}

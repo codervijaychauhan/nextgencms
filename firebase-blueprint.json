@@ -1,0 +1,538 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Public and private profile information for a user.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "username": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "bio": { "type": "string" },
+        "profilePicture": { "type": "string" },
+        "role": { "type": "string", "enum": ["super_admin", "admin", "manager", "volunteer", "guest"] },
+        "stateId": { "type": "string" },
+        "districtId": { "type": "string" },
+        "constituencyId": { "type": "string" },
+        "boothId": { "type": "string" },
+        "permissions": {
+          "type": "object",
+          "description": "Module-based permissions map. Keys: module IDs ('voters', 'demographics', 'users'). Values: strings containing 'v' (view), 'c' (create), 'u' (update), 'd' (delete)."
+        },
+        "disabled": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "username", "email", "role", "createdAt"]
+    },
+    "IndiaState": {
+      "title": "State of India",
+      "description": "Information about a state in India.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "population": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "code", "createdAt"]
+    },
+    "IndiaDistrict": {
+      "title": "District of India",
+      "description": "Information about a district within an Indian state.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "stateId": { "type": "string" },
+        "stateName": { "type": "string" },
+        "population": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "stateId", "createdAt"]
+    },
+    "IndiaConstituency": {
+      "title": "Constituency of India",
+      "description": "Information about an electoral constituency within a district.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "stateId": { "type": "string" },
+        "districtId": { "type": "string" },
+        "districtName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "stateId", "districtId", "createdAt"]
+    },
+    "IndiaBooth": {
+      "title": "Polling Booth",
+      "description": "Information about a polling booth within a constituency.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "boothNumber": { "type": "string" },
+        "boothLabel": { "type": "string" },
+        "address": { "type": "string" },
+        "stateId": { "type": "string" },
+        "districtId": { "type": "string" },
+        "constituencyId": { "type": "string" },
+        "constituencyName": { "type": "string" },
+        "population": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "boothNumber", "stateId", "districtId", "constituencyId", "createdAt"]
+    },
+    "Voter": {
+      "title": "Voter Information",
+      "description": "Details of an individual voter registered at a polling booth.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "voterId": { "type": "string" },
+        "name": { "type": "string" },
+        "gender": { "type": "string", "enum": ["Male", "Female", "Other"] },
+        "age": { "type": "number" },
+        "partNo": { "type": "string" },
+        "srNo": { "type": "string" },
+        "mobile": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "address": { "type": "string" },
+        "houseNo": { "type": "string" },
+        "village": { "type": "string" },
+        "caste": { "type": "string" },
+        "occupation": { "type": "string" },
+        "isKaryakarta": { "type": "boolean" },
+        "voted": { "type": "boolean" },
+        "stateId": { "type": "string" },
+        "districtId": { "type": "string" },
+        "constituencyId": { "type": "string" },
+        "boothId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["voterId", "name", "stateId", "districtId", "constituencyId", "boothId", "createdAt"]
+    },
+    "Election": {
+      "title": "Election Year",
+      "description": "Details of an election cycle.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "year": { "type": "number" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["Upcoming", "Active", "Completed"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["year", "status", "createdAt"]
+    },
+    "PoliticalParty": {
+      "title": "Political Party",
+      "description": "Details of a political party.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "abbreviation": { "type": "string" },
+        "logoUrl": { "type": "string" },
+        "color": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "abbreviation", "createdAt"]
+    },
+    "VoterSentiment": {
+      "title": "Voter Sentiment",
+      "description": "Survey data about a voter's political sentiment and preferences for a specific election.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "voterDocId": { "type": "string" },
+        "voterName": { "type": "string" },
+        "electionId": { "type": "string" },
+        "electionYear": { "type": "number" },
+        "favoredPartyId": { "type": "string" },
+        "favoredPartyName": { "type": "string" },
+        "sentimentScore": { "type": "number" },
+        "keyConcerns": { "type": "array", "items": { "type": "string" } },
+        "constituencyId": { "type": "string" },
+        "recordedBy": { "type": "string" },
+        "recordedByName": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["voterDocId", "electionId", "favoredPartyId", "sentimentScore", "recordedBy", "createdAt"]
+    },
+    "Survey": {
+      "title": "Survey Campaign",
+      "description": "An active survey campaign assigned to a field personnel.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "electionId": { "type": "string" },
+        "electionYear": { "type": "number" },
+        "assignedTo": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["Draft", "Active", "Completed"] },
+        "templateId": { "type": "string" },
+        "linkedPartyIds": { "type": "array", "items": { "type": "string" } },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["title", "description", "electionId", "electionYear", "status", "createdAt"]
+    },
+    "SurveyTemplate": {
+      "title": "Survey Template",
+      "description": "A reusable configuration template specifying custom fields/questions for a survey campaign.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "isSystem": { "type": "boolean" },
+        "fields": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "type": { "type": "string", "enum": ["select", "multiselect", "scale", "text", "checkbox", "number"] },
+              "options": { "type": "array", "items": { "type": "string" } },
+              "required": { "type": "boolean" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "fields"]
+    },
+    "AdminVolunteer": {
+      "title": "Admin Volunteer",
+      "description": "A voter registered as a volunteer under a specific MLA admin context.",
+      "type": "object",
+      "properties": {
+        "voterDocId": { "type": "string" },
+        "voterId": { "type": "string" },
+        "name": { "type": "string" },
+        "aadharNumber": { "type": "string" },
+        "mobile": { "type": "string" },
+        "adminId": { "type": "string" },
+        "status": { "type": "string", "enum": ["Active", "Inactive"] },
+        "tasks": { "type": "array" },
+        "performanceRating": { "type": "number" },
+        "assignedBoothId": { "type": "string" },
+        "assignedBoothName": { "type": "string" }
+      },
+      "required": ["voterDocId", "voterId", "name", "adminId", "status"]
+    },
+    "AdminBoothAssignment": {
+      "title": "Admin Booth Assignment",
+      "description": "A volunteer deployed as an active booth agent for a polling station.",
+      "type": "object",
+      "properties": {
+        "adminId": { "type": "string" },
+        "boothId": { "type": "string" },
+        "boothNumber": { "type": "string" },
+        "boothName": { "type": "string" },
+        "agentVolunteerDocId": { "type": "string" },
+        "agentName": { "type": "string" },
+        "agentAadhar": { "type": "string" },
+        "agentMobile": { "type": "string" },
+        "designation": { "type": "string" }
+      },
+      "required": ["adminId", "boothId", "boothNumber", "boothName", "agentVolunteerDocId", "agentName"]
+    },
+    "Benefit": {
+      "title": "Benefit Distribution",
+      "description": "Details of public or party-backed aid distributed to a voter.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "voterDocId": { "type": "string" },
+        "voterId": { "type": "string" },
+        "voterName": { "type": "string" },
+        "aadharNumber": { "type": "string" },
+        "amount": { "type": "number" },
+        "benefitName": { "type": "string" },
+        "benefitType": { "type": "string", "enum": ["Government", "Party"] },
+        "date": { "type": "string", "format": "date" },
+        "adminId": { "type": "string" },
+        "notes": { "type": "string" },
+        "witnessName": { "type": "string" },
+        "witnessVoterId": { "type": "string" },
+        "witnessVoterDocId": { "type": "string" },
+        "witnesses": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "name": { "type": "string" },
+              "voterId": { "type": "string" },
+              "voterDocId": { "type": "string" }
+            }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["voterDocId", "voterId", "voterName", "aadharNumber", "amount", "benefitName", "benefitType", "date", "adminId", "createdAt"]
+    },
+    "CampaignPoliticalSentiment": {
+      "title": "Campaign Political Sentiment",
+      "description": "Ground Intel recordings of a voter's current alignment, support intensity, and ground volunteer checkmark.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adminId": { "type": "string" },
+        "voterDocId": { "type": "string" },
+        "voterId": { "type": "string" },
+        "sentiment": { "type": "string", "enum": ["Support", "Neutral", "Oppose", "Other Party"] },
+        "notes": { "type": "string" },
+        "strength": { "type": "number" },
+        "isKaryakarta": { "type": "boolean" },
+        "updatedBy": { "type": "string" },
+        "updatedByName": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "adminId", "voterDocId", "sentiment", "updatedBy", "updatedAt"]
+    },
+    "CampaignBudget": {
+      "title": "Campaign Budget Allocation",
+      "description": "Custom budget limits and allocations per category defined by an admin.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adminId": { "type": "string" },
+        "totalBudget": { "type": "number" },
+        "electionYear": { "type": "string" },
+        "allocations": {
+          "type": "object",
+          "properties": {
+            "Campaign Materials": { "type": "number" },
+            "Events & Rallies": { "type": "number" },
+            "Digital Marketing": { "type": "number" },
+            "Office Operations": { "type": "number" },
+            "Travel & Logistics": { "type": "number" },
+            "Volunteer Support": { "type": "number" }
+          }
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "adminId", "totalBudget", "electionYear", "allocations"]
+    },
+    "FinanceTransaction": {
+      "title": "Finance Transaction",
+      "description": "Campaign expense or donation/income record.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adminId": { "type": "string" },
+        "type": { "type": "string", "enum": ["expense", "income"] },
+        "title": { "type": "string" },
+        "amount": { "type": "number" },
+        "category": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "paymentMethod": { "type": "string", "enum": ["Cash", "Bank Transfer", "Cheque", "Online"] },
+        "donorName": { "type": "string" },
+        "notes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "adminId", "type", "title", "amount", "category", "date", "paymentMethod", "createdAt"]
+    },
+    "WhatsAppConfig": {
+      "title": "WhatsApp Configuration",
+      "description": "Tenant isolated configurations for sending WhatsApp messages.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adminId": { "type": "string" },
+        "tenantType": { "type": "string", "enum": ["shared", "vendor"] },
+        "vendorName": { "type": "string" },
+        "phoneNumberId": { "type": "string" },
+        "wabaId": { "type": "string" },
+        "accessToken": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "status": { "type": "string", "enum": ["connected", "disconnected"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "adminId", "tenantType", "vendorName", "phoneNumber", "status", "createdAt"]
+    },
+    "WhatsAppBroadcast": {
+      "title": "WhatsApp Broadcast Campaign",
+      "description": "WhatsApp bulk campaign log and analytics.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adminId": { "type": "string" },
+        "campaignName": { "type": "string" },
+        "senderConfigId": { "type": "string" },
+        "senderPhone": { "type": "string" },
+        "templateId": { "type": "string" },
+        "templateName": { "type": "string" },
+        "mediaUrl": { "type": "string" },
+        "mediaType": { "type": "string", "enum": ["none", "image", "document", "video"] },
+        "status": { "type": "string", "enum": ["Draft", "Sending", "Completed", "Failed", "Paused"] },
+        "totalCount": { "type": "number" },
+        "successCount": { "type": "number" },
+        "failedCount": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "adminId", "campaignName", "senderConfigId", "senderPhone", "templateName", "status", "totalCount", "successCount", "failedCount", "createdAt"]
+    },
+    "WhatsAppTemplate": {
+      "title": "WhatsApp Approved Template",
+      "description": "WhatsApp message template approved by Meta.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "adminId": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string", "enum": ["UTILITY", "MARKETING", "AUTHENTICATION"] },
+        "language": { "type": "string" },
+        "bodyText": { "type": "string" },
+        "status": { "type": "string", "enum": ["APPROVED", "PENDING", "REJECTED"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "adminId", "name", "category", "language", "bodyText", "status", "createdAt"]
+    },
+    "Mandal": {
+      "title": "Mandal Management",
+      "description": "Details of an administrative sub-district or neighborhood block (Mandal).",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "mandalCode": { "type": "string" },
+        "presidentName": { "type": "string" },
+        "presidentPhone": { "type": "string" },
+        "voterCount": { "type": "number" },
+        "population": { "type": "number" },
+        "stateId": { "type": "string" },
+        "districtId": { "type": "string" },
+        "constituencyId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "mandalCode", "stateId", "districtId", "constituencyId", "createdAt"]
+    },
+    "MandalMember": {
+      "title": "Mandal Member",
+      "description": "A voter or custom citizen assigned to a specific subgroup list inside a Mandal.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "categoryKey": { "type": "string" },
+        "voterId": { "type": "string" },
+        "designation": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "name", "categoryKey", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/finance_budgets/{budgetId}": {
+      "schema": "CampaignBudget",
+      "description": "Budget definitions per admin."
+    },
+    "/finance_transactions/{transactionId}": {
+      "schema": "FinanceTransaction",
+      "description": "Finance transactions (expenses and donations) logged by admin."
+    },
+    "/survey_templates/{templateId}": {
+      "schema": "SurveyTemplate",
+      "description": "Reusable survey question templates designed by admins."
+    },
+    "/political_sentiments/{sentimentId}": {
+      "schema": "CampaignPoliticalSentiment",
+      "description": "Ground Intel recordings of a voter's current alignment, support intensity, and ground volunteer checkmark under multi-admin context."
+    },
+    "/benefits/{benefitId}": {
+      "schema": "Benefit",
+      "description": "Logs tracking government or party-backed aid packages distributed to voters under multi-admin isolation."
+    },
+    "/admin_volunteers/{volunteerId}": {
+      "schema": "AdminVolunteer",
+      "description": "Volunteers registered and run by a particular admin (MLA)."
+    },
+    "/admin_booth_assignments/{assignmentId}": {
+      "schema": "AdminBoothAssignment",
+      "description": "Booth deployed monitoring agents."
+    },
+    "/surveys/{surveyId}": {
+      "schema": "Survey",
+      "description": "Active or draft survey campaigns managed by admins and assigned to users."
+    },
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile document owned by the user."
+    },
+    "/elections/{electionId}": {
+      "schema": "Election",
+      "description": "Election cycle records."
+    },
+    "/parties/{partyId}": {
+      "schema": "PoliticalParty",
+      "description": "Political party records."
+    },
+    "/sentiments/{sentimentId}": {
+      "schema": "VoterSentiment",
+      "description": "Survey results recording voter sentiment."
+    },
+    "/voters/{voterUid}": {
+      "schema": "Voter",
+      "description": "Voter record synchronized with election commission data and local surveys."
+    },
+    "/demographics/india/states/{stateId}": {
+      "schema": "IndiaState",
+      "description": "List of Indian states managed by admins."
+    },
+    "/demographics/india/states/{stateId}/districts/{districtId}": {
+      "schema": "IndiaDistrict",
+      "description": "Districts within a specific state."
+    },
+    "/demographics/india/states/{stateId}/districts/{districtId}/constituencies/{constituencyId}": {
+      "schema": "IndiaConstituency",
+      "description": "Constituency within a district."
+    },
+    "/demographics/india/states/{stateId}/districts/{districtId}/constituencies/{constituencyId}/booths/{boothId}": {
+      "schema": "IndiaBooth",
+      "description": "Polling booth within a constituency."
+    },
+    "/whatsapp_configs/{configId}": {
+      "schema": "WhatsAppConfig",
+      "description": "WhatsApp accounts configuration."
+    },
+    "/whatsapp_broadcasts/{broadcastId}": {
+      "schema": "WhatsAppBroadcast",
+      "description": "Bulk WhatsApp broadcast campaign history."
+    },
+    "/whatsapp_templates/{templateId}": {
+      "schema": "WhatsAppTemplate",
+      "description": "Meta templates metadata."
+    },
+    "/mandals/{mandalId}": {
+      "schema": "Mandal",
+      "description": "Mandals managed by admins within a constituency."
+    },
+    "/mandals/{mandalId}/members/{memberId}": {
+      "schema": "MandalMember",
+      "description": "Members assigned to a specific category list within a Mandal."
+    }
+  }
+}

@@ -1,0 +1,73 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  body {
+    @apply bg-zinc-50 text-zinc-900 antialiased selection:bg-blue-500/10;
+    font-feature-settings: "ss01", "ss02", "cv01", "cv02", "cv03", "cv04";
+  }
+
+  .dark body {
+    @apply bg-zinc-950 text-zinc-300;
+  }
+
+  /* Custom Refined Scrollbar */
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+
+  ::-webkit-scrollbar-track {
+    @apply bg-transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-zinc-200/50 dark:bg-zinc-800/50 rounded-full hover:bg-zinc-300 dark:hover:bg-zinc-700 transition-colors;
+  }
+
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #e4e4e7 transparent;
+  }
+
+  .dark * {
+    scrollbar-color: #27272a transparent;
+  }
+}
+
+@layer components {
+  /* SaaS Professional Components */
+  .webapp-card {
+    @apply bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-[0_1px_3px_rgba(0,0,0,0.05)] transition-all;
+  }
+
+  .webapp-input {
+    @apply bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-800 rounded-lg px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all placeholder:text-zinc-400;
+  }
+
+  .webapp-button-primary {
+    @apply bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 font-semibold text-sm rounded-lg px-4 py-2 transition-all shadow-sm active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none;
+  }
+
+  .webapp-button-secondary {
+    @apply bg-white hover:bg-zinc-50 dark:bg-zinc-900 dark:hover:bg-zinc-800 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-semibold text-sm rounded-lg px-4 py-2 transition-all shadow-sm active:scale-[0.98];
+  }
+
+  .webapp-sidebar-item {
+    @apply flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-all;
+  }
+
+  .data-label {
+    @apply text-[11px] font-bold text-zinc-500 uppercase tracking-wider;
+  }
+
+  .data-value-mono {
+    @apply font-mono text-sm tracking-tight;
+  }
+}
