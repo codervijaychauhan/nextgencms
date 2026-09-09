@@ -32,6 +32,32 @@ function generateLocalToken(payload: { uid: string; email: string; name: string;
   return `local.${header}.${data}.${signature}`;
 }
 
+function sanitizeError(error: any): string {
+  if (!error) return 'An unexpected error occurred.';
+  const msg = error instanceof Error ? error.message : String(error);
+  
+  if (msg.includes('Login failed') || msg.includes('ELOGIN') || msg.includes('login failed') || msg.includes('election_user')) {
+    return 'Database connection failed. Please ensure SQL Server is running and credentials are valid.';
+  }
+  if (msg.includes('ConnectionError') || msg.includes('ESOCKET') || msg.includes('ETIMEOUT') || msg.includes('ECONNREFUSED') || msg.includes('service unavailable')) {
+    return 'Database service is temporarily unavailable. Please verify local database status.';
+  }
+  if (msg.includes('Invalid object name') || msg.includes('dbo.') || msg.includes('Cannot find table')) {
+    return 'Database table not found. Please execute the SQL setup script in SSMS.';
+  }
+  if (msg.includes('duplicate key') || msg.includes('PRIMARY KEY') || msg.includes('UNIQUE')) {
+    return 'A record with this identifier already exists.';
+  }
+  if (msg.includes('REFERENCE') || msg.includes('FOREIGN KEY')) {
+    return 'Cannot complete operation because related records exist.';
+  }
+  if (msg.includes('node_modules') || msg.includes('tedious') || msg.includes('SELECT ') || msg.includes('INSERT ') || msg.includes('UPDATE ') || msg.includes('DELETE ')) {
+    return 'Unable to process database request at this time.';
+  }
+
+  return msg;
+}
+
 function verifyLocalToken(token: string): any {
   if (!token.startsWith('local.')) return null;
   const parts = token.slice(6).split('.');
@@ -366,7 +392,7 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error('Local login error:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -389,7 +415,7 @@ async function startServer() {
 
       res.json({ success: true, message: 'Password updated successfully in database.' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -487,7 +513,7 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error('Error creating user invite:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -519,7 +545,7 @@ async function startServer() {
         created_at: u.created_at
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -547,7 +573,7 @@ async function startServer() {
       });
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -570,7 +596,7 @@ async function startServer() {
       );
       res.json({ success: true, message: 'User updated successfully' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -580,7 +606,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.users WHERE id = @id`, { id });
       res.json({ success: true, message: 'User deleted' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -594,7 +620,7 @@ async function startServer() {
       const states = await query(`SELECT * FROM dbo.states ORDER BY name ASC`);
       res.json(states);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -605,7 +631,7 @@ async function startServer() {
       await execute(`INSERT INTO dbo.states (id, name, code) VALUES (@id, @name, @code)`, { id: stateId, name, code: code || '' });
       res.json({ id: stateId, name, code });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -614,7 +640,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.states WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -632,7 +658,7 @@ async function startServer() {
       const districts = await query(sqlQuery, params);
       res.json(districts);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -643,7 +669,7 @@ async function startServer() {
       await execute(`INSERT INTO dbo.districts (id, name, state_id) VALUES (@id, @name, @state_id)`, { id: districtId, name, state_id });
       res.json({ id: districtId, name, state_id });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -652,7 +678,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.districts WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -677,7 +703,7 @@ async function startServer() {
       const constituencies = await query(sqlQuery, params);
       res.json(constituencies);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -689,7 +715,7 @@ async function startServer() {
         { id: constId, name, district_id, state_id });
       res.json({ id: constId, name, district_id, state_id });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -698,7 +724,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.constituencies WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -723,7 +749,7 @@ async function startServer() {
       const booths = await query(sqlQuery, params);
       res.json(booths);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -738,7 +764,7 @@ async function startServer() {
       );
       res.json({ id: boothId, booth_number, name, constituency_id, mandal_id, total_voters, address });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -747,7 +773,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.booths WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -771,7 +797,7 @@ async function startServer() {
       const mandals = await query(sqlQuery, params);
       res.json(mandals);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -786,7 +812,7 @@ async function startServer() {
       );
       res.json({ id: mandalId, name, mandal_code });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -807,7 +833,7 @@ async function startServer() {
       );
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -816,7 +842,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.mandals WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -835,7 +861,7 @@ async function startServer() {
       const members = await query(sqlQuery, params);
       res.json(members);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -851,7 +877,7 @@ async function startServer() {
       );
       res.json({ id: memberId, mandal_id: mandalId, name, category_key });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -860,7 +886,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.mandal_members WHERE id = @id`, { id: req.params.memberId });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -947,7 +973,7 @@ async function startServer() {
       });
     } catch (error: any) {
       console.error('Error fetching voters:', error);
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -996,7 +1022,7 @@ async function startServer() {
       );
       res.json({ id, ...v });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1060,7 +1086,7 @@ async function startServer() {
 
       res.json({ success: true, count: insertedCount });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1101,7 +1127,7 @@ async function startServer() {
       );
       res.json({ success: true, message: 'Voter updated' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1110,7 +1136,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.voters WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1123,7 +1149,7 @@ async function startServer() {
       const volunteers = await query(`SELECT * FROM dbo.volunteers ORDER BY created_at DESC`);
       res.json(volunteers);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1156,7 +1182,7 @@ async function startServer() {
       );
       res.json({ id, ...v });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1165,7 +1191,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.volunteers WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1175,7 +1201,7 @@ async function startServer() {
       const agents = await query(`SELECT * FROM dbo.booth_agents ORDER BY created_at DESC`);
       res.json(agents);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1218,7 +1244,7 @@ async function startServer() {
       );
       res.json({ id, ...a });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1227,7 +1253,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.booth_agents WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1262,7 +1288,7 @@ async function startServer() {
       });
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1300,7 +1326,7 @@ async function startServer() {
       );
       res.json({ id, ...b });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1309,7 +1335,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.benefits WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1333,7 +1359,7 @@ async function startServer() {
       });
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1366,7 +1392,7 @@ async function startServer() {
       );
       res.json({ id, ...b });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1387,7 +1413,7 @@ async function startServer() {
       }));
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1434,7 +1460,7 @@ async function startServer() {
       );
       res.json({ id, ...t });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1443,7 +1469,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.finance_transactions WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1467,7 +1493,7 @@ async function startServer() {
       }));
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1512,7 +1538,7 @@ async function startServer() {
       );
       res.json({ id, ...c });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1521,7 +1547,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.whatsapp_configs WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1539,7 +1565,7 @@ async function startServer() {
       }));
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1575,7 +1601,7 @@ async function startServer() {
       );
       res.json({ id, ...t });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1584,7 +1610,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.whatsapp_templates WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1609,7 +1635,7 @@ async function startServer() {
       }));
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1664,7 +1690,7 @@ async function startServer() {
       );
       res.json({ id, ...b });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1673,7 +1699,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.whatsapp_broadcasts WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1687,7 +1713,7 @@ async function startServer() {
       const elections = await query(`SELECT * FROM dbo.elections ORDER BY year DESC`);
       res.json(elections);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1720,7 +1746,7 @@ async function startServer() {
       );
       res.json({ id: electionId, year, title, description, status });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1739,7 +1765,7 @@ async function startServer() {
       );
       res.json({ success: true, message: 'Election updated' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1748,7 +1774,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.elections WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1766,7 +1792,7 @@ async function startServer() {
       }));
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1799,7 +1825,7 @@ async function startServer() {
       );
       res.json({ id: partyId, name, abbreviation, logoUrl, color });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1818,7 +1844,7 @@ async function startServer() {
       );
       res.json({ success: true, message: 'Party updated' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1827,7 +1853,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.political_parties WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1852,7 +1878,7 @@ async function startServer() {
       });
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1885,7 +1911,7 @@ async function startServer() {
       );
       res.json({ id, ...t });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1908,7 +1934,7 @@ async function startServer() {
       );
       res.json({ success: true, message: 'Template updated' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1917,7 +1943,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.survey_templates WHERE id = @id AND is_system = 0`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1944,7 +1970,7 @@ async function startServer() {
       });
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -1985,7 +2011,7 @@ async function startServer() {
       );
       res.json({ id, ...s });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -2018,7 +2044,7 @@ async function startServer() {
       );
       res.json({ success: true, message: 'Survey updated' });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -2027,7 +2053,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.surveys WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -2064,7 +2090,7 @@ async function startServer() {
       });
       res.json(formatted);
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -2112,7 +2138,7 @@ async function startServer() {
       );
       res.json({ id, ...s });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -2121,7 +2147,7 @@ async function startServer() {
       await execute(`DELETE FROM dbo.voter_sentiments WHERE id = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
@@ -2188,7 +2214,7 @@ async function startServer() {
         partyInclination
       });
     } catch (error: any) {
-      res.status(500).json({ error: error.message });
+      res.status(500).json({ error: sanitizeError(error) });
     }
   });
 

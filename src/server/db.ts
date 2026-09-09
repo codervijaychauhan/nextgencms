@@ -4,7 +4,7 @@ dotenv.config();
 
 const dbConfig: sql.config = {
   server: process.env.DB_SERVER || 'localhost',
-  database: process.env.DB_NAME || 'nextgencms',
+  database: process.env.DB_DATABASE || process.env.DB_NAME || 'nextgencms',
   user: process.env.DB_USER || 'election_user',
   password: process.env.DB_PASSWORD || 'Election@2026#Secure',
   options: {
@@ -20,6 +20,7 @@ const dbConfig: sql.config = {
 };
 
 let pool: sql.ConnectionPool | null = null;
+let lastLogTime = 0;
 
 export async function getDbPool(): Promise<sql.ConnectionPool> {
   if (pool && pool.connected) {
@@ -29,9 +30,14 @@ export async function getDbPool(): Promise<sql.ConnectionPool> {
     pool = await new sql.ConnectionPool(dbConfig).connect();
     console.log(`[Database] Connected successfully to MS SQL Server database: ${dbConfig.database}`);
     return pool;
-  } catch (error) {
-    console.error('[Database] Connection error to MS SQL Server:', error);
-    throw error;
+  } catch (error: any) {
+    const now = Date.now();
+    if (now - lastLogTime > 5000) {
+      console.error(`[Database] Connection notice: Unable to connect to local SQL database (${error.message?.split('\n')[0] || 'Login failed'}).`);
+      lastLogTime = now;
+    }
+    const cleanError = new Error('Database service unavailable. Please verify local SQL Server setup in SSMS.');
+    throw cleanError;
   }
 }
 
