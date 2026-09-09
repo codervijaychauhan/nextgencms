@@ -46,6 +46,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isStaff, setIsStaff] = useState(false);
   const [loading, setLoading] = useState(true);
 
+  const applyProfile = (data: UserProfile, email?: string | null) => {
+    setProfile(data);
+    const userEmail = (email || data.email || '').toLowerCase();
+    const isSuper = data.role === 'super_admin' || userEmail === 'vijaychauhanofficial01@gmail.com';
+    const isMngr = data.role === 'admin' || data.role === 'manager';
+    setIsAdmin(isSuper);
+    setIsManager(isMngr);
+    setIsStaff(isSuper || isMngr);
+  };
+
   const fetchProfile = async (currentUser: User) => {
     try {
       const data = await api.post<UserProfile>('/api/auth/sync', {
@@ -54,6 +64,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (data.disabled) {
         await firebaseSignOut(auth);
+        localStorage.removeItem('nextgen_local_token');
         setProfile(null);
         setIsAdmin(false);
         setIsManager(false);
@@ -62,53 +73,82 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return;
       }
 
-      setProfile(data);
-      const isSuper = data.role === 'super_admin' || currentUser.email === 'vijaychauhanofficial01@gmail.com';
-      const isMngr = data.role === 'admin' || data.role === 'manager';
-      setIsAdmin(isSuper);
-      setIsManager(isMngr);
-      setIsStaff(isSuper || isMngr);
+      applyProfile(data, currentUser.email);
     } catch (error) {
       console.error('Error syncing SQL profile:', error);
       // Fallback local profile if backend is initializing
-      const isSuperAdmin = currentUser.email === 'vijaychauhanofficial01@gmail.com';
-      setProfile({
+      const userEmail = (currentUser.email || '').toLowerCase();
+      const isSuperAdmin = userEmail === 'vijaychauhanofficial01@gmail.com';
+      const fallback: UserProfile = {
         uid: currentUser.uid,
         username: currentUser.displayName || currentUser.email?.split('@')[0] || 'User',
         email: currentUser.email,
         role: isSuperAdmin ? 'super_admin' : 'guest',
         permissions: isSuperAdmin ? { voters: 'vcud', users: 'vcud', demographics: 'vcud', mandals: 'vcud' } : {}
-      });
-      setIsAdmin(isSuperAdmin);
-      setIsStaff(isSuperAdmin);
+      };
+      applyProfile(fallback, currentUser.email);
     }
+  };
+
+  const checkLocalAuth = async () => {
+    const localToken = localStorage.getItem('nextgen_local_token');
+    if (localToken) {
+      try {
+        const data = await api.get<UserProfile>('/api/auth/me');
+        if (data && !data.disabled) {
+          applyProfile(data, data.email);
+          return true;
+        }
+      } catch (err) {
+        console.warn('Local session invalid or expired:', err);
+        localStorage.removeItem('nextgen_local_token');
+      }
+    }
+    return false;
   };
 
   const refreshProfile = async () => {
     if (user) {
       await fetchProfile(user);
+    } else {
+      await checkLocalAuth();
     }
   };
 
   useEffect(() => {
+    let isMounted = true;
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       setUser(currentUser);
       if (currentUser) {
         await fetchProfile(currentUser);
       } else {
-        setProfile(null);
-        setIsAdmin(false);
-        setIsManager(false);
-        setIsStaff(false);
+        const hasLocal = await checkLocalAuth();
+        if (!hasLocal && isMounted) {
+          setProfile(null);
+          setIsAdmin(false);
+          setIsManager(false);
+          setIsStaff(false);
+        }
       }
-      setLoading(false);
+      if (isMounted) setLoading(false);
     });
 
-    return () => unsubscribe();
+    return () => {
+      isMounted = false;
+      unsubscribe();
+    };
   }, []);
 
   const signOut = async () => {
-    await firebaseSignOut(auth);
+    localStorage.removeItem('nextgen_local_token');
+    try {
+      await firebaseSignOut(auth);
+    } catch {}
+    setUser(null);
+    setProfile(null);
+    setIsAdmin(false);
+    setIsManager(false);
+    setIsStaff(false);
   };
 
   const hasPermission = (moduleId: string, right: string) => {

@@ -7,7 +7,8 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   Users, Shield, ShieldCheck, Mail, Calendar, Search, Loader2, 
   AlertCircle, CheckCircle, Edit2, Trash2, 
-  UserX, UserCheck, Key, Plus, X, Save
+  UserX, UserCheck, Key, Plus, X, Save,
+  Copy, Share2, MessageCircle, ExternalLink, Send
 } from 'lucide-react';
 
 interface UserData {
@@ -107,10 +108,12 @@ export default function UserManagement() {
   const [manualResetUser, setManualResetUser] = useState<UserData | null>(null);
   const [manualPassword, setManualPassword] = useState('');
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [createdInviteInfo, setCreatedInviteInfo] = useState<{ email: string; name: string; role: string; inviteLink: string } | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
   const [newUser, setNewUser] = useState({ 
     username: '', 
     email: '', 
-    role: 'guest' as UserData['role'],
+    role: 'volunteer' as UserData['role'],
     permissions: {} as Record<string, string>,
     stateId: '',
     districtId: '',
@@ -373,30 +376,53 @@ export default function UserManagement() {
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
     setActionLoading('creating');
+    setError('');
     try {
-      const inviteData = {
+      const payload = {
         name: newUser.username,
+        email: newUser.email,
         role: newUser.role,
-        permissions: newUser.permissions
+        permissions: newUser.permissions,
+        rights: newUser.permissions,
+        state_id: newUser.stateId || null,
+        district_id: newUser.districtId || null,
+        constituency_id: newUser.constituencyId || null,
+        booth_id: newUser.boothId || null,
+        assigned_booths: newUser.boothId ? [newUser.boothId] : []
       };
       
-      setUsers([newUser as unknown as UserData, ...users]);
-      setSuccessMessage(`Account invitation created for ${newUser.email}.`);
+      const res = await api.post<{ success: boolean; inviteLink: string; email: string; name: string; role: string }>('/api/users/invite', payload);
+      
       setIsAddModalOpen(false);
+      setCreatedInviteInfo({
+        email: newUser.email,
+        name: newUser.username,
+        role: newUser.role,
+        inviteLink: res.inviteLink || `${window.location.origin}/login?email=${encodeURIComponent(newUser.email)}`
+      });
+
+      // Refresh users from database
+      const updatedUsers = await api.get<UserData[]>('/api/users');
+      if (Array.isArray(updatedUsers)) {
+        setUsers(updatedUsers);
+      }
+
+      setSuccessMessage(`Invitation link generated successfully for ${newUser.email}.`);
       setNewUser({ 
         username: '', 
         email: '', 
-        role: 'guest', 
+        role: 'volunteer', 
         permissions: {},
         stateId: '',
         districtId: '',
         constituencyId: '',
         boothId: ''
       });
-      setTimeout(() => setSuccessMessage(''), 3000);
+      setTimeout(() => setSuccessMessage(''), 5000);
     } catch (err: unknown) {
       console.error('Create error:', err);
-      setError('Failed to create user invitation.');
+      const msg = err instanceof Error ? err.message : 'Failed to create user invitation.';
+      setError(msg);
     } finally {
       setActionLoading(null);
     }
@@ -637,6 +663,22 @@ export default function UserManagement() {
                               <ShieldCheck size={16} />
                             </button>
                           </div>
+                        )}
+                        {hasRight('users', 'u') && (
+                          <button 
+                            onClick={() => {
+                              setCreatedInviteInfo({
+                                email: u.email,
+                                name: u.username,
+                                role: u.role,
+                                inviteLink: `${window.location.origin}/login?email=${encodeURIComponent(u.email)}`
+                              });
+                            }}
+                            className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all"
+                            title="Share / Copy Direct Login Link"
+                          >
+                            <Share2 size={16} />
+                          </button>
                         )}
                         {hasRight('users', 'u') && (
                           <button 
@@ -1170,6 +1212,109 @@ export default function UserManagement() {
                   <p className="text-[9px] text-zinc-500 text-center italic leading-tight">New users must sign up with this exact email to claim their pre-configured settings.</p>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+
+        {/* Generated Invite Link Modal */}
+        {createdInviteInfo && (
+          <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="webapp-card w-full max-w-md overflow-hidden shadow-2xl border-emerald-500/20"
+            >
+              <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-emerald-500/5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-600 dark:text-emerald-400">
+                    <CheckCircle size={22} />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-zinc-900 dark:text-white">Invitation Ready</h3>
+                    <p className="text-xs text-zinc-500">Share this link with {createdInviteInfo.name}</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setCreatedInviteInfo(null)}
+                  className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="p-6 space-y-4">
+                <div className="bg-zinc-50 dark:bg-zinc-900/60 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-bold text-zinc-900 dark:text-white">{createdInviteInfo.name}</p>
+                    <p className="text-[11px] text-zinc-500">{createdInviteInfo.email}</p>
+                  </div>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                    {createdInviteInfo.role}
+                  </span>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="data-label text-zinc-700 dark:text-zinc-300 font-bold">Direct Invitation URL</label>
+                  <div className="flex items-center gap-2">
+                    <input 
+                      type="text" 
+                      readOnly 
+                      value={createdInviteInfo.inviteLink}
+                      className="webapp-input w-full text-xs font-mono select-all bg-zinc-100 dark:bg-zinc-900"
+                    />
+                    <button 
+                      onClick={() => {
+                        navigator.clipboard.writeText(createdInviteInfo.inviteLink);
+                        setCopiedLink(true);
+                        setTimeout(() => setCopiedLink(false), 2500);
+                      }}
+                      className={`px-3 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5 transition-all ${
+                        copiedLink 
+                          ? 'bg-emerald-600 text-white' 
+                          : 'webapp-button-secondary'
+                      }`}
+                    >
+                      {copiedLink ? <CheckCircle size={14} /> : <Copy size={14} />}
+                      {copiedLink ? 'Copied' : 'Copy'}
+                    </button>
+                  </div>
+                </div>
+
+                <div className="pt-2 flex flex-col gap-2">
+                  <button 
+                    onClick={() => {
+                      const msg = `Hello ${createdInviteInfo.name}, you have been invited to NextGen CMS as ${createdInviteInfo.role}. Click here to access your account: ${createdInviteInfo.inviteLink}`;
+                      window.open(`https://api.whatsapp.com/send?text=${encodeURIComponent(msg)}`, '_blank');
+                    }}
+                    className="w-full py-2.5 px-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all"
+                  >
+                    <MessageCircle size={16} />
+                    Share via WhatsApp
+                  </button>
+
+                  <button 
+                    onClick={() => {
+                      const subject = `Invitation to NextGen CMS - ${createdInviteInfo.role}`;
+                      const body = `Hello ${createdInviteInfo.name},\n\nYou have been invited to join the NextGen CMS system as a ${createdInviteInfo.role}.\n\nPlease click the secure link below to login:\n${createdInviteInfo.inviteLink}\n\nBest regards,\nNextGen CMS Team`;
+                      window.open(`mailto:${createdInviteInfo.email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`, '_blank');
+                    }}
+                    className="w-full py-2.5 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all"
+                  >
+                    <Mail size={16} />
+                    Send via Email Client
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-900/50 border-t border-zinc-200 dark:border-zinc-800 flex justify-end">
+                <button 
+                  onClick={() => setCreatedInviteInfo(null)}
+                  className="webapp-button-primary px-6 py-2 text-xs"
+                >
+                  Done
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

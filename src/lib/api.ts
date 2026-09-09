@@ -2,14 +2,21 @@ import { auth } from './firebase';
 
 async function getAuthHeader(): Promise<Record<string, string>> {
   const user = auth.currentUser;
-  if (!user) return {};
-  try {
-    const token = await user.getIdToken();
-    return { Authorization: `Bearer ${token}` };
-  } catch (error) {
-    console.error('Failed to get auth token:', error);
-    return {};
+  if (user) {
+    try {
+      const token = await user.getIdToken();
+      return { Authorization: `Bearer ${token}` };
+    } catch (error) {
+      console.error('Failed to get Firebase auth token:', error);
+    }
   }
+
+  const localToken = typeof window !== 'undefined' ? localStorage.getItem('nextgen_local_token') : null;
+  if (localToken) {
+    return { Authorization: `Bearer ${localToken}` };
+  }
+
+  return {};
 }
 
 export async function apiRequest<T = any>(

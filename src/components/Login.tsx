@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   signInWithEmailAndPassword, 
   signInWithPopup,
@@ -6,40 +6,60 @@ import {
   browserLocalPersistence
 } from 'firebase/auth';
 import { auth, googleProvider } from '../lib/firebase';
-import { Link, useNavigate } from 'react-router-dom';
+import { api } from '../lib/api';
+import { useAuth } from '../AuthProvider';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { motion } from 'motion/react';
 import { LogIn, Chrome, Loader2, AlertCircle } from 'lucide-react';
 
 export default function Login() {
+  const [searchParams] = useSearchParams();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { refreshProfile } = useAuth();
+
+  useEffect(() => {
+    const emailParam = searchParams.get('email');
+    if (emailParam) {
+      setEmail(emailParam);
+    }
+  }, [searchParams]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError('');
 
+    // 1. Try Firebase Auth
     try {
       await setPersistence(auth, browserLocalPersistence);
       await signInWithEmailAndPassword(auth, email, password);
+      await refreshProfile();
       navigate('/dashboard');
-    } catch (err: unknown) {
-      console.error('Login error:', err);
-      const errorCode = err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : '';
-      const errorMessage = err && typeof err === 'object' && 'message' in err ? (err as { message?: string }).message : '';
-      
-      if (errorCode === 'auth/user-not-found' || errorCode === 'auth/wrong-password' || errorCode === 'auth/invalid-credential') {
-        setError('Invalid email or password.');
-      } else if (errorCode === 'auth/user-disabled') {
-        setError('This account has been disabled.');
-      } else if (errorCode === 'auth/too-many-requests') {
-        setError('Too many failed attempts. Please try again later.');
-      } else {
-        setError(errorMessage || 'Failed to sign in.');
+      return;
+    } catch (firebaseErr: unknown) {
+      console.log('Firebase login attempted, checking local database...');
+    }
+
+    // 2. Fallback to Local MSSQL Database Password check
+    try {
+      const res = await api.post<{ success: boolean; token: string; user: any }>('/api/auth/local-login', {
+        email: email.trim(),
+        password: password
+      });
+
+      if (res && res.token) {
+        localStorage.setItem('nextgen_local_token', res.token);
+        await refreshProfile();
+        navigate('/dashboard');
+        return;
       }
+    } catch (localErr: any) {
+      console.error('Local login error:', localErr);
+      setError(localErr.message || 'Invalid email or password. Please verify credentials or continue with Google.');
     } finally {
       setLoading(false);
     }
@@ -52,6 +72,7 @@ export default function Login() {
       googleProvider.setCustomParameters({ prompt: 'select_account' });
       await setPersistence(auth, browserLocalPersistence);
       await signInWithPopup(auth, googleProvider);
+      await refreshProfile();
       navigate('/dashboard');
     } catch (err: unknown) {
       console.error('Google sign in error:', err);
