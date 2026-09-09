@@ -1,14 +1,18 @@
 import React, { useState } from 'react';
 import { 
   createUserWithEmailAndPassword, 
+  signInWithPopup,
   updateProfile,
-  sendEmailVerification 
+  sendEmailVerification,
+  setPersistence,
+  browserLocalPersistence
 } from 'firebase/auth';
-import { auth } from '../lib/firebase';
-import { apiFetch } from '../lib/api';
+import { auth, googleProvider } from '../lib/firebase';
+import { api } from '../lib/api';
+import { useAuth } from '../AuthProvider';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { UserPlus, Loader2, AlertCircle } from 'lucide-react';
+import { UserPlus, Chrome, Loader2, AlertCircle } from 'lucide-react';
 
 export default function SignUp() {
   const [username, setUsername] = useState('');
@@ -18,6 +22,25 @@ export default function SignUp() {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const { refreshProfile } = useAuth();
+
+  const handleGoogleSignUp = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      googleProvider.setCustomParameters({ prompt: 'select_account' });
+      await setPersistence(auth, browserLocalPersistence);
+      await signInWithPopup(auth, googleProvider);
+      await refreshProfile();
+      navigate('/dashboard');
+    } catch (err: unknown) {
+      console.error('Google registration error:', err);
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      setError(errorMessage || 'Failed to sign up with Google.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,21 +54,19 @@ export default function SignUp() {
     }
 
     try {
+      await setPersistence(auth, browserLocalPersistence);
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
 
       await updateProfile(user, { displayName: username });
       
       try {
-        await apiFetch('/api/auth/sync', {
-          method: 'POST',
-          body: JSON.stringify({ name: username })
-        });
+        await api.post('/api/auth/sync', { name: username });
       } catch (err: unknown) {
-        console.warn('Sync on signup fallback:', err);
+        console.warn('Sync on signup notice:', err);
       }
 
-      await sendEmailVerification(user);
+      await refreshProfile();
       navigate('/dashboard');
     } catch (err: unknown) {
       console.error('Registration error:', err);
@@ -58,8 +79,6 @@ export default function SignUp() {
         setError('Password is too weak. Please use at least 6 characters.');
       } else if (errorCode === 'auth/invalid-email') {
         setError('Please enter a valid email address.');
-      } else if (errorCode === 'auth/operation-not-allowed') {
-        setError('Email/Password registration is not enabled in this Firebase Project. Please go to your Firebase Console -> Authentication -> Sign-in method and enable the "Email/Password" provider.');
       } else {
         setError(errorMessage || 'Failed to create account. Please try again.');
       }
@@ -81,6 +100,24 @@ export default function SignUp() {
         </div>
 
         <div className="webapp-card p-6 space-y-6">
+          <button
+            onClick={handleGoogleSignUp}
+            disabled={loading}
+            className="webapp-button-secondary w-full flex items-center justify-center gap-2 py-2.5"
+          >
+            <Chrome size={18} />
+            Continue with Google
+          </button>
+
+          <div className="relative">
+            <div className="absolute inset-0 flex items-center">
+              <div className="w-full border-t border-zinc-200 dark:border-zinc-800"></div>
+            </div>
+            <div className="relative flex justify-center">
+              <span className="bg-white dark:bg-zinc-900 px-3 text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">or</span>
+            </div>
+          </div>
+
           {error && (
             <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-600 dark:text-red-400 text-xs font-medium flex items-center gap-2">
               <AlertCircle size={14} />
