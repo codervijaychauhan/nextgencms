@@ -42,7 +42,7 @@ interface AuthContextType {
   loading: boolean;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
-  hasPermission: (moduleId: string, right: string) => boolean;
+  hasPermission: (moduleId: string, right?: string) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -163,10 +163,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setIsStaff(false);
   };
 
-  const hasPermission = (moduleId: string, right: string) => {
+  const hasPermission = (moduleId: string, right?: string) => {
     const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
-    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin || isAdmin) return true;
+    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin) return true;
     const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
+    if (!right) {
+      return perms.length > 0;
+    }
     return perms.includes(right);
   };
 

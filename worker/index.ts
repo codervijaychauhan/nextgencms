@@ -54,7 +54,7 @@ function parseAuthToken(token: string, secret = JWT_SECRET): any {
         uid: payload.user_id || payload.sub || payload.uid,
         email: payload.email || '',
         name: payload.name || payload.display_name || payload.email?.split('@')[0] || 'User',
-        role: payload.role || 'admin',
+        role: payload.role || 'volunteer',
         firebase: true
       };
     }

@@ -103,12 +103,13 @@ export default function UserManagement() {
   const { user, isAdmin, isSuperAdmin, profile, loading: authLoading } = useAuth();
   
   const hasRight = (moduleId: string, right: string) => {
-    if (isSuperAdmin || isAdmin) return true; // super_admin / admin has basic access
+    const currentEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+    if (isSuperAdmin || currentEmail === OWNER_EMAIL) return true; // Only Super Admin / Owner has unrestricted access
     const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
     return perms.includes(right);
   };
 
-  const hasUserView = isSuperAdmin || isAdmin || hasRight('users', 'v');
+  const hasUserView = isSuperAdmin || hasRight('users', 'v');
 
   const canManageUser = (targetUser: UserData) => {
     const currentEmail = (user?.email || profile?.email || '').toLowerCase().trim();

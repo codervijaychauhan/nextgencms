@@ -36,7 +36,7 @@ interface PoliticalParty {
 }
 
 export default function ElectionSetup() {
-  const { isAdmin, hasPermission } = useAuth();
+  const { isSuperAdmin, hasPermission } = useAuth();
   const [activeTab, setActiveTab] = useState<'elections' | 'parties'>('elections');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -68,9 +68,9 @@ export default function ElectionSetup() {
   const [deleteConfirmation, setDeleteConfirmation] = useState<{ id: string; type: 'elections' | 'parties'; label: string } | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const canEdit = isAdmin || hasPermission('elections', 'u');
-  const canCreate = isAdmin || hasPermission('elections', 'c');
-  const canDelete = isAdmin || hasPermission('elections', 'd');
+  const canEdit = isSuperAdmin || hasPermission('elections', 'u');
+  const canCreate = isSuperAdmin || hasPermission('elections', 'c');
+  const canDelete = isSuperAdmin || hasPermission('elections', 'd');
 
   useEffect(() => {
     fetchData();
@@ -172,7 +172,7 @@ export default function ElectionSetup() {
     }
   };
 
-  if (!isAdmin && !hasPermission('elections', 'v')) {
+  if (!isSuperAdmin && !hasPermission('elections', 'v')) {
     return (
       <div className="flex flex-col items-center justify-center py-24 bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-8 text-center max-w-lg mx-auto shadow-sm mt-8">
         <Layers className="text-zinc-300 dark:text-zinc-700 w-16 h-16 min-h-16 mb-4" />

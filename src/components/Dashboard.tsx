@@ -124,7 +124,20 @@ interface BudgetRecord {
 }
 
 export default function Dashboard() {
-  const { user, isAdmin, profile, loading: authLoading } = useAuth();
+  const { user, isAdmin, isSuperAdmin, profile, loading: authLoading } = useAuth();
+  const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isSuper = isSuperAdmin || userEmail === 'vijaychauhanofficial01@gmail.com';
+
+  // Permission check helper
+  const canAccess = (moduleId: string): boolean => {
+    if (isSuper) return true;
+    if (!profile || profile.role === 'guest' || profile.disabled) return false;
+    const perms = profile.permissions?.[moduleId] || profile.rights?.[moduleId] || '';
+    if (typeof perms === 'string') {
+      return perms.includes('v') || perms.includes('c') || perms.includes('u') || perms.includes('d');
+    }
+    return false;
+  };
   
   // Dynamic Module States
   const [reportVoters, setReportVoters] = useState<Voter[]>([]);
@@ -141,17 +154,6 @@ export default function Dashboard() {
   const [partiesList, setPartiesList] = useState<any[]>([]);
   const [usersList, setUsersList] = useState<any[]>([]);
   const [loadingData, setLoadingData] = useState(true);
-
-  // Permission check helper
-  const canAccess = (moduleId: string): boolean => {
-    if (isAdmin) return true;
-    if (!profile || profile.role === 'guest') return false;
-    const perms = profile.permissions?.[moduleId] || profile.rights?.[moduleId] || '';
-    if (typeof perms === 'string') {
-      return perms.includes('v') || perms.includes('c') || perms.includes('u') || perms.includes('d');
-    }
-    return false;
-  };
 
   const userIdentifiers = [
     user?.uid,
@@ -170,7 +172,7 @@ export default function Dashboard() {
         const promises: Promise<any>[] = [];
 
         // 1. Voters
-        if (canAccess('voters') || canAccess('demographics') || isAdmin) {
+        if (canAccess('voters') || canAccess('demographics')) {
           promises.push(
             api.get<{ data: Voter[] }>('/api/voters?limit=500')
               .then(res => {
@@ -192,14 +194,14 @@ export default function Dashboard() {
         }
 
         // 2. Surveys & Sentiments
-        if (canAccess('surveys') || canAccess('survey_campaigns') || isAdmin) {
+        if (canAccess('surveys') || canAccess('survey_campaigns')) {
           promises.push(
             api.get<CampaignSurvey[]>('/api/surveys')
               .then(surveyList => {
                 const list = surveyList || [];
                 setAllSurveysCount(list.length);
                 const activeUserSurveys = list.filter(s => 
-                  isAdmin || (Array.isArray(s.assignedTo) && s.assignedTo.some(a => userIdentifiers.includes(String(a).toLowerCase().trim())))
+                  isSuper || (Array.isArray(s.assignedTo) && s.assignedTo.some(a => userIdentifiers.includes(String(a).toLowerCase().trim())))
                 );
                 setAssignedSurveys(activeUserSurveys);
               })
@@ -216,7 +218,7 @@ export default function Dashboard() {
         }
 
         // 3. Volunteers / Karyakartas
-        if (canAccess('volunteers') || canAccess('booths') || isAdmin) {
+        if (canAccess('volunteers') || canAccess('booths')) {
           promises.push(
             api.get<VolunteerItem[]>('/api/volunteers')
               .then(list => setVolunteersList(list || []))
@@ -225,7 +227,7 @@ export default function Dashboard() {
         }
 
         // 4. Booths
-        if (canAccess('booths') || canAccess('demographics') || isAdmin) {
+        if (canAccess('booths') || canAccess('demographics')) {
           promises.push(
             api.get<BoothItem[]>('/api/booths')
               .then(list => setBoothsList(list || []))
@@ -234,7 +236,7 @@ export default function Dashboard() {
         }
 
         // 5. Mandals
-        if (canAccess('mandals') || isAdmin) {
+        if (canAccess('mandals')) {
           promises.push(
             api.get<MandalItem[]>('/api/mandals')
               .then(list => setMandalsList(list || []))
@@ -243,7 +245,7 @@ export default function Dashboard() {
         }
 
         // 6. Benefits
-        if (canAccess('benefits') || isAdmin) {
+        if (canAccess('benefits')) {
           promises.push(
             api.get<BenefitItem[]>('/api/benefits')
               .then(list => setBenefitsList(list || []))
@@ -252,7 +254,7 @@ export default function Dashboard() {
         }
 
         // 7. Finance
-        if (canAccess('finance') || isAdmin) {
+        if (canAccess('finance')) {
           promises.push(
             api.get<BudgetRecord[]>('/api/finance/budgets')
               .then(list => setBudgetsList(list || []))
@@ -261,7 +263,7 @@ export default function Dashboard() {
         }
 
         // 8. WhatsApp
-        if (canAccess('whatsapp') || isAdmin) {
+        if (canAccess('whatsapp')) {
           promises.push(
             api.get<WhatsAppBroadcast[]>('/api/whatsapp/broadcasts')
               .then(list => setWhatsappBroadcasts(list || []))
@@ -270,7 +272,7 @@ export default function Dashboard() {
         }
 
         // 9. Elections & Parties
-        if (canAccess('elections') || canAccess('demographics') || isAdmin) {
+        if (canAccess('elections') || canAccess('demographics')) {
           promises.push(
             api.get<any[]>('/api/elections')
               .then(list => setElectionsList(list || []))
@@ -284,7 +286,7 @@ export default function Dashboard() {
         }
 
         // 10. Users
-        if (canAccess('users') || isAdmin) {
+        if (canAccess('users')) {
           promises.push(
             api.get<any[]>('/api/users')
               .then(list => setUsersList(list || []))
@@ -303,7 +305,7 @@ export default function Dashboard() {
     if (user) {
       fetchData();
     }
-  }, [user?.uid, user?.email, profile?.uid, profile?.id, profile?.permissions, profile?.rights, isAdmin]);
+  }, [user?.uid, user?.email, profile?.uid, profile?.id, profile?.permissions, profile?.rights, isSuper]);
 
   // Derived Calculations
   const totalVoters = reportVoters.length;
@@ -314,7 +316,7 @@ export default function Dashboard() {
 
   const assignedSurveyIds = assignedSurveys.map(s => String(s.id));
   const relevantSentiments = allSentiments.filter(s => 
-    isAdmin || (s.surveyId && assignedSurveyIds.includes(String(s.surveyId))) ||
+    isSuper || (s.surveyId && assignedSurveyIds.includes(String(s.surveyId))) ||
     userIdentifiers.includes(String(s.recordedBy || '').toLowerCase())
   );
   const userSentimentsCount = relevantSentiments.filter(s => 
@@ -332,7 +334,7 @@ export default function Dashboard() {
     'elections', 'users'
   ].filter(id => canAccess(id));
 
-  const hasAssignedPermissions = isAdmin || accessibleModuleIds.length > 0;
+  const hasAssignedPermissions = isSuper || accessibleModuleIds.length > 0;
 
   return (
     <div className="p-4 sm:p-6 lg:p-8 space-y-6 w-full max-w-7xl mx-auto">
@@ -344,11 +346,11 @@ export default function Dashboard() {
               Dashboard
             </h1>
             <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
-              {isAdmin ? 'Super Admin' : (profile?.role ? profile.role.replace('_', ' ') : 'Volunteer')}
+              {isSuper ? 'Super Admin' : (profile?.role ? profile.role.replace('_', ' ') : 'User')}
             </span>
           </div>
           <p className="text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
-            {isAdmin 
+            {isSuper 
               ? 'Complete system command center & operational overview.' 
               : 'Welcome to NextGen Election Management System workspace.'}
           </p>
@@ -356,7 +358,7 @@ export default function Dashboard() {
       </div>
 
       {/* Guest / No Module Access View */}
-      {!hasAssignedPermissions && !isAdmin ? (
+      {!hasAssignedPermissions && !isSuper ? (
         <motion.div 
           initial={{ opacity: 0, y: 15 }}
           animate={{ opacity: 1, y: 0 }}
@@ -698,7 +700,7 @@ export default function Dashboard() {
                   <div className="flex items-baseline justify-between">
                     <span className="text-2xl font-black text-purple-600 dark:text-purple-400">{assignedSurveys.length}</span>
                     <span className="text-[11px] font-semibold text-zinc-500">
-                      {isAdmin ? 'Total Campaigns' : 'Assigned Campaigns'}
+                      {isSuper ? 'Total Campaigns' : 'Assigned Campaigns'}
                     </span>
                   </div>
                   <div className="flex items-center justify-between text-[11px] text-zinc-500 pt-1 border-t border-zinc-200/60 dark:border-zinc-800">

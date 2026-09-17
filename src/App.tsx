@@ -77,12 +77,15 @@ function PublicRoute({ children }: { children: React.ReactNode }) {
 }
 
 function PermissionRoute({ children, moduleId }: { children: React.ReactNode, moduleId: string }) {
-  const { profile, isAdmin, loading } = useAuth();
+  const { profile, isSuperAdmin, user, loading } = useAuth();
   
   if (loading) return null;
   
-  const canAccess = isAdmin || moduleId === 'dashboard' || (
-    profile && profile.role !== 'guest' && Boolean(
+  const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isSuper = isSuperAdmin || userEmail === 'vijaychauhanofficial01@gmail.com';
+
+  const canAccess = isSuper || moduleId === 'dashboard' || (
+    profile && !profile.disabled && profile.role !== 'guest' && Boolean(
       (profile.permissions?.[moduleId] || profile.rights?.[moduleId])?.length
     )
   );

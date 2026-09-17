@@ -151,7 +151,7 @@ const formatSurveyDate = (val: any): string => {
 };
 
 export default function VoterSurvey() {
-  const { user, isAdmin, profile } = useAuth();
+  const { user, isSuperAdmin, isAdmin, profile } = useAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -170,8 +170,9 @@ export default function VoterSurvey() {
 
   // Permission helper
   const hasRight = (moduleId: string, right: string) => {
-    if (isAdmin) return true;
-    const perms = profile?.permissions?.[moduleId] || '';
+    const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin) return true;
+    const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
     return perms.includes(right);
   };
 
@@ -508,11 +509,11 @@ export default function VoterSurvey() {
   };
 
   const canDelete = (s: Sentiment) => {
-    return isAdmin || s.recordedBy === user?.uid || hasRight('surveys', 'd');
+    return isSuperAdmin || s.recordedBy === user?.uid || hasRight('surveys', 'd');
   };
 
   const canEdit = (s: Sentiment) => {
-    return isAdmin || s.recordedBy === user?.uid || hasRight('surveys', 'u');
+    return isSuperAdmin || s.recordedBy === user?.uid || hasRight('surveys', 'u');
   };
 
   const handleStartEdit = (s: Sentiment) => {

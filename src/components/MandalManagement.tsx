@@ -165,13 +165,13 @@ const MANDAL_CATEGORIES = [
 ];
 
 export default function MandalManagement() {
-  const { user, isAdmin, hasPermission } = useAuth();
+  const { user, isSuperAdmin, hasPermission } = useAuth();
 
   // Permission rights check
-  const canView = isAdmin || hasPermission('mandals', 'v');
-  const canCreate = isAdmin || hasPermission('mandals', 'c');
-  const canUpdate = isAdmin || hasPermission('mandals', 'u');
-  const canDelete = isAdmin || hasPermission('mandals', 'd');
+  const canView = isSuperAdmin || hasPermission('mandals', 'v');
+  const canCreate = isSuperAdmin || hasPermission('mandals', 'c');
+  const canUpdate = isSuperAdmin || hasPermission('mandals', 'u');
+  const canDelete = isSuperAdmin || hasPermission('mandals', 'd');
 
   // Component states
   const [mandals, setMandals] = useState<Mandal[]>([]);

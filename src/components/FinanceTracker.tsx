@@ -54,13 +54,14 @@ const DEFAULT_ALLOCATIONS: Record<string, number> = {
 };
 
 export default function FinanceTracker() {
-  const { user, profile, isAdmin } = useAuth();
+  const { user, profile, isSuperAdmin } = useAuth();
   const adminId = user?.uid || 'default_admin';
   const adminName = profile?.username || user?.displayName || 'Admin';
 
   const hasRight = (moduleId: string, right: string) => {
-    if (isAdmin) return true;
-    const perms = profile?.permissions?.[moduleId] || '';
+    const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin) return true;
+    const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
     return perms.includes(right);
   };
 

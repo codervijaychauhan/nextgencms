@@ -33,8 +33,8 @@ export default function Navigation() {
 
   const canAccess = (moduleId: string) => {
     const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
-    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin || isAdmin) return true; // super_admin has unrestricted access
-    if (!profile || profile.role === 'guest') return false;
+    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin) return true; // Only super_admin / owner has unrestricted access
+    if (!profile || profile.role === 'guest' || profile.disabled) return false;
     
     // Explicit permission check: user has view or any active right on this module
     const perms = profile.permissions?.[moduleId] || profile.rights?.[moduleId] || '';
