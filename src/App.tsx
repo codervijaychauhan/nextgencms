@@ -47,9 +47,9 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="min-h-screen bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-300 flex flex-col md:flex-row">
+    <div className="min-h-screen text-zinc-900 dark:text-zinc-100 flex flex-col md:flex-row">
       <Navigation />
-      <main className={`flex-1 min-w-0 overflow-x-hidden transition-all duration-300 min-h-screen bg-zinc-50 dark:bg-zinc-950 ${isCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
+      <main className={`flex-1 min-w-0 overflow-x-hidden transition-all duration-300 min-h-screen ${isCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
         <div className="max-w-full mx-auto px-4 sm:px-6 md:px-8 py-6 md:py-8 min-w-0">
           {children}
         </div>
@@ -81,10 +81,14 @@ function PermissionRoute({ children, moduleId }: { children: React.ReactNode, mo
   
   if (loading) return null;
   
-  const canAccess = isAdmin || moduleId === 'dashboard' || (profile?.permissions?.[moduleId]?.includes('v'));
+  const canAccess = isAdmin || moduleId === 'dashboard' || (
+    profile && profile.role !== 'guest' && Boolean(
+      (profile.permissions?.[moduleId] || profile.rights?.[moduleId])?.length
+    )
+  );
   
   if (!canAccess) {
-    return <Navigate to="/dashboard" />;
+    return <Navigate to="/dashboard" replace />;
   }
   
   return <>{children}</>;

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, Search, Gift, X, Trash2, Calendar, 
   User, CreditCard, Banknote, Landmark, Filter, CheckCircle2, AlertCircle, RefreshCw,
-  Eye, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  Eye, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../AuthProvider';
@@ -109,6 +109,19 @@ export default function Benefits() {
   // Deletion confirmation
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
+  // Edit Benefit State
+  const [editingBenefit, setEditingBenefit] = useState<Benefit | null>(null);
+  const [editBenefitName, setEditBenefitName] = useState('');
+  const [editBenefitType, setEditBenefitType] = useState<'Government' | 'Party'>('Government');
+  const [editAmount, setEditAmount] = useState('');
+  const [editDate, setEditDate] = useState('');
+  const [editNotes, setEditNotes] = useState('');
+  const [editAadharNumber, setEditAadharNumber] = useState('');
+  const [editWitnessName, setEditWitnessName] = useState('');
+  const [editWitnessesList, setEditWitnessesList] = useState<{name: string; voterId?: string; voterDocId?: string}[]>([]);
+  const [editWitnessSearch, setEditWitnessSearch] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
+
   // Load high-privilege users specifically for the Admin dropdown filter
   useEffect(() => {
     if (!user || !isAdmin) {
@@ -179,22 +192,23 @@ export default function Benefits() {
 
   // Pre-cache voters in memory whenever the "Register Benefit" portal is opened
   useEffect(() => {
-    if (isOpen && user) {
+    if ((isOpen || editingBenefit) && user) {
       const fetchVotersList = async () => {
         setLoadingVoters(true);
         setError('');
         try {
-          const votersData = await api.get<any[]>('/api/voters?pageSize=500');
-          const list: BaseVoter[] = (votersData || []).map((d: any) => ({
-            id: d.id,
-            voterId: d.voterId || '',
+          const votersData = await api.get<any>('/api/voters?limit=1000');
+          const rawList = Array.isArray(votersData) ? votersData : (votersData?.data || []);
+          const list: BaseVoter[] = rawList.map((d: any) => ({
+            id: String(d.id),
+            voterId: d.voter_id || d.voterId || '',
             name: d.name || '',
-            aadharNumber: d.aadharNumber || '',
+            aadharNumber: d.aadhar_number || d.aadharNumber || '',
             mobile: d.mobile || '',
-            stateId: d.stateId || '',
-            districtId: d.districtId || '',
-            constituencyId: d.constituencyId || '',
-            boothId: d.boothId || ''
+            stateId: String(d.state_id || d.stateId || ''),
+            districtId: String(d.district_id || d.districtId || ''),
+            constituencyId: String(d.constituency_id || d.constituencyId || ''),
+            boothId: String(d.booth_id || d.boothId || '')
           }));
           setAllVoters(list);
         } catch (err) {
@@ -206,13 +220,13 @@ export default function Benefits() {
       };
       
       fetchVotersList();
-    } else {
+    } else if (!isOpen && !editingBenefit) {
       setAllVoters([]);
       setSelectedVoter(null);
       setVoterSearch('');
       resetForm();
     }
-  }, [isOpen, user, profile, isAdmin]);
+  }, [isOpen, editingBenefit, user, profile, isAdmin]);
 
   const resetForm = () => {
     setAadharNumber('');
@@ -332,6 +346,79 @@ export default function Benefits() {
       setError(err?.message || "Failed to finalize aid entry.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Edit logic
+  const startEditBenefit = (b: Benefit) => {
+    setEditingBenefit(b);
+    setEditBenefitName(b.benefitName || '');
+    setEditBenefitType(b.benefitType || 'Government');
+    setEditAmount(String(b.amount || ''));
+    setEditDate(b.date || new Date().toISOString().split('T')[0]);
+    setEditNotes(b.notes || '');
+    setEditAadharNumber(b.aadharNumber || '');
+    setEditWitnessName(b.witnessName || '');
+    setEditWitnessesList(Array.isArray(b.witnesses) ? [...b.witnesses] : (b.witnessName ? [{ name: b.witnessName, voterId: b.witnessVoterId, voterDocId: b.witnessVoterDocId }] : []));
+    setEditWitnessSearch('');
+  };
+
+  const handleUpdateBenefit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingBenefit) return;
+    if (!hasRight('benefits', 'u')) {
+      setError("You do not have permission to update benefit records.");
+      return;
+    }
+    if (!editBenefitName.trim()) {
+      setError("Please enter the scheme/program name.");
+      return;
+    }
+    if (editAadharNumber.trim() && (editAadharNumber.length !== 12 || !/^\d+$/.test(editAadharNumber))) {
+      setError("If provided, the Aadhaar number must be exactly 12 digits.");
+      return;
+    }
+    if (!editAmount || Number(editAmount) < 0) {
+      setError("Please enter a valid amount.");
+      return;
+    }
+
+    setEditSaving(true);
+    setError('');
+
+    try {
+      const finalWitnesses = [...editWitnessesList];
+      if (finalWitnesses.length === 0 && editWitnessName.trim()) {
+        finalWitnesses.push({ name: editWitnessName.trim() });
+      }
+      const computedWitnessName = finalWitnesses.map(w => w.name).join(', ');
+      const firstWitness = finalWitnesses[0] || null;
+
+      const updatedPayload = {
+        id: editingBenefit.id,
+        voter_name: editingBenefit.voterName,
+        aadhar_number: editAadharNumber.trim(),
+        amount: parseFloat(editAmount) || 0,
+        benefit_name: editBenefitName.trim(),
+        benefit_type: editBenefitType,
+        distribution_date: editDate,
+        notes: editNotes.trim(),
+        witness_name: computedWitnessName,
+        witness_voter_id: firstWitness ? (firstWitness.voterId || '') : '',
+        witnesses: finalWitnesses
+      };
+
+      await api.put(`/api/benefits/${editingBenefit.id}`, updatedPayload);
+
+      setSuccess(`Benefit record for "${editingBenefit.voterName}" updated successfully.`);
+      setEditingBenefit(null);
+      fetchBenefits();
+      setTimeout(() => setSuccess(''), 4000);
+    } catch (err: any) {
+      console.error("Update benefit error:", err);
+      setError(err?.message || "Failed to update benefit record.");
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -722,8 +809,8 @@ export default function Benefits() {
           </div>
         ) : (
           <>
-            <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
+            <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left border-collapse min-w-[800px]">
               <thead>
                 <tr className="bg-zinc-50 dark:bg-zinc-950/50 text-[10px] font-black uppercase tracking-widest text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
                   <th className="py-4 px-5">Citizen (Recipient)</th>
@@ -795,6 +882,17 @@ export default function Benefits() {
                         >
                           <Eye size={14} />
                         </button>
+
+                        {/* Edit Benefit Trigger */}
+                        {hasRight('benefits', 'u') && (
+                          <button
+                            onClick={() => startEditBenefit(b)}
+                            className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-400 p-1.5 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-all"
+                            title="Edit benefit record"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                        )}
 
                         {hasRight('benefits', 'd') ? (
                           confirmDeleteId === b.id ? (
@@ -1500,6 +1598,195 @@ export default function Benefits() {
                     className="w-full bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-900 dark:hover:bg-zinc-850 text-zinc-800 dark:text-white font-extrabold text-xs uppercase tracking-wider py-3.5 rounded-xl border border-zinc-200 dark:border-zinc-800 transition-all font-sans cursor-pointer active:scale-98"
                   >
                     Close Inspector
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          </div>
+        )}
+        {/* EDIT BENEFIT MODAL */}
+        {editingBenefit && (
+          <div className="fixed inset-0 z-50 overflow-hidden">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setEditingBenefit(null)}
+              className="absolute inset-0 bg-black/40 backdrop-blur-xs"
+            />
+            <div className="absolute inset-y-0 right-0 max-w-full pl-10 flex">
+              <motion.div 
+                initial={{ x: '100%' }}
+                animate={{ x: 0 }}
+                exit={{ x: '100%' }}
+                transition={{ type: 'spring', damping: 26, stiffness: 220 }}
+                className="w-screen max-w-md bg-white dark:bg-zinc-950 shadow-2xl flex flex-col justify-between"
+              >
+                <div className="px-6 py-5 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
+                  <div>
+                    <h2 className="text-base font-black text-zinc-900 dark:text-white uppercase tracking-wider">
+                      Edit Benefit Allocation
+                    </h2>
+                    <p className="text-xs text-zinc-500 mt-0.5">
+                      Beneficiary: <span className="font-bold text-zinc-800 dark:text-zinc-200">{editingBenefit.voterName}</span> ({editingBenefit.voterId || 'No EPIC'})
+                    </p>
+                  </div>
+                  <button 
+                    onClick={() => setEditingBenefit(null)}
+                    className="text-zinc-400 hover:text-zinc-700 dark:hover:text-white p-1 rounded-lg"
+                  >
+                    <X size={18} />
+                  </button>
+                </div>
+
+                <div className="p-6 overflow-y-auto flex-1 custom-scrollbar space-y-5">
+                  <form id="edit-benefit-form" onSubmit={handleUpdateBenefit} className="space-y-4">
+                    {/* Aadhaar Number */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400 flex items-center gap-1.5">
+                        <CreditCard size={12} className="opacity-80" />
+                        Aadhaar Number (12 Digits)
+                      </label>
+                      <input 
+                        type="text"
+                        maxLength={12}
+                        disabled={editSaving}
+                        value={editAadharNumber}
+                        onChange={e => setEditAadharNumber(e.target.value.replace(/\D/g, ''))}
+                        placeholder="e.g. 123456789012"
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-white font-mono"
+                      />
+                    </div>
+
+                    {/* Source selection */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                        Benefit Type / Source
+                      </label>
+                      <div className="grid grid-cols-2 gap-3">
+                        <button
+                          type="button"
+                          disabled={editSaving}
+                          onClick={() => setEditBenefitType('Government')}
+                          className={`p-3 border rounded-xl flex flex-col items-center justify-center gap-1.5 transition-all ${
+                            editBenefitType === 'Government'
+                              ? 'border-purple-500 bg-purple-50 dark:bg-purple-950/20 text-purple-700 dark:text-purple-300 font-bold'
+                              : 'border-zinc-200 dark:border-zinc-800 text-zinc-500'
+                          }`}
+                        >
+                          <Landmark size={15} />
+                          <span className="text-[10px] uppercase tracking-wider">Government Scheme</span>
+                        </button>
+                        <button
+                          type="button"
+                          disabled={editSaving}
+                          onClick={() => setEditBenefitType('Party')}
+                          className={`p-3 border rounded-xl flex flex-col items-center justify-center gap-1.5 transition-all ${
+                            editBenefitType === 'Party'
+                              ? 'border-orange-500 bg-orange-50 dark:bg-orange-950/20 text-orange-700 dark:text-orange-300 font-bold'
+                              : 'border-zinc-200 dark:border-zinc-800 text-zinc-500'
+                          }`}
+                        >
+                          <Gift size={15} />
+                          <span className="text-[10px] uppercase tracking-wider">Party Outreach</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Scheme Name */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                        Scheme / Aid Program Name
+                      </label>
+                      <input 
+                        type="text"
+                        required
+                        disabled={editSaving}
+                        value={editBenefitName}
+                        onChange={e => setEditBenefitName(e.target.value)}
+                        placeholder="Enter program name"
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-white"
+                      />
+                      <div className="flex flex-wrap gap-1.5 pt-1.5">
+                        {BENEFIT_SUGGESTIONS.map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => setEditBenefitName(s)}
+                            className="bg-zinc-50 dark:bg-zinc-900 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-[9px] text-zinc-500 dark:text-zinc-400 px-2 py-1 rounded border border-zinc-200 dark:border-zinc-800 transition-all"
+                          >
+                            {s}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Amount & Date */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                          Aid amount (₹)
+                        </label>
+                        <input
+                          type="number"
+                          min="0"
+                          required
+                          disabled={editSaving}
+                          value={editAmount}
+                          onChange={e => setEditAmount(e.target.value)}
+                          placeholder="e.g. 5000"
+                          className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-white font-mono font-bold"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                          Allocation Date
+                        </label>
+                        <input
+                          type="date"
+                          required
+                          disabled={editSaving}
+                          value={editDate}
+                          onChange={e => setEditDate(e.target.value)}
+                          className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-white font-mono"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Notes */}
+                    <div className="space-y-1.5">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-400">
+                        Admin Remarks / Notes
+                      </label>
+                      <textarea
+                        rows={3}
+                        disabled={editSaving}
+                        value={editNotes}
+                        onChange={e => setEditNotes(e.target.value)}
+                        placeholder="Add additional remarks or notes..."
+                        className="w-full bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3.5 py-2.5 text-xs outline-none focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-white"
+                      />
+                    </div>
+                  </form>
+                </div>
+
+                <div className="p-6 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-end gap-3 bg-zinc-50/50 dark:bg-zinc-950/50">
+                  <button
+                    type="button"
+                    disabled={editSaving}
+                    onClick={() => setEditingBenefit(null)}
+                    className="px-4 py-2.5 border border-zinc-200 dark:border-zinc-800 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-all"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="edit-benefit-form"
+                    disabled={editSaving}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black uppercase tracking-wider transition-all disabled:opacity-50 shadow-sm"
+                  >
+                    {editSaving ? 'Updating...' : 'Save Changes'}
                   </button>
                 </div>
               </motion.div>

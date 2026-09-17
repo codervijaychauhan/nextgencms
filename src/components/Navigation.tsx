@@ -10,9 +10,10 @@ import { useAuth } from '../AuthProvider';
 import { useTheme } from '../ThemeProvider';
 import { useSidebar } from '../SidebarContext';
 import { motion, AnimatePresence } from 'motion/react';
+import Logo from './Logo';
 
 export default function Navigation() {
-  const { signOut, user, isAdmin, profile } = useAuth();
+  const { signOut, user, isAdmin, isSuperAdmin, profile } = useAuth();
   const { theme, toggleTheme } = useTheme();
   const { isCollapsed, toggleSidebar } = useSidebar();
   const location = useLocation();
@@ -31,12 +32,16 @@ export default function Navigation() {
   }, []);
 
   const canAccess = (moduleId: string) => {
-    if (isAdmin) return true; // super_admin or owner
-    if (!profile) return false;
+    const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin || isAdmin) return true; // super_admin has unrestricted access
+    if (!profile || profile.role === 'guest') return false;
     
-    // Explicit module check
-    const perms = profile.permissions?.[moduleId] || '';
-    return perms.includes('v');
+    // Explicit permission check: user has view or any active right on this module
+    const perms = profile.permissions?.[moduleId] || profile.rights?.[moduleId] || '';
+    if (typeof perms === 'string') {
+      return perms.includes('v') || perms.includes('c') || perms.includes('u') || perms.includes('d');
+    }
+    return false;
   };
 
   const navItems = [
@@ -63,15 +68,13 @@ export default function Navigation() {
     const filteredNavItems = navItems.filter(item => item.alwaysShow || canAccess(item.moduleId || ''));
     const filteredAdminItems = adminItems.filter(item => canAccess(item.moduleId || ''));
     return (
-      <div className="flex flex-col h-full bg-white dark:bg-zinc-950 transition-all duration-300">
+      <div className="flex flex-col h-full bg-white/90 dark:bg-[#111823]/90 backdrop-blur-md transition-all duration-300">
       {/* Brand Header */}
       <div className={`h-16 flex items-center border-b border-zinc-200 dark:border-zinc-800 transition-all duration-300 relative ${isCollapsed && !isMobile ? 'px-4 justify-center' : 'px-6'}`}>
-        <Link to="/" className="flex items-center gap-2 overflow-hidden whitespace-nowrap">
-          <div className="w-7 h-7 bg-zinc-950 dark:bg-zinc-100 rounded flex items-center justify-center shrink-0">
-            <Command size={16} className="text-white dark:text-zinc-950" />
-          </div>
+        <Link to="/" className="flex items-center gap-2.5 overflow-hidden whitespace-nowrap">
+          <Logo size={28} />
           {(!isCollapsed || isMobile) && (
-            <span className="font-bold tracking-tight text-zinc-900 dark:text-white transition-opacity duration-300">NextGen CMS </span>
+            <span className="font-bold tracking-tight text-zinc-900 dark:text-white transition-opacity duration-300">NextGen CMS</span>
           )}
         </Link>
         {!isMobile && (
@@ -259,10 +262,8 @@ export default function Navigation() {
       {/* Mobile Header */}
       <div className="md:hidden sticky top-0 bg-white/80 dark:bg-zinc-950/80 backdrop-blur-md border-b border-zinc-200 dark:border-zinc-800 h-14 flex items-center justify-between px-4 z-40">
         <Link to="/" className="flex items-center gap-2">
-          <div className="w-6 h-6 bg-zinc-950 dark:bg-zinc-100 rounded flex items-center justify-center">
-            <Command size={14} className="text-white dark:text-zinc-950" />
-          </div>
-          <span className="font-bold text-sm text-zinc-900 dark:text-white uppercase tracking-tight">Command</span>
+          <Logo size={24} />
+          <span className="font-bold text-sm text-zinc-900 dark:text-white tracking-tight">NextGen CMS</span>
         </Link>
         
         <div className="flex items-center gap-2">

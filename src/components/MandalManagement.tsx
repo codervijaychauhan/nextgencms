@@ -168,10 +168,10 @@ export default function MandalManagement() {
   const { user, isAdmin, hasPermission } = useAuth();
 
   // Permission rights check
-  const canView = hasPermission('mandals', 'v');
-  const canCreate = hasPermission('mandals', 'c');
-  const canUpdate = hasPermission('mandals', 'u');
-  const canDelete = hasPermission('mandals', 'd');
+  const canView = isAdmin || hasPermission('mandals', 'v');
+  const canCreate = isAdmin || hasPermission('mandals', 'c');
+  const canUpdate = isAdmin || hasPermission('mandals', 'u');
+  const canDelete = isAdmin || hasPermission('mandals', 'd');
 
   // Component states
   const [mandals, setMandals] = useState<Mandal[]>([]);
@@ -241,20 +241,25 @@ export default function MandalManagement() {
         setError('');
 
         // 1. Fetch States
-        const statesList = await api.get<StateData[]>('/api/states').catch(() => []);
-        setStates(statesList);
+        const statesList = await api.get<any[]>('/api/states').catch(() => []);
+        setStates(statesList.map(s => ({ ...s, id: String(s.id) })));
 
         // 2. Fetch Districts
-        const districtsList = await api.get<DistrictData[]>('/api/districts').catch(() => []);
-        setDistricts(districtsList);
+        const districtsList = await api.get<any[]>('/api/districts').catch(() => []);
+        setDistricts(districtsList.map(d => ({ ...d, id: String(d.id), stateId: String(d.state_id || d.stateId || '') })));
 
         // 3. Fetch Constituencies
-        const constituenciesList = await api.get<ConstituencyData[]>('/api/constituencies').catch(() => []);
-        setConstituencies(constituenciesList);
+        const constituenciesList = await api.get<any[]>('/api/constituencies').catch(() => []);
+        setConstituencies(constituenciesList.map(c => ({ 
+          ...c, 
+          id: String(c.id), 
+          stateId: String(c.state_id || c.stateId || ''), 
+          districtId: String(c.district_id || c.districtId || '') 
+        })));
 
         // 4. Fetch Volunteers/Karyakartas for President assignment
-        const volList = await api.get<Volunteer[]>('/api/volunteers').catch(() => []);
-        setVolunteers(volList);
+        const volList = await api.get<any[]>('/api/volunteers').catch(() => []);
+        setVolunteers(volList.map(v => ({ ...v, id: String(v.id) })));
       } catch (err) {
         console.error('Error loading metadata:', err);
         setError('Failed to load demographic metadata.');
@@ -277,15 +282,18 @@ export default function MandalManagement() {
       const list = await api.get<Mandal[]>('/api/mandals');
       setMandals(list.map((m: any) => ({
         ...m,
-        mandalCode: m.mandal_code || m.mandalCode,
-        presidentName: m.president_name || m.presidentName,
-        presidentPhone: m.president_phone || m.presidentPhone,
-        voterCount: m.voter_count !== undefined ? m.voter_count : m.voterCount,
-        population: m.population,
-        stateId: m.state_id || m.stateId,
-        districtId: m.district_id || m.districtId,
-        constituencyId: m.constituency_id || m.constituencyId,
-        constituencyName: m.constituency_name || m.constituencyName
+        id: String(m.id),
+        mandalCode: m.mandal_code || m.mandalCode || '',
+        presidentName: m.president_name || m.presidentName || '',
+        presidentPhone: m.president_phone || m.presidentPhone || '',
+        voterCount: m.voter_count !== undefined ? m.voter_count : (m.voterCount || 0),
+        population: m.population || 0,
+        stateId: String(m.state_id || m.stateId || ''),
+        stateName: m.state_name || m.stateName || '',
+        districtId: String(m.district_id || m.districtId || ''),
+        districtName: m.district_name || m.districtName || '',
+        constituencyId: String(m.constituency_id || m.constituencyId || ''),
+        constituencyName: m.constituency_name || m.constituencyName || ''
       })));
     } catch (err: unknown) {
       setError('Failed to fetch Mandals list.');
@@ -307,6 +315,7 @@ export default function MandalManagement() {
       const list = await api.get<MandalMember[]>(`/api/mandals/${mandalId}/members`);
       setMembers(list.map((item: any) => ({
         ...item,
+        id: String(item.id),
         categoryKey: item.category_key || item.categoryKey,
         voterId: item.voter_id || item.voterId
       })));
@@ -324,7 +333,7 @@ export default function MandalManagement() {
       setVoterSearching(true);
       const res = await api.get<{ data: any[] }>(`/api/voters?constituencyId=${constituencyId}&limit=200`);
       const list = (res.data || []).map(d => ({
-        id: d.id,
+        id: String(d.id),
         voterId: d.voter_id || d.voterId || '',
         name: d.name || '',
         mobile: d.mobile || '',
@@ -352,9 +361,10 @@ export default function MandalManagement() {
   const handleVolunteerSelection = (val: string) => {
     setSelectedVolunteerId(val);
     if (val === 'custom') {
-      setName('');
+      setPresidentName('');
+      setPresidentPhone('');
     } else {
-      const selectedVol = volunteers.find(v => v.id === val);
+      const selectedVol = volunteers.find(v => String(v.id) === String(val));
       if (selectedVol) {
         setPresidentName(selectedVol.name);
         setPresidentPhone(selectedVol.mobile || '');
@@ -390,7 +400,7 @@ export default function MandalManagement() {
       setSelectedConstituency(mandal.constituencyId);
       
       const matchedVol = volunteers.find(v => v.name === mandal.presidentName && v.mobile === mandal.presidentPhone);
-      setSelectedVolunteerId(matchedVol ? matchedVol.id : 'custom');
+      setSelectedVolunteerId(matchedVol ? String(matchedVol.id) : 'custom');
     } else {
       setIsEditMode(false);
       setEditingId('');
@@ -400,9 +410,9 @@ export default function MandalManagement() {
       setPresidentPhone('');
       setVoterCount('');
       setPopulation('');
-      setSelectedState('');
-      setSelectedDistrict('');
-      setSelectedConstituency('');
+      setSelectedState(filterState !== 'all' ? filterState : (states[0]?.id || ''));
+      setSelectedDistrict(filterDistrict !== 'all' ? filterDistrict : '');
+      setSelectedConstituency(filterConstituency !== 'all' ? filterConstituency : '');
       setSelectedVolunteerId('custom');
     }
     setIsModalOpen(true);
@@ -412,7 +422,7 @@ export default function MandalManagement() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !mandalCode.trim() || !selectedState || !selectedDistrict || !selectedConstituency) {
-      setError('Please complete all required fields.');
+      setError('Please complete all required fields (Name, Code, State, District, and Constituency).');
       return;
     }
 
@@ -450,8 +460,9 @@ export default function MandalManagement() {
 
       setIsModalOpen(false);
       fetchMandals();
-    } catch (err: unknown) {
-      setError('Failed to persist Mandal details.');
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to persist Mandal details.';
+      setError(msg);
     }
   };
 
@@ -468,8 +479,9 @@ export default function MandalManagement() {
       setSuccess('Mandal deleted successfully.');
       setDeleteConfirmId('');
       fetchMandals();
-    } catch (err: unknown) {
-      setError('Failed to delete Mandal.');
+    } catch (err: any) {
+      const msg = err?.response?.data?.error || err?.message || 'Failed to delete Mandal.';
+      setError(msg);
     }
   };
 
@@ -528,14 +540,21 @@ export default function MandalManagement() {
         category_key: memberFormCategory
       };
 
-      await api.post(`/api/mandals/${selectedMandalForMembers.id}/members`, payload);
-      setSuccess('Member added to list successfully.');
+      if (editingMember) {
+        await api.put(`/api/mandals/members/${editingMember.id}`, payload);
+        setSuccess('Member assignment updated successfully.');
+      } else {
+        await api.post(`/api/mandals/${selectedMandalForMembers.id}/members`, payload);
+        setSuccess('Member added to list successfully.');
+      }
 
       setIsMemberModalOpen(false);
+      setEditingMember(null);
       fetchMandalMembers(selectedMandalForMembers.id);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Error saving member:', err);
-      setError('Failed to save list member.');
+      const msg = err?.response?.data?.error || err?.message || 'Failed to save list member.';
+      setError(msg);
     }
   };
 

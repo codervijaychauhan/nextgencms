@@ -7,7 +7,7 @@ import {
   Filter, RefreshCw, 
   ChevronDown, X, Coins, Printer,
   ArrowUpRight, ArrowDownLeft, Edit2, Tag,
-  CheckCircle2, AlertCircle
+  CheckCircle2, AlertCircle, ShieldAlert, Sliders, Target
 } from 'lucide-react';
 
 interface Budget {
@@ -35,7 +35,7 @@ interface Transaction {
   createdAt?: unknown;
 }
 
-const CATEGORIES = [
+const DEFAULT_CATEGORIES = [
   'Campaign Materials',
   'Events & Rallies',
   'Digital Marketing',
@@ -44,7 +44,7 @@ const CATEGORIES = [
   'Volunteer Support'
 ];
 
-const DEFAULT_ALLOCATIONS = {
+const DEFAULT_ALLOCATIONS: Record<string, number> = {
   'Campaign Materials': 500000,
   'Events & Rallies': 300000,
   'Digital Marketing': 200000,
@@ -54,17 +54,27 @@ const DEFAULT_ALLOCATIONS = {
 };
 
 export default function FinanceTracker() {
-  const { user, profile } = useAuth();
+  const { user, profile, isAdmin } = useAuth();
   const adminId = user?.uid || 'default_admin';
   const adminName = profile?.username || user?.displayName || 'Admin';
+
+  const hasRight = (moduleId: string, right: string) => {
+    if (isAdmin) return true;
+    const perms = profile?.permissions?.[moduleId] || '';
+    return perms.includes(right);
+  };
 
   const [loading, setLoading] = useState(true);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
+  const [currentBudgetId, setCurrentBudgetId] = useState<string>('');
+  const [totalBudgetCap, setTotalBudgetCap] = useState<number>(1325000);
+  const [categoryAllocations, setCategoryAllocations] = useState<Record<string, number>>(DEFAULT_ALLOCATIONS);
   
   // Modals / Actions
   const [isTxModalOpen, setIsTxModalOpen] = useState(false);
   const [isReportModalOpen, setIsReportModalOpen] = useState(false);
+  const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [editingTx, setEditingTx] = useState<Transaction | null>(null);
 
   // State for custom alerts and confirmations
@@ -106,9 +116,15 @@ export default function FinanceTracker() {
   const [txError, setTxError] = useState('');
   const [txSaving, setTxSaving] = useState(false);
 
-  const [customCategories, setCustomCategories] = useState<string[]>(CATEGORIES);
+  // Category State
+  const [customCategories, setCustomCategories] = useState<string[]>(DEFAULT_CATEGORIES);
   const [newCategoryName, setNewCategoryName] = useState('');
   const [yearInput, setYearInput] = useState<string>('2026');
+
+  // Budget Modal State
+  const [tempAllocations, setTempAllocations] = useState<Record<string, number>>({});
+  const [tempTotalBudget, setTempTotalBudget] = useState<string>('0');
+  const [budgetSaving, setBudgetSaving] = useState(false);
 
   // Filters / Search
   const [selectedYear, setSelectedYear] = useState<string>('2026');
@@ -117,6 +133,7 @@ export default function FinanceTracker() {
   useEffect(() => {
     setYearInput(selectedYear);
   }, [selectedYear]);
+
   const [categoryFilter, setCategoryFilter] = useState('all');
   const [typeFilter, setTypeFilter] = useState('all');
   const [sortOrder, setSortOrder] = useState<'desc' | 'asc'>('desc');
@@ -127,9 +144,9 @@ export default function FinanceTracker() {
     if (selectedTimeframe === 'all') return txList;
     const baseDate = new Date('2026-07-07');
     return txList.filter(t => {
-      const txDate = new Date(t.date);
-      if (isNaN(txDate.getTime())) return true;
-      const diffTime = baseDate.getTime() - txDate.getTime();
+      const tDate = new Date(t.date);
+      if (isNaN(tDate.getTime())) return true;
+      const diffTime = baseDate.getTime() - tDate.getTime();
       const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
       
       if (selectedTimeframe === 'weekly') {
@@ -145,8 +162,10 @@ export default function FinanceTracker() {
 
   // Load / Seed Data
   useEffect(() => {
-    if (adminId) {
+    if (adminId && hasRight('finance', 'v')) {
       fetchFinanceData(selectedYear);
+    } else {
+      setLoading(false);
     }
   }, [adminId, selectedYear]);
 
@@ -157,24 +176,43 @@ export default function FinanceTracker() {
     try {
       // 1. Fetch budgets and custom categories
       const budgets = await api.get<any[]>('/api/finance/budgets');
-      const currentBudget = (budgets || []).find(b => (b.adminId === adminId || b.admin_id === adminId) && (b.electionYear === targetYear || b.election_year === targetYear));
+      const currentBudget = (budgets || []).find(b => 
+        (b.adminId === adminId || b.admin_id === adminId) && 
+        (String(b.electionYear) === String(targetYear) || String(b.election_year) === String(targetYear))
+      ) || (budgets || []).find(b => (b.adminId === adminId || b.admin_id === adminId));
       
-      let loadedCats = CATEGORIES;
-      if (currentBudget && currentBudget.allocations && Object.keys(currentBudget.allocations).length > 0) {
-        loadedCats = Object.keys(currentBudget.allocations);
+      let loadedCats = DEFAULT_CATEGORIES;
+      let allocMap = { ...DEFAULT_ALLOCATIONS };
+      let totalCap = 0;
+
+      if (currentBudget) {
+        setCurrentBudgetId(String(currentBudget.id || ''));
+        if (currentBudget.allocations && typeof currentBudget.allocations === 'object' && Object.keys(currentBudget.allocations).length > 0) {
+          loadedCats = Object.keys(currentBudget.allocations);
+          allocMap = currentBudget.allocations;
+        }
+        totalCap = parseFloat(currentBudget.totalBudget || currentBudget.total_budget || '0');
+        if (totalCap <= 0) {
+          totalCap = Object.values(allocMap).reduce((sum, v) => sum + (Number(v) || 0), 0);
+        }
+      } else {
+        totalCap = Object.values(DEFAULT_ALLOCATIONS).reduce((sum, v) => sum + (Number(v) || 0), 0);
       }
+
       setCustomCategories(loadedCats);
+      setCategoryAllocations(allocMap);
+      setTotalBudgetCap(totalCap);
 
       // 2. Fetch Transactions
       const txData = await api.get<any[]>('/api/finance/transactions');
       const txList: Transaction[] = (txData || []).map(d => ({
-        id: d.id,
+        id: String(d.id),
         adminId: d.adminId || d.admin_id || adminId,
         type: d.type || 'expense',
         title: d.title || '',
         amount: typeof d.amount === 'number' ? d.amount : parseFloat(d.amount || '0'),
         category: d.category || 'General',
-        date: d.date ? new Date(d.date).toISOString().split('T')[0] : (d.transaction_date ? new Date(d.transaction_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
+        date: d.date ? (d.date.length === 10 ? d.date : new Date(d.date).toISOString().split('T')[0]) : (d.transaction_date ? new Date(d.transaction_date).toISOString().split('T')[0] : new Date().toISOString().split('T')[0]),
         paymentMethod: d.paymentMethod || d.payment_method || 'Cash',
         donorName: d.donorName || d.donor_name || '',
         notes: d.notes || '',
@@ -185,6 +223,7 @@ export default function FinanceTracker() {
       setTransactions(txList);
     } catch (err) {
       console.error('Error fetching finance tracker metrics:', err);
+      showNotification('Failed to load finance data from server.', 'error');
     } finally {
       setLoading(false);
       setIsInitialLoad(false);
@@ -229,6 +268,10 @@ export default function FinanceTracker() {
   });
 
   const handleEditClick = (tx: Transaction) => {
+    if (!hasRight('finance', 'u')) {
+      showNotification('You do not have permission to edit transactions.', 'error');
+      return;
+    }
     setEditingTx(tx);
     setTxType(tx.type);
     setTxTitle(tx.title);
@@ -242,18 +285,243 @@ export default function FinanceTracker() {
     setIsTxModalOpen(true);
   };
 
-  const handleAddTransaction = (type: 'expense' | 'income') => {
+  const handleOpenNewTx = (type: 'expense' | 'income') => {
+    if (!hasRight('finance', 'c')) {
+      showNotification('You do not have permission to record transactions.', 'error');
+      return;
+    }
     setEditingTx(null);
     setTxType(type);
     setTxTitle('');
     setTxAmount('');
-    setTxCategory(customCategories[0] || 'Campaign Materials');
+    setTxCategory(type === 'income' ? 'Income' : (customCategories[0] || 'General'));
     setTxDate(new Date().toISOString().split('T')[0]);
     setTxMethod('Online');
     setTxDonorName('');
     setTxNotes('');
     setTxError('');
     setIsTxModalOpen(true);
+  };
+
+  const handleSaveTx = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (editingTx && !hasRight('finance', 'u')) {
+      showNotification('You do not have permission to edit transactions.', 'error');
+      return;
+    }
+    if (!editingTx && !hasRight('finance', 'c')) {
+      showNotification('You do not have permission to record transactions.', 'error');
+      return;
+    }
+
+    if (!txTitle.trim()) {
+      setTxError('Please enter a description for the transaction.');
+      return;
+    }
+    const amountVal = parseFloat(txAmount);
+    if (isNaN(amountVal) || amountVal <= 0) {
+      setTxError('Please enter a valid amount greater than zero.');
+      return;
+    }
+
+    setTxSaving(true);
+    setTxError('');
+
+    const txPayload = {
+      adminId,
+      type: txType,
+      title: txTitle.trim(),
+      amount: amountVal,
+      category: txType === 'income' ? 'Income' : txCategory,
+      date: txDate,
+      paymentMethod: txMethod,
+      donorName: txType === 'income' ? txDonorName.trim() || 'Anonymous' : '',
+      notes: txNotes.trim()
+    };
+
+    try {
+      if (editingTx) {
+        await api.put(`/api/finance/transactions/${editingTx.id}`, txPayload);
+        setTransactions(prev => prev.map(t => t.id === editingTx.id ? { ...t, ...txPayload, id: editingTx.id } : t).sort((a, b) => b.date.localeCompare(a.date)));
+      } else {
+        const res = await api.post<any>('/api/finance/transactions', txPayload);
+        const newRecord: Transaction = {
+          id: String(res?.id || `tx_${Date.now()}`),
+          ...txPayload
+        };
+        setTransactions(prev => [newRecord, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
+      }
+      setIsTxModalOpen(false);
+      setEditingTx(null);
+      setTxTitle('');
+      setTxAmount('');
+      setTxDonorName('');
+      setTxNotes('');
+      showNotification(editingTx ? 'Transaction updated successfully.' : 'Transaction recorded successfully.', 'success');
+      fetchFinanceData(selectedYear);
+    } catch (err: any) {
+      console.error('Error saving transaction:', err);
+      setTxError(err?.message || 'Failed to save transaction.');
+    } finally {
+      setTxSaving(false);
+    }
+  };
+
+  const handleAddCategory = async () => {
+    if (!hasRight('finance', 'c')) {
+      showNotification('You do not have permission to add categories.', 'error');
+      return;
+    }
+    const trimmed = newCategoryName.trim();
+    if (!trimmed) return;
+    if (customCategories.includes(trimmed)) {
+      showNotification('This category already exists.', 'error');
+      return;
+    }
+
+    const updatedCats = [...customCategories, trimmed];
+    const updatedAllocations = { ...categoryAllocations, [trimmed]: 0 };
+    setCustomCategories(updatedCats);
+    setCategoryAllocations(updatedAllocations);
+    setNewCategoryName('');
+
+    const updatedBudget = {
+      id: currentBudgetId || `${adminId}_${selectedYear}`,
+      adminId,
+      totalBudget: totalBudgetCap,
+      electionYear: selectedYear,
+      allocations: updatedAllocations
+    };
+
+    try {
+      await api.post('/api/finance/budgets', updatedBudget);
+      showNotification(`Category "${trimmed}" added successfully.`, 'success');
+    } catch (err: any) {
+      console.error('Failed to save category:', err);
+      showNotification('Failed to save category to database.', 'error');
+    }
+  };
+
+  const handleDeleteCategory = async (catToDelete: string) => {
+    if (!hasRight('finance', 'd')) {
+      showNotification('You do not have permission to delete categories.', 'error');
+      return;
+    }
+    const isUsed = transactions.some(t => t.category === catToDelete);
+    if (isUsed) {
+      showNotification(`Cannot delete "${catToDelete}" because transaction records are logged under it. Please delete or re-categorize those transactions first.`, 'error');
+      return;
+    }
+
+    showConfirm(
+      'Delete Category',
+      `Are you sure you want to delete the category "${catToDelete}"?`,
+      async () => {
+        const updatedCats = customCategories.filter(c => c !== catToDelete);
+        const updatedAllocations = { ...categoryAllocations };
+        delete updatedAllocations[catToDelete];
+
+        setCustomCategories(updatedCats);
+        setCategoryAllocations(updatedAllocations);
+
+        const updatedBudget = {
+          id: currentBudgetId || `${adminId}_${selectedYear}`,
+          adminId,
+          totalBudget: totalBudgetCap,
+          electionYear: selectedYear,
+          allocations: updatedAllocations
+        };
+
+        try {
+          await api.post('/api/finance/budgets', updatedBudget);
+          showNotification(`Category "${catToDelete}" deleted successfully.`, 'success');
+        } catch (err: any) {
+          console.error('Failed to delete category:', err);
+          showNotification('Failed to update category deletion on server.', 'error');
+        }
+      }
+    );
+  };
+
+  const handleOpenBudgetModal = () => {
+    if (!hasRight('finance', 'u')) {
+      showNotification('You do not have permission to adjust budget allocations.', 'error');
+      return;
+    }
+    setTempAllocations({ ...categoryAllocations });
+    setTempTotalBudget(String(totalBudgetCap));
+    setIsBudgetModalOpen(true);
+  };
+
+  const handleSaveBudgetTargets = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBudgetSaving(true);
+    const totalCap = parseFloat(tempTotalBudget) || Object.values(tempAllocations).reduce((sum: number, v: any) => sum + (Number(v) || 0), 0);
+
+    const updatedBudget = {
+      id: currentBudgetId || `${adminId}_${selectedYear}`,
+      adminId,
+      totalBudget: totalCap,
+      electionYear: selectedYear,
+      allocations: tempAllocations
+    };
+
+    try {
+      await api.post('/api/finance/budgets', updatedBudget);
+      setCategoryAllocations(tempAllocations);
+      setTotalBudgetCap(totalCap);
+      setIsBudgetModalOpen(false);
+      showNotification('Campaign budget allocations and spending targets updated.', 'success');
+    } catch (err: any) {
+      console.error('Failed to update budget targets:', err);
+      showNotification(err?.message || 'Failed to update budget targets.', 'error');
+    } finally {
+      setBudgetSaving(false);
+    }
+  };
+
+  const handleDeleteTx = async (txId: string) => {
+    if (!hasRight('finance', 'd')) {
+      showNotification('You do not have permission to delete transaction records.', 'error');
+      return;
+    }
+    showConfirm(
+      'Delete Transaction Record',
+      'Are you sure you want to permanently delete this transaction record from the database?',
+      async () => {
+        try {
+          await api.delete(`/api/finance/transactions/${txId}`);
+          setTransactions(prev => prev.filter(t => t.id !== txId));
+          showNotification('Transaction record deleted successfully.', 'success');
+        } catch (err: any) {
+          console.error('Error deleting transaction:', err);
+          showNotification(err?.message || 'Failed to delete transaction.', 'error');
+        }
+      }
+    );
+  };
+
+  const handleDownloadCSV = () => {
+    const csvContent = "data:text/csv;charset=utf-8," 
+      + ["Title,Type,Category,Amount(INR),Date,Method,Donor Name,Notes"].join(",") + "\n"
+      + filteredTransactions.map(t => [
+          `"${t.title.replace(/"/g, '""')}"`,
+          t.type.toUpperCase(),
+          t.category,
+          t.amount,
+          t.date,
+          t.paymentMethod,
+          `"${(t.donorName || '').replace(/"/g, '""')}"`,
+          `"${(t.notes || '').replace(/"/g, '""')}"`
+        ].join(",")).join("\n");
+    
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+    link.setAttribute("download", `Campaign_Finance_Report_${adminName}_${selectedYear.replace(/\s+/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
   };
 
   const getChartData = () => {
@@ -348,197 +616,9 @@ export default function FinanceTracker() {
     }
   };
 
-  const handleOpenNewTx = (type: 'expense' | 'income') => {
-    setEditingTx(null);
-    setTxType(type);
-    setTxTitle('');
-    setTxAmount('');
-    setTxCategory(type === 'income' ? 'Income' : (customCategories[0] || 'General'));
-    setTxDate(new Date().toISOString().split('T')[0]);
-    setTxMethod('Online');
-    setTxDonorName('');
-    setTxNotes('');
-    setTxError('');
-    setIsTxModalOpen(true);
-  };
-
-  const handleEditTx = (tx: Transaction) => {
-    setEditingTx(tx);
-    setTxType(tx.type);
-    setTxTitle(tx.title);
-    setTxAmount(tx.amount.toString());
-    setTxCategory(tx.category);
-    setTxDate(tx.date);
-    setTxMethod(tx.paymentMethod);
-    setTxDonorName(tx.donorName || '');
-    setTxNotes(tx.notes || '');
-    setTxError('');
-    setIsTxModalOpen(true);
-  };
-
-  const handleSaveTx = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!txTitle.trim()) {
-      setTxError('Please enter a description for the transaction.');
-      return;
-    }
-    const amountVal = parseFloat(txAmount);
-    if (isNaN(amountVal) || amountVal <= 0) {
-      setTxError('Please enter a valid amount greater than zero.');
-      return;
-    }
-
-    setTxSaving(true);
-    setTxError('');
-
-    const txPayload = {
-      id: editingTx ? editingTx.id : `tx_${Date.now()}`,
-      adminId,
-      type: txType,
-      title: txTitle.trim(),
-      amount: amountVal,
-      category: txType === 'income' ? 'Income' : txCategory,
-      date: txDate,
-      paymentMethod: txMethod,
-      donorName: txType === 'income' ? txDonorName.trim() || 'Anonymous' : '',
-      notes: txNotes.trim()
-    };
-
-    try {
-      await api.post('/api/finance/transactions', txPayload);
-      if (editingTx) {
-        setTransactions(prev => prev.map(t => t.id === editingTx.id ? { ...t, ...txPayload } : t).sort((a, b) => b.date.localeCompare(a.date)));
-      } else {
-        setTransactions(prev => [txPayload, ...prev].sort((a, b) => b.date.localeCompare(a.date)));
-      }
-      setIsTxModalOpen(false);
-      setEditingTx(null);
-      setTxTitle('');
-      setTxAmount('');
-      setTxDonorName('');
-      setTxNotes('');
-      showNotification(editingTx ? 'Transaction updated successfully.' : 'Transaction recorded successfully.', 'success');
-    } catch (err: any) {
-      console.error('Error saving transaction:', err);
-      setTxError(err?.message || 'Failed to save transaction.');
-    } finally {
-      setTxSaving(false);
-    }
-  };
-
-  const handleAddCategory = async () => {
-    const trimmed = newCategoryName.trim();
-    if (!trimmed) return;
-    if (customCategories.includes(trimmed)) {
-      showNotification('This category already exists.', 'error');
-      return;
-    }
-
-    const updatedCats = [...customCategories, trimmed];
-    setCustomCategories(updatedCats);
-    setNewCategoryName('');
-
-    const defaultAllocations: Record<string, number> = {};
-    updatedCats.forEach(cat => {
-      defaultAllocations[cat] = 0;
-    });
-
-    const updatedBudget = {
-      id: `${adminId}_${selectedYear}`,
-      adminId,
-      totalBudget: 0,
-      electionYear: selectedYear,
-      allocations: defaultAllocations
-    };
-
-    try {
-      await api.post('/api/finance/budgets', updatedBudget);
-      showNotification('New category added successfully.', 'success');
-    } catch (err) {
-      console.error('Failed to save category:', err);
-    }
-  };
-
-  const handleDeleteCategory = async (catToDelete: string) => {
-    const isUsed = transactions.some(t => t.category === catToDelete);
-    if (isUsed) {
-      showNotification(`Cannot delete "${catToDelete}" because there are transaction records logged under this category. Please delete or re-categorize those transactions first.`, 'error');
-      return;
-    }
-
-    showConfirm(
-      'Delete Category',
-      `Are you sure you want to delete the category "${catToDelete}"?`,
-      async () => {
-        const updatedCats = customCategories.filter(c => c !== catToDelete);
-        setCustomCategories(updatedCats);
-
-        const defaultAllocations: Record<string, number> = {};
-        updatedCats.forEach(cat => {
-          defaultAllocations[cat] = 0;
-        });
-
-        const updatedBudget = {
-          id: `${adminId}_${selectedYear}`,
-          adminId,
-          totalBudget: 0,
-          electionYear: selectedYear,
-          allocations: defaultAllocations
-        };
-
-        try {
-          await api.post('/api/finance/budgets', updatedBudget);
-          showNotification('Category deleted successfully.', 'success');
-        } catch (err) {
-          console.error('Failed to delete category:', err);
-        }
-      }
-    );
-  };
-
-  const handleDeleteTx = async (txId: string) => {
-    showConfirm(
-      'Delete Transaction Record',
-      'Are you sure you want to permanently delete this transaction record from the database?',
-      async () => {
-        try {
-          await api.delete(`/api/finance/transactions/${txId}`);
-          setTransactions(prev => prev.filter(t => t.id !== txId));
-          showNotification('Transaction record deleted successfully.', 'success');
-        } catch (err: any) {
-          console.error('Error deleting transaction:', err);
-          showNotification(err?.message || 'Failed to delete transaction.', 'error');
-        }
-      }
-    );
-  };
-
-  const handleDownloadCSV = () => {
-    const csvContent = "data:text/csv;charset=utf-8," 
-      + ["Title,Type,Category,Amount(INR),Date,Method,Donor Name,Notes"].join(",") + "\n"
-      + transactions.map(t => [
-          `"${t.title.replace(/"/g, '""')}"`,
-          t.type.toUpperCase(),
-          t.category,
-          t.amount,
-          t.date,
-          t.paymentMethod,
-          `"${(t.donorName || '').replace(/"/g, '""')}"`,
-          `"${(t.notes || '').replace(/"/g, '""')}"`
-        ].join(",")).join("\n");
-    
-    const encodedUri = encodeURI(csvContent);
-    const link = document.createElement("a");
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `Campaign_Finance_Report_${adminName}_${selectedYear.replace(/\s+/g, '_')}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   // Filter and Search Transactions
   const filteredTransactions = transactions.filter(t => {
-    const matchesYear = t.date.substring(0, 4) === selectedYear;
+    const matchesYear = t.date.substring(0, 4) === yearNumStr || t.date.includes(yearNumStr);
     const matchesSearch = t.title.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           (t.notes || '').toLowerCase().includes(searchTerm.toLowerCase()) ||
                           (t.donorName || '').toLowerCase().includes(searchTerm.toLowerCase());
@@ -551,13 +631,25 @@ export default function FinanceTracker() {
 
   // Income Details
   const activeIncomesThisMonth = incomes.filter(t => {
-    const txMonth = t.date.substring(0, 7); // YYYY-MM
+    const txMonth = t.date.substring(0, 7);
     const currentMonth = new Date().toISOString().substring(0, 7);
     return txMonth === currentMonth;
   });
   
   const totalIncomeSources = new Set(incomes.map(i => i.donorName || 'Anonymous')).size;
   const avgIncomeAmount = incomes.length > 0 ? (totalIncome / incomes.length) : 0;
+
+  if (!hasRight('finance', 'v')) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[50vh] text-zinc-500 p-8 text-center bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800">
+        <ShieldAlert className="w-12 h-12 text-amber-500 mb-3" />
+        <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Finance Tracker Access Restricted</h3>
+        <p className="text-xs text-zinc-500 max-w-md mt-1">
+          You do not have view permissions for the Finance & Campaign Budget module. Please contact your administrator for access.
+        </p>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -581,38 +673,38 @@ export default function FinanceTracker() {
             Finance & Budget
           </h1>
           <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1 max-w-xl">
-            Personal workspace for **{adminName}** to track campaign funds, register income and expense transactions, and manage custom spending categories.
+            Personal workspace for <strong className="text-zinc-900 dark:text-white">{adminName}</strong> to track campaign funds, register income and expense transactions, and manage custom spending categories.
           </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-2.5">
+          {hasRight('finance', 'u') && (
+            <button
+              onClick={handleOpenBudgetModal}
+              className="flex items-center gap-2 px-3.5 py-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-sm"
+            >
+              <Sliders className="w-3.5 h-3.5 text-blue-500" />
+              Budget Allocations
+            </button>
+          )}
+
           <button
             onClick={() => setIsReportModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-sm animate-button-glow"
+            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-sm"
           >
             <Printer className="w-3.5 h-3.5" />
             Generate Report
           </button>
 
-          <button
-            onClick={() => {
-              setEditingTx(null);
-              setTxType('expense');
-              setTxTitle('');
-              setTxAmount('');
-              setTxCategory(customCategories[0] || 'Campaign Materials');
-              setTxDate(new Date().toISOString().split('T')[0]);
-              setTxMethod('Online');
-              setTxDonorName('');
-              setTxNotes('');
-              setTxError('');
-              setIsTxModalOpen(true);
-            }}
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-sm"
-          >
-            <Plus className="w-4 h-4" />
-            Add Transaction
-          </button>
+          {hasRight('finance', 'c') && (
+            <button
+              onClick={() => handleOpenNewTx('expense')}
+              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-sm"
+            >
+              <Plus className="w-4 h-4" />
+              Add Transaction
+            </button>
+          )}
         </div>
       </div>
 
@@ -900,7 +992,7 @@ export default function FinanceTracker() {
                       {/* X Axis label */}
                       <text
                         x={centerX}
-                        y="210"
+                        y={210}
                         textAnchor="middle"
                         className={`text-[10px] font-medium transition-colors duration-200 ${
                           isHovered 
@@ -955,39 +1047,51 @@ export default function FinanceTracker() {
           <div className="flex justify-between items-center border-b border-zinc-100 dark:border-zinc-800 pb-4">
             <div>
               <h2 className="text-base font-bold text-zinc-900 dark:text-white">
-                Custom Expense Categories
+                Custom Expense Categories & Targets
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                Manage, add, and review spending distribution across custom campaign categories.
+                Manage spending categories, budget caps, and live expense distribution.
               </p>
             </div>
+            {hasRight('finance', 'u') && (
+              <button
+                type="button"
+                onClick={handleOpenBudgetModal}
+                className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 cursor-pointer"
+              >
+                <Sliders className="w-3.5 h-3.5" />
+                Adjust Targets
+              </button>
+            )}
           </div>
 
           {/* Add Category Form */}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              placeholder="New Category (e.g. Social Media Ad)"
-              value={newCategoryName}
-              onChange={(e) => setNewCategoryName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleAddCategory();
-                }
-              }}
-              className="flex-1 px-3 py-2 border border-zinc-200 dark:border-zinc-800 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100"
-            />
-            <button
-              type="button"
-              onClick={handleAddCategory}
-              className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1 shrink-0"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              Add Category
-            </button>
-          </div>
+          {hasRight('finance', 'c') && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                placeholder="New Category (e.g. Social Media Ad)"
+                value={newCategoryName}
+                onChange={(e) => setNewCategoryName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleAddCategory();
+                  }
+                }}
+                className="flex-1 px-3 py-2 border border-zinc-200 dark:border-zinc-800 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100"
+              />
+              <button
+                type="button"
+                onClick={handleAddCategory}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-sm transition-all flex items-center gap-1 shrink-0"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                Add Category
+              </button>
+            </div>
+          )}
 
-          <div className="space-y-3.5 max-h-[400px] overflow-y-auto pr-1">
+          <div className="space-y-3 max-h-[400px] overflow-y-auto pr-1">
             {customCategories.length === 0 ? (
               <div className="text-center py-8 text-zinc-400 text-xs border border-dashed border-zinc-100 dark:border-zinc-800 rounded-xl">
                 No custom categories defined. Add one above to start tracking.
@@ -995,30 +1099,56 @@ export default function FinanceTracker() {
             ) : (
               customCategories.map((cat) => {
                 const spent = getCategorySpent(cat);
+                const cap = categoryAllocations[cat] || 0;
                 const count = expenses.filter(t => t.category === cat).length;
+                const percent = cap > 0 ? Math.min(100, Math.round((spent / cap) * 100)) : 0;
+                const isOver = cap > 0 && spent > cap;
 
                 return (
-                  <div key={cat} className="flex justify-between items-center p-3.5 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-zinc-100 dark:border-zinc-800/80 hover:border-zinc-200 dark:hover:border-zinc-700/60 transition-all">
-                    <div>
-                      <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{cat}</span>
-                      <div className="flex items-center gap-2 mt-1 text-[10px] text-zinc-400">
-                        <span>{count} {count === 1 ? 'transaction' : 'transactions'} logged</span>
+                  <div key={cat} className="p-3.5 bg-zinc-50 dark:bg-zinc-900/50 rounded-xl border border-zinc-100 dark:border-zinc-800/80 hover:border-zinc-200 dark:hover:border-zinc-700/60 transition-all space-y-2">
+                    <div className="flex justify-between items-center">
+                      <div>
+                        <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{cat}</span>
+                        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-zinc-400">
+                          <span>{count} {count === 1 ? 'transaction' : 'transactions'}</span>
+                          {cap > 0 && (
+                            <>
+                              <span>•</span>
+                              <span>Target Cap: {formatCurrency(cap)}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="text-right">
+                          <span className={`text-xs font-black block ${isOver ? 'text-red-600 dark:text-red-400' : 'text-zinc-950 dark:text-white'}`}>
+                            {formatCurrency(spent)}
+                          </span>
+                          <span className="text-[9px] text-zinc-400 uppercase tracking-wider block font-medium">
+                            {cap > 0 ? `${percent}% of cap` : 'total spent'}
+                          </span>
+                        </div>
+                        {hasRight('finance', 'd') && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteCategory(cat)}
+                            className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
+                            title="Delete Category"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-3">
-                      <div className="text-right">
-                        <span className="text-xs font-black text-zinc-950 dark:text-white block">{formatCurrency(spent)}</span>
-                        <span className="text-[9px] text-zinc-400 uppercase tracking-wider block font-medium">total spent</span>
+
+                    {cap > 0 && (
+                      <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                        <div 
+                          className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-red-500' : percent > 80 ? 'bg-amber-500' : 'bg-blue-600'}`}
+                          style={{ width: `${percent}%` }}
+                        />
                       </div>
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteCategory(cat)}
-                        className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-500/10 rounded-lg transition-all cursor-pointer"
-                        title="Delete Category"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
+                    )}
                   </div>
                 );
               })
@@ -1151,13 +1281,15 @@ export default function FinanceTracker() {
           </div>
 
           {/* Action buttons */}
-          <button
-            onClick={handleDownloadCSV}
-            className="flex items-center gap-2 px-3 py-1.5 border border-zinc-200 dark:border-zinc-800 text-xs font-semibold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-all cursor-pointer text-zinc-700 dark:text-zinc-300 shadow-sm"
-          >
-            <Download className="w-3.5 h-3.5" />
-            Export Excel/CSV
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleDownloadCSV}
+              className="flex items-center gap-2 px-3.5 py-1.5 border border-zinc-200 dark:border-zinc-800 text-xs font-semibold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-all cursor-pointer text-zinc-700 dark:text-zinc-300 shadow-sm"
+            >
+              <Download className="w-3.5 h-3.5" />
+              Export Excel/CSV
+            </button>
+          </div>
         </div>
 
         {/* Ledgers Filters Row */}
@@ -1215,8 +1347,8 @@ export default function FinanceTracker() {
         </div>
 
         {/* Transaction Table */}
-        <div className="overflow-x-auto rounded-xl border border-zinc-150 dark:border-zinc-800">
-          <table className="w-full text-left border-collapse">
+        <div className="overflow-x-auto custom-scrollbar rounded-xl border border-zinc-150 dark:border-zinc-800">
+          <table className="w-full text-left border-collapse min-w-[750px]">
             <thead>
               <tr className="bg-zinc-50 dark:bg-zinc-800/50 text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 border-b border-zinc-150 dark:border-zinc-800">
                 <th className="py-3 px-4">Title / Ledger</th>
@@ -1273,20 +1405,24 @@ export default function FinanceTracker() {
                       </td>
                       <td className="py-3 px-4 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
-                          <button
-                            onClick={() => handleEditClick(tx)}
-                            className="p-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-all cursor-pointer"
-                            title="Edit record"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleDeleteTx(tx.id)}
-                            className="p-1 text-red-500 hover:bg-red-500/10 rounded transition-all cursor-pointer"
-                            title="Delete record"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          {hasRight('finance', 'u') && (
+                            <button
+                              onClick={() => handleEditClick(tx)}
+                              className="p-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-all cursor-pointer"
+                              title="Edit record"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                          {hasRight('finance', 'd') && (
+                            <button
+                              onClick={() => handleDeleteTx(tx.id)}
+                              className="p-1 text-red-500 hover:bg-red-500/10 rounded transition-all cursor-pointer"
+                              title="Delete record"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1298,7 +1434,7 @@ export default function FinanceTracker() {
         </div>
       </div>
 
-      {/* MODAL 1: ADD TRANSACTION */}
+      {/* MODAL 1: ADD / EDIT TRANSACTION */}
       <AnimatePresence>
         {isTxModalOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
@@ -1323,7 +1459,7 @@ export default function FinanceTracker() {
               </div>
 
               {/* Form */}
-              <form onSubmit={handleAddTransaction} className="p-6 space-y-4">
+              <form onSubmit={handleSaveTx} className="p-6 space-y-4">
                 {txError && (
                   <div className="flex items-center gap-2 text-xs text-red-600 dark:text-red-400 bg-red-500/10 p-3 rounded-lg">
                     <AlertTriangle className="w-4 h-4 shrink-0" />
@@ -1337,7 +1473,7 @@ export default function FinanceTracker() {
                     type="button"
                     onClick={() => {
                       setTxType('expense');
-                      setTxCategory('Campaign Materials');
+                      setTxCategory(customCategories[0] || 'Campaign Materials');
                     }}
                     className={`py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
                       txType === 'expense' 
@@ -1497,6 +1633,92 @@ export default function FinanceTracker() {
         )}
       </AnimatePresence>
 
+      {/* MODAL 2: BUDGET ALLOCATIONS & TARGET CAPS */}
+      <AnimatePresence>
+        {isBudgetModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl w-full max-w-lg overflow-hidden"
+            >
+              <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-150 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/30">
+                <h3 className="text-base font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                  <Target className="w-4 h-4 text-blue-500" />
+                  Budget Allocations & Spending Targets ({selectedYear})
+                </h3>
+                <button
+                  onClick={() => setIsBudgetModalOpen(false)}
+                  className="p-1.5 text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveBudgetTargets} className="p-6 space-y-4">
+                <div>
+                  <label className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                    Overall Campaign Budget Cap (₹)
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={tempTotalBudget}
+                    onChange={(e) => setTempTotalBudget(e.target.value)}
+                    placeholder="e.g. 2500000"
+                    className="w-full px-3 py-2 border border-zinc-200 dark:border-zinc-800 text-xs rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100 font-bold"
+                  />
+                  <p className="text-[10px] text-zinc-400 mt-1">Total spending ceiling planned for election year {selectedYear}.</p>
+                </div>
+
+                <div className="space-y-3 pt-2">
+                  <label className="block text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                    Category Spending Targets
+                  </label>
+                  <div className="max-h-60 overflow-y-auto space-y-2.5 pr-1">
+                    {customCategories.map((cat) => (
+                      <div key={cat} className="flex items-center justify-between gap-3 p-2.5 bg-zinc-50 dark:bg-zinc-800/40 rounded-xl border border-zinc-150 dark:border-zinc-800">
+                        <span className="text-xs font-semibold text-zinc-800 dark:text-zinc-200 flex-1 truncate">{cat}</span>
+                        <div className="w-36 flex items-center gap-1">
+                          <span className="text-xs text-zinc-400">₹</span>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={tempAllocations[cat] ?? 0}
+                            onChange={(e) => setTempAllocations({ ...tempAllocations, [cat]: parseFloat(e.target.value) || 0 })}
+                            className="w-full px-2 py-1 border border-zinc-200 dark:border-zinc-700 text-xs rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 dark:bg-zinc-900 text-zinc-800 dark:text-zinc-100 text-right font-medium"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2.5 pt-4 border-t border-zinc-150 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    onClick={() => setIsBudgetModalOpen(false)}
+                    className="px-4 py-2 border border-zinc-200 dark:border-zinc-800 text-xs font-semibold rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={budgetSaving}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg disabled:opacity-50 transition-all cursor-pointer shadow-sm"
+                  >
+                    {budgetSaving ? 'Saving...' : 'Save Allocations'}
+                  </button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
       {/* MODAL 3: GENERATE REPORT (PRINT VIEW) */}
       <AnimatePresence>
         {isReportModalOpen && (
@@ -1574,17 +1796,20 @@ export default function FinanceTracker() {
                   <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">Category-wise Spending Distributions</h4>
                   <div className="border border-zinc-150 dark:border-zinc-800 rounded-xl overflow-hidden divide-y divide-zinc-150 dark:divide-zinc-800">
                     <div className="grid grid-cols-12 bg-zinc-50 dark:bg-zinc-800/30 p-3 text-[10px] font-bold uppercase text-zinc-500 dark:text-zinc-400">
-                      <div className="col-span-6">Category Name</div>
-                      <div className="col-span-3 text-right">Transactions</div>
+                      <div className="col-span-5">Category Name</div>
+                      <div className="col-span-2 text-right">Target Cap</div>
+                      <div className="col-span-2 text-right">Transactions</div>
                       <div className="col-span-3 text-right">Total Expensed</div>
                     </div>
                     {customCategories.map(cat => {
                       const spent = getCategorySpent(cat);
+                      const cap = categoryAllocations[cat] || 0;
                       const count = expenses.filter(t => t.category === cat).length;
                       return (
                         <div key={cat} className="grid grid-cols-12 p-3 text-xs">
-                          <div className="col-span-6 font-semibold text-zinc-900 dark:text-zinc-100">{cat}</div>
-                          <div className="col-span-3 text-right text-zinc-500">{count}</div>
+                          <div className="col-span-5 font-semibold text-zinc-900 dark:text-zinc-100">{cat}</div>
+                          <div className="col-span-2 text-right text-zinc-500">{cap > 0 ? formatCurrency(cap) : '-'}</div>
+                          <div className="col-span-2 text-right text-zinc-500">{count}</div>
                           <div className="col-span-3 text-right text-zinc-900 dark:text-zinc-100 font-semibold">{formatCurrency(spent)}</div>
                         </div>
                       );

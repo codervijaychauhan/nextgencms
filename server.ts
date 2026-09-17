@@ -70,6 +70,60 @@ function verifyLocalToken(token: string): any {
   return payload;
 }
 
+function buildSafeInClause(
+  rawVal: any,
+  colPrefix: string,
+  colExprs: string[],
+  params: Record<string, any>
+): string | null {
+  if (!rawVal || rawVal === 'all') return null;
+  const items = String(rawVal).split(',').map((s: string) => s.trim()).filter(Boolean);
+  if (items.length === 0) return null;
+  const paramNames = items.map((val: string, idx: number) => {
+    const pName = `${colPrefix}_${idx}`;
+    params[pName] = val;
+    return `@${pName}`;
+  });
+  const inList = paramNames.join(', ');
+  const orParts = colExprs.map(expr => `CAST(${expr} AS NVARCHAR(64)) IN (${inList})`);
+  return orParts.length === 1 ? orParts[0] : `(${orParts.join(' OR ')})`;
+}
+
+async function getRequesterInfo(reqUser: any): Promise<{ isSuperAdmin: boolean; userRow: any }> {
+  if (!reqUser) {
+    return { isSuperAdmin: false, userRow: null };
+  }
+
+  const email = (reqUser.email || '').toLowerCase().trim();
+  const uid = reqUser.uid || reqUser.user_id || reqUser.id || '';
+
+  // 1. Check if root super admin by owner email
+  if (email === 'vijaychauhanofficial01@gmail.com') {
+    return { isSuperAdmin: true, userRow: null };
+  }
+
+  // 2. Query user from database by email or id
+  let userRow: any = null;
+  if (email || uid) {
+    try {
+      const rows = await query(
+        `SELECT TOP 1 * FROM dbo.users WHERE (LOWER(email) = @email AND @email <> '') OR (id = @uid AND @uid <> '')`,
+        { email, uid }
+      );
+      if (rows && rows.length > 0) {
+        userRow = rows[0];
+      }
+    } catch (err) {
+      console.warn('[getRequesterInfo] user query notice:', err);
+    }
+  }
+
+  const role = userRow?.role || reqUser.role;
+  const isSuperAdmin = role === 'super_admin' || email === 'vijaychauhanofficial01@gmail.com';
+
+  return { isSuperAdmin, userRow };
+}
+
 // Auto-create users and user_invites tables if they don't exist
 async function ensureAuthTables() {
   try {
@@ -84,13 +138,26 @@ async function ensureAuthTables() {
           role VARCHAR(50) DEFAULT 'volunteer',
           assigned_booths NVARCHAR(MAX) NULL,
           rights NVARCHAR(MAX) DEFAULT '{}',
-          state_id VARCHAR(64) NULL,
-          district_id VARCHAR(64) NULL,
-          constituency_id VARCHAR(64) NULL,
+          state_id NVARCHAR(MAX) NULL,
+          district_id NVARCHAR(MAX) NULL,
+          constituency_id NVARCHAR(MAX) NULL,
+          bio NVARCHAR(MAX) NULL,
+          created_by NVARCHAR(255) NULL,
           disabled BIT NOT NULL DEFAULT 0,
           created_at DATETIME2 DEFAULT SYSUTCDATETIME()
         );
         CREATE UNIQUE INDEX idx_users_email ON dbo.users(email);
+      END
+      ELSE
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'bio')
+        BEGIN
+          ALTER TABLE dbo.users ADD bio NVARCHAR(MAX) NULL;
+        END
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'created_by')
+        BEGIN
+          ALTER TABLE dbo.users ADD created_by NVARCHAR(255) NULL;
+        END
       END
 
       IF OBJECT_ID(N'dbo.user_invites', N'U') IS NULL
@@ -116,8 +183,202 @@ async function ensureAuthTables() {
         CREATE INDEX idx_user_invites_token ON dbo.user_invites(token);
       END
     `);
+
+    // Ensure all required columns exist on dbo.users for older database schemas
+    await execute(`
+      IF OBJECT_ID(N'dbo.users', N'U') IS NOT NULL
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'state_id')
+          ALTER TABLE dbo.users ADD state_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'district_id')
+          ALTER TABLE dbo.users ADD district_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'constituency_id')
+          ALTER TABLE dbo.users ADD constituency_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'booth_id')
+          ALTER TABLE dbo.users ADD booth_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'assigned_booths')
+          ALTER TABLE dbo.users ADD assigned_booths NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'rights')
+          ALTER TABLE dbo.users ADD rights NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'election_settings')
+          ALTER TABLE dbo.users ADD election_settings NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'created_by')
+          ALTER TABLE dbo.users ADD created_by NVARCHAR(255) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'disabled')
+          ALTER TABLE dbo.users ADD disabled BIT NOT NULL DEFAULT 0;
+      END
+    `);
+
+    // Ensure Master Global Super Admin account vijaychauhanofficial01@gmail.com exists with full permissions
+    const superAdminEmail = 'vijaychauhanofficial01@gmail.com';
+    const fullPermissions = JSON.stringify({
+      voters: 'vcud',
+      volunteers: 'vcud',
+      mandals: 'vcud',
+      booths: 'vcud',
+      benefits: 'vcud',
+      finance: 'vcud',
+      whatsapp: 'vcud',
+      surveys: 'vcud',
+      predictions: 'vcud',
+      users: 'vcud',
+      survey_campaigns: 'vcud',
+      demographics: 'vcud',
+      elections: 'vcud'
+    });
+
+    const existingSuper = await query(`SELECT * FROM dbo.users WHERE LOWER(email) = @email`, { email: superAdminEmail });
+    if (existingSuper.length === 0) {
+      await execute(`
+        INSERT INTO dbo.users (id, email, password_hash, name, role, assigned_booths, rights, disabled)
+        VALUES ('usr_super_admin_vijay', @email, @pwd, 'Vijay Chauhan (Super Admin)', 'super_admin', '[]', @rights, 0)
+      `, {
+        email: superAdminEmail,
+        pwd: hashPassword('Vijay@2026#GlobalAdmin'),
+        rights: fullPermissions
+      });
+    } else {
+      await execute(`
+        UPDATE dbo.users 
+        SET role = 'super_admin', rights = @rights, disabled = 0 
+        WHERE LOWER(email) = @email
+      `, {
+        email: superAdminEmail,
+        rights: fullPermissions
+      });
+    }
   } catch (err) {
     console.warn('[Database] ensureAuthTables notice:', err);
+  }
+}
+
+async function ensureDemographicSchema() {
+  try {
+    await execute(`
+      IF OBJECT_ID(N'dbo.states', N'U') IS NOT NULL AND COL_LENGTH('dbo.states', 'created_by') IS NULL
+        ALTER TABLE dbo.states ADD created_by VARCHAR(128) NULL;
+
+      IF OBJECT_ID(N'dbo.districts', N'U') IS NOT NULL AND COL_LENGTH('dbo.districts', 'created_by') IS NULL
+        ALTER TABLE dbo.districts ADD created_by VARCHAR(128) NULL;
+
+      IF OBJECT_ID(N'dbo.constituencies', N'U') IS NOT NULL AND COL_LENGTH('dbo.constituencies', 'created_by') IS NULL
+        ALTER TABLE dbo.constituencies ADD created_by VARCHAR(128) NULL;
+
+      IF OBJECT_ID(N'dbo.mandals', N'U') IS NOT NULL AND COL_LENGTH('dbo.mandals', 'created_by') IS NULL
+        ALTER TABLE dbo.mandals ADD created_by VARCHAR(128) NULL;
+
+      IF OBJECT_ID(N'dbo.booths', N'U') IS NOT NULL AND COL_LENGTH('dbo.booths', 'created_by') IS NULL
+        ALTER TABLE dbo.booths ADD created_by VARCHAR(128) NULL;
+
+      IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL AND COL_LENGTH('dbo.voters', 'created_by') IS NULL
+        ALTER TABLE dbo.voters ADD created_by VARCHAR(128) NULL;
+
+      IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL AND COL_LENGTH('dbo.voters', 'aadhar_number') IS NULL
+        ALTER TABLE dbo.voters ADD aadhar_number VARCHAR(50) NULL;
+
+      -- Drop any legacy foreign keys on voter/survey/sentiment/volunteer tables that block column altering
+      DECLARE @dropSql NVARCHAR(MAX) = N'';
+      
+      SELECT @dropSql += N'ALTER TABLE ' + QUOTENAME(OBJECT_SCHEMA_NAME(parent_object_id)) + '.' + QUOTENAME(OBJECT_NAME(parent_object_id)) + ' DROP CONSTRAINT ' + QUOTENAME(name) + ';' + CHAR(10)
+      FROM sys.foreign_keys
+      WHERE parent_object_id IN (
+        OBJECT_ID('dbo.voter_sentiments'),
+        OBJECT_ID('dbo.volunteers'),
+        OBJECT_ID('dbo.benefits'),
+        OBJECT_ID('dbo.booth_agents'),
+        OBJECT_ID('dbo.mandal_members'),
+        OBJECT_ID('dbo.voters')
+      );
+
+      -- Drop any legacy non-primary key indexes on demographic ID columns
+      SELECT @dropSql += N'DROP INDEX ' + QUOTENAME(i.name) + N' ON ' + QUOTENAME(OBJECT_SCHEMA_NAME(i.object_id)) + '.' + QUOTENAME(OBJECT_NAME(i.object_id)) + ';' + CHAR(10)
+      FROM sys.indexes i
+      JOIN sys.index_columns ic ON i.object_id = ic.object_id AND i.index_id = ic.index_id
+      JOIN sys.columns c ON ic.object_id = c.object_id AND ic.column_id = c.column_id
+      WHERE i.object_id IN (
+        OBJECT_ID('dbo.voter_sentiments'),
+        OBJECT_ID('dbo.volunteers'),
+        OBJECT_ID('dbo.benefits'),
+        OBJECT_ID('dbo.booth_agents'),
+        OBJECT_ID('dbo.mandal_members'),
+        OBJECT_ID('dbo.voters')
+      ) AND c.name IN ('voter_id', 'voter_doc_id', 'witness_voter_doc_id', 'witness_voter_id', 'agent_volunteer_id', 'election_id', 'favored_party_id', 'booth_id', 'mandal_id', 'constituency_id', 'state_id', 'district_id')
+        AND i.is_primary_key = 0;
+
+      IF LEN(@dropSql) > 0
+      BEGIN
+        BEGIN TRY
+          EXEC sp_executesql @dropSql;
+        END TRY
+        BEGIN CATCH END CATCH
+      END
+
+      -- Ensure columns exist and are typed as VARCHAR
+      IF OBJECT_ID(N'dbo.voter_sentiments', N'U') IS NOT NULL
+      BEGIN
+        IF COL_LENGTH('dbo.voter_sentiments', 'survey_id') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD survey_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'survey_title') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD survey_title VARCHAR(255) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'custom_answers') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD custom_answers NVARCHAR(MAX) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'state_id') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD state_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'district_id') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD district_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'booth_id') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD booth_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'mobile') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD mobile VARCHAR(50) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'email') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD email VARCHAR(255) NULL;
+        IF COL_LENGTH('dbo.voter_sentiments', 'aadhar_number') IS NULL
+          ALTER TABLE dbo.voter_sentiments ADD aadhar_number VARCHAR(50) NULL;
+
+        BEGIN TRY ALTER TABLE dbo.voter_sentiments ALTER COLUMN favored_party_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.voter_sentiments ALTER COLUMN voter_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.voter_sentiments ALTER COLUMN election_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+      END
+
+      IF OBJECT_ID(N'dbo.volunteers', N'U') IS NOT NULL
+      BEGIN
+        BEGIN TRY ALTER TABLE dbo.volunteers ALTER COLUMN voter_doc_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.volunteers ALTER COLUMN voter_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.volunteers ALTER COLUMN assigned_booth_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+      END
+
+      IF OBJECT_ID(N'dbo.benefits', N'U') IS NOT NULL
+      BEGIN
+        BEGIN TRY ALTER TABLE dbo.benefits ALTER COLUMN voter_doc_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.benefits ALTER COLUMN voter_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.benefits ALTER COLUMN witness_voter_doc_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.benefits ALTER COLUMN witness_voter_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+      END
+
+      IF OBJECT_ID(N'dbo.booth_agents', N'U') IS NOT NULL
+      BEGIN
+        BEGIN TRY ALTER TABLE dbo.booth_agents ALTER COLUMN agent_volunteer_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.booth_agents ALTER COLUMN booth_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+      END
+
+      IF OBJECT_ID(N'dbo.mandal_members', N'U') IS NOT NULL
+      BEGIN
+        BEGIN TRY ALTER TABLE dbo.mandal_members ALTER COLUMN voter_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.mandal_members ALTER COLUMN mandal_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+      END
+
+      IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL
+      BEGIN
+        BEGIN TRY ALTER TABLE dbo.voters ALTER COLUMN voter_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.voters ALTER COLUMN booth_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.voters ALTER COLUMN mandal_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.voters ALTER COLUMN constituency_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.voters ALTER COLUMN state_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+        BEGIN TRY ALTER TABLE dbo.voters ALTER COLUMN district_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+      END
+    `);
+  } catch (err) {
+    console.warn('[Database] ensureDemographicSchema notice:', err);
   }
 }
 
@@ -128,8 +389,9 @@ async function startServer() {
   app.use(express.json({ limit: '50mb' }));
   app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-  // Run ensureAuthTables on startup
+  // Run schema checks on startup
   ensureAuthTables().catch(() => {});
+  ensureDemographicSchema().catch(() => {});
 
   // Middleware to authenticate requests via Firebase ID Token or Local Token
   const authenticateUser = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -206,6 +468,43 @@ async function startServer() {
   };
 
   // ============================================================================
+  // 0. Database Health Check & Diagnostics
+  // ============================================================================
+  app.get("/api/health/db", async (req, res) => {
+    try {
+      const dbInfo = await query(`
+        SELECT 
+          DB_NAME() as [database],
+          SUSER_SNAME() as [connected_user],
+          (SELECT COUNT(*) FROM dbo.users) as [total_users]
+      `);
+
+      const users = await query(`SELECT TOP 5 id, email, name, role, created_at FROM dbo.users ORDER BY created_at DESC`);
+
+      res.json({
+        status: 'CONNECTED_AND_SYNCED',
+        message: 'Successfully communicating with local Microsoft SQL Server database',
+        connection: dbInfo[0],
+        totalUsersInDatabase: dbInfo[0]?.total_users || 0,
+        recentUsers: users
+      });
+    } catch (err: any) {
+      res.status(500).json({
+        status: 'DISCONNECTED',
+        message: 'Unable to communicate with local Microsoft SQL Server database',
+        errorCode: err.code || 'ELOGIN',
+        errorDetails: err.message?.split('\n')[0] || 'Login failed for user election_user',
+        quickFixSteps: [
+          "1. Open SQL Server Management Studio (SSMS).",
+          "2. Connect to your SQL Server (Windows Authentication).",
+          "3. Open and Execute C:\\nextgencms\\setup_nextgencms_mssql.sql",
+          "4. Refresh http://localhost:3000/api/health/db"
+        ]
+      });
+    }
+  });
+
+  // ============================================================================
   // 1. Auth & User Profile Sync with SQL Server
   // ============================================================================
 
@@ -224,14 +523,14 @@ async function startServer() {
       const defaultRights = isSuperAdmin 
         ? JSON.stringify({
             voters: 'vcud', users: 'vcud', demographics: 'vcud', elections: 'vcud',
-            surveys: 'vcud', volunteers: 'vcud', booths: 'vcud', benefits: 'vcud',
+            surveys: 'vcud', survey_campaigns: 'vcud', volunteers: 'vcud', booths: 'vcud', benefits: 'vcud',
             finance: 'vcud', whatsapp: 'vcud', mandals: 'vcud', predictions: 'vcud'
           })
         : JSON.stringify({});
 
-      // Check for pending invite
-      let assignedRole = isSuperAdmin ? 'super_admin' : 'volunteer';
-      let assignedRights = defaultRights;
+      // Default role & permissions: Super Admin gets full rights, new users get 'guest' with NO permissions unless invited
+      let assignedRole = isSuperAdmin ? 'super_admin' : 'guest';
+      let assignedRights = isSuperAdmin ? defaultRights : '{}';
       let assignedBooths = '[]';
       let assignedStateId = null;
       let assignedDistrictId = null;
@@ -300,7 +599,15 @@ async function startServer() {
         role: userProfile.role,
         permissions: rightsObj,
         rights: rightsObj,
+        state_id: userProfile.state_id || '',
+        district_id: userProfile.district_id || '',
+        constituency_id: userProfile.constituency_id || '',
+        stateId: userProfile.state_id || '',
+        districtId: userProfile.district_id || '',
+        constituencyId: userProfile.constituency_id || '',
+        boothId: Array.isArray(assignedBoothsArr) ? assignedBoothsArr.join(',') : (userProfile.assigned_booths || ''),
         assigned_booths: assignedBoothsArr,
+        bio: userProfile.bio || '',
         disabled: Boolean(userProfile.disabled),
         created_at: userProfile.created_at
       });
@@ -312,7 +619,7 @@ async function startServer() {
       const defaultRights = isSuperAdmin 
         ? {
             voters: 'vcud', users: 'vcud', demographics: 'vcud', elections: 'vcud',
-            surveys: 'vcud', volunteers: 'vcud', booths: 'vcud', benefits: 'vcud',
+            surveys: 'vcud', survey_campaigns: 'vcud', volunteers: 'vcud', booths: 'vcud', benefits: 'vcud',
             finance: 'vcud', whatsapp: 'vcud', mandals: 'vcud', predictions: 'vcud'
           }
         : {};
@@ -338,27 +645,37 @@ async function startServer() {
       await ensureAuthTables();
       const { email, password } = req.body;
       if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required' });
+        return res.status(400).json({ error: 'Email and password are required.' });
       }
 
-      const users = await query(`SELECT * FROM dbo.users WHERE email = @email`, { email: email.trim().toLowerCase() });
+      const cleanEmail = email.trim().toLowerCase();
+      const users = await query(`SELECT * FROM dbo.users WHERE email = @email`, { email: cleanEmail });
       if (users.length === 0) {
-        return res.status(401).json({ error: 'No account found with this email in the database. Please sign up or continue with Google.' });
+        return res.status(401).json({ error: 'No account found with this email. Please check your email or sign up.' });
       }
 
       const user = users[0];
       if (user.disabled) {
-        return res.status(403).json({ error: 'This account has been disabled. Please contact your administrator.' });
+        return res.status(403).json({ error: 'This account has been disabled. Please contact your system administrator.' });
+      }
+
+      if (user.password_hash === 'pending_invite') {
+        return res.status(401).json({ 
+          error: 'Your invitation is pending password setup. Please click the invitation link sent to your email or use "Forgot Password" to set a password.' 
+        });
+      }
+
+      if (user.password_hash === 'firebase_oauth') {
+        return res.status(401).json({ 
+          error: 'This account was registered using Google Sign-In. Please click "Continue with Google" or set a password via "Forgot Password".' 
+        });
       }
 
       const hashed = hashPassword(password);
-      const isMatch = (user.password_hash === hashed) || 
-                      (user.password_hash === password) ||
-                      (user.password_hash === 'firebase_oauth' && password === 'Initial@12345') ||
-                      (user.password_hash === 'pending_invite');
+      const isMatch = (user.password_hash === hashed);
 
       if (!isMatch) {
-        return res.status(401).json({ error: 'Invalid password. If you originally signed in with Google, please continue with Google or reset your password.' });
+        return res.status(401).json({ error: 'Invalid email or password. Please verify your credentials and try again.' });
       }
 
       let rightsObj = {};
@@ -410,7 +727,7 @@ async function startServer() {
       await execute(`UPDATE dbo.users SET password_hash = @hash WHERE id = @id OR email = @email`, {
         hash: hashed,
         id: user.uid,
-        email: user.email || ''
+        email: (user.email || '').trim().toLowerCase()
       });
 
       res.json({ success: true, message: 'Password updated successfully in database.' });
@@ -419,11 +736,145 @@ async function startServer() {
     }
   });
 
+  // Sync password from Firebase Auth reset flow to SQL Server dbo.users table
+  app.post("/api/auth/sync-password", async (req, res) => {
+    try {
+      await ensureAuthTables();
+      const { email, password, newPassword } = req.body;
+      const pwd = newPassword || password;
+      if (!email || !pwd || pwd.length < 6) {
+        return res.status(400).json({ error: 'Valid email and password (min 6 characters) are required.' });
+      }
+
+      const cleanEmail = String(email).trim().toLowerCase();
+      const hashed = hashPassword(pwd);
+
+      const existing = await query(`SELECT * FROM dbo.users WHERE email = @email`, { email: cleanEmail });
+      if (existing.length > 0) {
+        await execute(`UPDATE dbo.users SET password_hash = @hash WHERE email = @email`, {
+          hash: hashed,
+          email: cleanEmail
+        });
+      } else {
+        const newId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+        await execute(
+          `INSERT INTO dbo.users (id, email, password_hash, name, role, assigned_booths, rights, disabled)
+           VALUES (@id, @email, @password_hash, @name, 'volunteer', '[]', '{}', 0)`,
+          {
+            id: newId,
+            email: cleanEmail,
+            password_hash: hashed,
+            name: cleanEmail.split('@')[0]
+          }
+        );
+      }
+
+      res.json({ success: true, message: 'Password synchronized with SQL Server database.' });
+    } catch (error: any) {
+      console.error('Password sync error:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Admin Manual Password Reset (updates both Firebase Auth and SQL Server dbo.users)
+  app.post("/api/admin/reset-password", authenticateUser, async (req, res) => {
+    try {
+      await ensureAuthTables();
+      const caller = (req as any).user;
+      const { uid, email, newPassword, password } = req.body;
+      const pwd = newPassword || password;
+
+      if (!pwd || pwd.length < 6) {
+        return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
+      }
+
+      const targetIdentifier = uid || email;
+      if (!targetIdentifier) {
+        return res.status(400).json({ error: 'User UID or email is required.' });
+      }
+
+      // Find user in dbo.users
+      const users = await query(
+        `SELECT * FROM dbo.users WHERE id = @target OR email = @target`,
+        { target: targetIdentifier }
+      );
+
+      const targetEmail = users.length > 0 ? users[0].email : (email || null);
+      const targetId = users.length > 0 ? users[0].id : (uid || null);
+
+      // 1. Update in Firebase Auth
+      let fbUpdated = false;
+      try {
+        if (targetId && !targetId.startsWith('usr_')) {
+          await auth.updateUser(targetId, { password: pwd });
+          fbUpdated = true;
+        } else if (targetEmail) {
+          try {
+            const fbUser = await auth.getUserByEmail(targetEmail);
+            await auth.updateUser(fbUser.uid, { password: pwd });
+            fbUpdated = true;
+          } catch (getErr: any) {
+            if (getErr.code === 'auth/user-not-found') {
+              await auth.createUser({
+                email: targetEmail,
+                password: pwd,
+                displayName: users[0]?.name || targetEmail.split('@')[0]
+              });
+              fbUpdated = true;
+            }
+          }
+        }
+      } catch (fbErr) {
+        console.warn('[Firebase Admin] Warning updating user password in Firebase:', fbErr);
+      }
+
+      // 2. Update in SQL Server dbo.users
+      const hashed = hashPassword(pwd);
+      if (targetEmail) {
+        await execute(`UPDATE dbo.users SET password_hash = @hash WHERE email = @email OR id = @id`, {
+          hash: hashed,
+          email: targetEmail,
+          id: targetId || ''
+        });
+      }
+
+      res.json({ 
+        success: true, 
+        message: fbUpdated 
+          ? 'Password updated in both Firebase Auth and SQL Server database.' 
+          : 'Password updated in SQL Server database.' 
+      });
+    } catch (error: any) {
+      console.error('Admin reset password error:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  const getRequesterInfo = async (reqUser: any) => {
+    const reqUid = reqUser?.uid || reqUser?.user_id || reqUser?.sub || '';
+    const reqEmail = (reqUser?.email || '').toLowerCase();
+    const users = await query(`SELECT * FROM dbo.users WHERE id = @id OR LOWER(email) = @email`, { id: reqUid, email: reqEmail });
+    const userRow = users[0];
+    const role = userRow?.role || 'guest';
+    const isSuperAdmin = role === 'super_admin' || reqEmail === 'vijaychauhanofficial01@gmail.com';
+    const isAdmin = isSuperAdmin || role === 'admin';
+    return { reqUid, reqEmail, userRow, role, isSuperAdmin, isAdmin };
+  };
+
   // Invite User & Generate Invite Link
   app.post("/api/users/invite", authenticateUser, async (req, res) => {
     try {
       await ensureAuthTables();
       const sender = (req as any).user;
+      const { reqUid, reqEmail, isSuperAdmin, isAdmin, userRow } = await getRequesterInfo(sender);
+      let senderPerms: Record<string, string> = {};
+      try { senderPerms = userRow?.rights ? (typeof userRow.rights === 'string' ? JSON.parse(userRow.rights) : userRow.rights) : {}; } catch {}
+      const hasUserCreate = isAdmin || (senderPerms['users'] && senderPerms['users'].includes('c'));
+      
+      if (!hasUserCreate) {
+        return res.status(403).json({ error: 'Forbidden: Insufficient privileges to invite users.' });
+      }
+
       const { 
         name, 
         email, 
@@ -441,20 +892,72 @@ async function startServer() {
         return res.status(400).json({ error: 'Name and email are required to generate an invitation.' });
       }
 
-      const token = crypto.randomBytes(24).toString('hex');
-      const inviteId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-      const rightsJson = JSON.stringify(permissions || rights || {});
-      const assignedBoothsJson = JSON.stringify(assigned_booths || (booth_id ? [booth_id] : []));
+      const cleanEmail = email.trim().toLowerCase();
 
-      // Insert invite
+      // Regular Admin cannot assign Super Admin or Admin roles
+      let targetRole = role;
+      if (!isSuperAdmin && (targetRole === 'super_admin' || targetRole === 'admin')) {
+        return res.status(403).json({ error: 'Only Super Admin can assign Admin or Super Admin roles.' });
+      }
+
+      // Filter permissions: Regular Admin cannot grant admin-related module rights
+      let safePermissions = { ...(permissions || rights || {}) };
+      if (!isSuperAdmin) {
+        const adminModules = ['users', 'survey_campaigns', 'demographics', 'elections'];
+        adminModules.forEach(m => delete safePermissions[m]);
+      }
+
+      const token = Buffer.from(crypto.randomBytes(24)).toString('hex');
+      const inviteId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const rightsJson = JSON.stringify(safePermissions);
+      const assignedBoothsJson = JSON.stringify(assigned_booths || (booth_id ? [booth_id] : []));
+      const creatorIdentifier = reqUid || reqEmail || sender.uid || sender.email;
+
+      // 1. Ensure user exists in Firebase Auth so password reset & invitations work seamlessly
+      let firebaseUid = null;
+      let firebaseResetLink = null;
+      try {
+        let fbUser;
+        try {
+          fbUser = await auth.getUserByEmail(cleanEmail);
+        } catch (err: any) {
+          if (err.code === 'auth/user-not-found') {
+            fbUser = await auth.createUser({
+              email: cleanEmail,
+              displayName: name,
+              emailVerified: false
+            });
+          }
+        }
+        if (fbUser) {
+          firebaseUid = fbUser.uid;
+          try {
+            const host = req.get('host') || 'localhost:3000';
+            const protocol = req.protocol || 'http';
+            const actionCodeSettings = {
+              url: `${protocol}://${host}/reset-password`,
+              handleCodeInApp: true
+            };
+            firebaseResetLink = await auth.generatePasswordResetLink(cleanEmail, actionCodeSettings);
+          } catch {
+            try {
+              firebaseResetLink = await auth.generatePasswordResetLink(cleanEmail);
+            } catch {}
+          }
+        }
+      } catch (fbErr) {
+        console.warn('[Firebase Admin] Warning pre-creating user in Firebase Auth:', fbErr);
+      }
+
+      // 2. Insert invite in SQL Server
       await execute(`
         INSERT INTO dbo.user_invites (id, email, name, role, assigned_booths, rights, state_id, district_id, constituency_id, booth_id, token, status, created_by)
         VALUES (@id, @email, @name, @role, @assigned_booths, @rights, @state_id, @district_id, @constituency_id, @booth_id, @token, 'pending', @created_by)
       `, {
         id: inviteId,
-        email: email.trim().toLowerCase(),
+        email: cleanEmail,
         name,
-        role,
+        role: targetRole,
         assigned_booths: assignedBoothsJson,
         rights: rightsJson,
         state_id,
@@ -462,54 +965,62 @@ async function startServer() {
         constituency_id,
         booth_id,
         token,
-        created_by: sender.uid || sender.email
+        created_by: creatorIdentifier
       });
 
-      // Also create or pre-populate user in dbo.users
-      const existingUser = await query(`SELECT * FROM dbo.users WHERE email = @email`, { email: email.trim().toLowerCase() });
+      // 3. Create or update user in dbo.users
+      const existingUser = await query(`SELECT * FROM dbo.users WHERE LOWER(email) = @email`, { email: cleanEmail });
+      const finalUserId = firebaseUid || (existingUser.length > 0 ? existingUser[0].id : `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`);
+
       if (existingUser.length === 0) {
-        const userId = `usr_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
         await execute(`
-          INSERT INTO dbo.users (id, email, password_hash, name, role, assigned_booths, rights, state_id, district_id, constituency_id, disabled)
-          VALUES (@id, @email, @password_hash, @name, @role, @assigned_booths, @rights, @state_id, @district_id, @constituency_id, 0)
+          INSERT INTO dbo.users (id, email, password_hash, name, role, assigned_booths, rights, state_id, district_id, constituency_id, created_by, disabled)
+          VALUES (@id, @email, @password_hash, @name, @role, @assigned_booths, @rights, @state_id, @district_id, @constituency_id, @created_by, 0)
         `, {
-          id: userId,
-          email: email.trim().toLowerCase(),
+          id: finalUserId,
+          email: cleanEmail,
           password_hash: 'pending_invite',
           name,
-          role,
+          role: targetRole,
           assigned_booths: assignedBoothsJson,
           rights: rightsJson,
           state_id,
           district_id,
-          constituency_id
+          constituency_id,
+          created_by: creatorIdentifier
         });
       } else {
         await execute(`
           UPDATE dbo.users 
-          SET role = @role, rights = @rights, assigned_booths = @assigned_booths
-          WHERE email = @email
+          SET role = @role, rights = @rights, assigned_booths = @assigned_booths, state_id = @state_id, district_id = @district_id, constituency_id = @constituency_id
+          WHERE LOWER(email) = @email
         `, {
-          role,
+          role: targetRole,
           rights: rightsJson,
           assigned_booths: assignedBoothsJson,
-          email: email.trim().toLowerCase()
+          state_id,
+          district_id,
+          constituency_id,
+          email: cleanEmail
         });
       }
 
       const host = req.get('host') || 'localhost:3000';
       const protocol = req.protocol || 'http';
-      const inviteLink = `${protocol}://${host}/login?email=${encodeURIComponent(email)}&invite=${token}`;
+      const localInviteLink = `${protocol}://${host}/login?email=${encodeURIComponent(cleanEmail)}&invite=${token}`;
+      const effectiveLink = firebaseResetLink || localInviteLink;
 
       res.json({
         success: true,
-        message: `Invitation generated successfully for ${email}`,
+        message: `Invitation registered successfully for ${cleanEmail}`,
         inviteId,
         token,
-        inviteLink,
-        email: email.trim().toLowerCase(),
+        inviteLink: effectiveLink,
+        localInviteLink,
+        firebaseResetLink,
+        email: cleanEmail,
         name,
-        role
+        role: targetRole
       });
     } catch (error: any) {
       console.error('Error creating user invite:', error);
@@ -521,7 +1032,8 @@ async function startServer() {
   app.get("/api/auth/me", authenticateUser, async (req, res) => {
     try {
       const user = (req as any).user;
-      const users = await query(`SELECT * FROM dbo.users WHERE id = @id OR email = @email`, { id: user.uid, email: user.email || '' });
+      const reqEmail = (user.email || '').toLowerCase();
+      const users = await query(`SELECT * FROM dbo.users WHERE id = @id OR LOWER(email) = @email`, { id: user.uid, email: reqEmail });
       if (users.length === 0) {
         return res.status(404).json({ error: 'User not found in SQL database' });
       }
@@ -530,6 +1042,8 @@ async function startServer() {
       try { rightsObj = u.rights ? JSON.parse(u.rights) : {}; } catch {}
       let assignedBooths = [];
       try { assignedBooths = u.assigned_booths ? JSON.parse(u.assigned_booths) : []; } catch {}
+      let electionSettingsObj = {};
+      try { electionSettingsObj = u.election_settings ? JSON.parse(u.election_settings) : {}; } catch {}
 
       res.json({
         uid: u.id,
@@ -540,7 +1054,17 @@ async function startServer() {
         role: u.role,
         permissions: rightsObj,
         rights: rightsObj,
+        state_id: u.state_id || '',
+        district_id: u.district_id || '',
+        constituency_id: u.constituency_id || '',
+        stateId: u.state_id || '',
+        districtId: u.district_id || '',
+        constituencyId: u.constituency_id || '',
+        boothId: Array.isArray(assignedBooths) ? assignedBooths.join(',') : (u.assigned_booths || ''),
         assigned_booths: assignedBooths,
+        election_settings: electionSettingsObj,
+        electionSettings: electionSettingsObj,
+        bio: u.bio || '',
         disabled: Boolean(u.disabled),
         created_at: u.created_at
       });
@@ -552,12 +1076,39 @@ async function startServer() {
   // User Management CRUD
   app.get("/api/users", authenticateUser, async (req, res) => {
     try {
-      const users = await query(`SELECT id, email, name, role, rights, assigned_booths, disabled, created_at FROM dbo.users ORDER BY created_at DESC`);
+      const { reqUid, reqEmail, isSuperAdmin, isAdmin, userRow } = await getRequesterInfo((req as any).user);
+      let permissions: Record<string, string> = {};
+      try { permissions = userRow?.rights ? (typeof userRow.rights === 'string' ? JSON.parse(userRow.rights) : userRow.rights) : {}; } catch {}
+      const hasUserView = isAdmin || (permissions['users'] && permissions['users'].includes('v'));
+
+      if (!hasUserView) {
+        return res.status(403).json({ error: 'Forbidden: Insufficient privileges to view users' });
+      }
+
+      let users;
+      if (isSuperAdmin) {
+        // Super Admin sees ALL users in the entire system
+        users = await query(`SELECT id, email, name, role, rights, assigned_booths, disabled, state_id, district_id, constituency_id, booth_id, election_settings, bio, created_by, created_at FROM dbo.users ORDER BY created_at DESC`);
+      } else {
+        // Regular Admin sees users created by them OR subordinates (volunteers, managers, guests) - but not other admins/super admins
+        users = await query(`
+          SELECT id, email, name, role, rights, assigned_booths, disabled, state_id, district_id, constituency_id, booth_id, election_settings, bio, created_by, created_at 
+          FROM dbo.users 
+          WHERE (id = @reqUid OR LOWER(email) = @reqEmail)
+             OR (created_by = @reqUid OR LOWER(created_by) = @reqEmail)
+             OR (role IN ('volunteer', 'manager', 'guest') AND (created_by IS NULL OR created_by = ''))
+          ORDER BY created_at DESC
+        `, { reqUid, reqEmail });
+      }
+
       const formatted = users.map(u => {
         let permissions = {};
-        try { permissions = u.rights ? JSON.parse(u.rights) : {}; } catch {}
-        let assignedBooths = [];
-        try { assignedBooths = u.assigned_booths ? JSON.parse(u.assigned_booths) : []; } catch {}
+        try { permissions = u.rights ? (typeof u.rights === 'string' ? JSON.parse(u.rights) : u.rights) : {}; } catch {}
+        let assignedBooths: string[] = [];
+        try { assignedBooths = u.assigned_booths ? (typeof u.assigned_booths === 'string' ? JSON.parse(u.assigned_booths) : u.assigned_booths) : []; } catch {}
+        let electionSettingsObj = {};
+        try { electionSettingsObj = u.election_settings ? JSON.parse(u.election_settings) : {}; } catch {}
+
         return {
           id: u.id,
           uid: u.id,
@@ -566,7 +1117,16 @@ async function startServer() {
           name: u.name,
           role: u.role,
           permissions,
-          assigned_booths: assignedBooths,
+          rights: permissions,
+          bio: u.bio || '',
+          createdBy: u.created_by || '',
+          stateId: u.state_id || '',
+          districtId: u.district_id || '',
+          constituencyId: u.constituency_id || '',
+          boothId: Array.isArray(assignedBooths) && assignedBooths.length > 0 ? assignedBooths.join(',') : (u.booth_id || u.assigned_booths || ''),
+          assigned_booths: Array.isArray(assignedBooths) ? assignedBooths : [],
+          election_settings: electionSettingsObj,
+          electionSettings: electionSettingsObj,
           disabled: Boolean(u.disabled),
           created_at: u.created_at
         };
@@ -580,19 +1140,111 @@ async function startServer() {
   app.put("/api/users/:id", authenticateUser, async (req, res) => {
     try {
       const { id } = req.params;
-      const { role, name, permissions, disabled, assigned_booths } = req.body;
-      const rightsJson = permissions ? JSON.stringify(permissions) : null;
-      const assignedBoothsJson = assigned_booths ? JSON.stringify(assigned_booths) : null;
+      const { reqUid, reqEmail, isSuperAdmin, isAdmin, userRow } = await getRequesterInfo((req as any).user);
+      let senderPermissions: Record<string, string> = {};
+      try { senderPermissions = userRow?.rights ? (typeof userRow.rights === 'string' ? JSON.parse(userRow.rights) : userRow.rights) : {}; } catch {}
+      const hasUserUpdate = isAdmin || (senderPermissions['users'] && senderPermissions['users'].includes('u'));
+
+      if (!hasUserUpdate) {
+        return res.status(403).json({ error: 'Forbidden: Insufficient privileges' });
+      }
+
+      const targetUsers = await query(`SELECT * FROM dbo.users WHERE id = @id OR LOWER(email) = LOWER(@id)`, { id });
+      if (targetUsers.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      const target = targetUsers[0];
+      const targetId = target.id;
+
+      // Scoping security: regular admin cannot modify other Admins or Super Admins
+      if (!isSuperAdmin) {
+        if ((target.role === 'super_admin' || target.role === 'admin') && target.id !== reqUid && target.email?.toLowerCase() !== reqEmail) {
+          return res.status(403).json({ error: 'Only Super Admin can modify other Admin or Super Admin accounts.' });
+        }
+        if (req.body.role && (req.body.role === 'super_admin' || req.body.role === 'admin') && target.role !== req.body.role) {
+          return res.status(403).json({ error: 'Only Super Admin can assign Admin or Super Admin roles.' });
+        }
+      }
+
+      const { role, name, bio, permissions, rights, disabled, assigned_booths, state_id, district_id, constituency_id, booth_id, election_settings, electionSettings } = req.body;
+      const permsData = permissions !== undefined ? permissions : rights;
+      let rightsJson = null;
+
+      if (permsData !== undefined) {
+        let permsObj = typeof permsData === 'string' ? JSON.parse(permsData) : { ...permsData };
+        if (!isSuperAdmin) {
+          // Preserve existing admin module permissions from target user so regular admin cannot alter them
+          let existingPerms: Record<string, string> = {};
+          try { existingPerms = target.rights ? (typeof target.rights === 'string' ? JSON.parse(target.rights) : target.rights) : {}; } catch {}
+          const adminModules = ['users', 'survey_campaigns', 'demographics', 'elections'];
+          adminModules.forEach(m => {
+            if (existingPerms[m]) {
+              permsObj[m] = existingPerms[m];
+            } else {
+              delete permsObj[m];
+            }
+          });
+        }
+        rightsJson = JSON.stringify(permsObj);
+      }
+
+      const boothsData = assigned_booths !== undefined ? assigned_booths : (booth_id !== undefined ? (booth_id ? String(booth_id).split(',').map((s: string) => s.trim()).filter(Boolean) : []) : undefined);
+      const assignedBoothsJson = boothsData !== undefined ? (typeof boothsData === 'string' ? boothsData : JSON.stringify(boothsData)) : null;
+      const boothIdStr = booth_id !== undefined ? (booth_id || null) : (Array.isArray(boothsData) && boothsData.length > 0 ? boothsData.join(',') : null);
+
+      // Consolidate election settings JSON
+      const rawElectSettings = election_settings !== undefined ? election_settings : electionSettings;
+      let electionSettingsJson: string | null = null;
+      if (rawElectSettings !== undefined) {
+        electionSettingsJson = typeof rawElectSettings === 'string' ? rawElectSettings : JSON.stringify(rawElectSettings);
+      } else if (state_id !== undefined || district_id !== undefined || constituency_id !== undefined || booth_id !== undefined || assigned_booths !== undefined) {
+        electionSettingsJson = JSON.stringify({
+          state_id: state_id || null,
+          district_id: district_id || null,
+          constituency_id: constituency_id || null,
+          booth_id: boothIdStr,
+          assigned_booths: boothsData || []
+        });
+      }
 
       await execute(
         `UPDATE dbo.users 
-         SET role = COALESCE(@role, role),
-             name = COALESCE(@name, name),
-             rights = COALESCE(@rights, rights),
-             assigned_booths = COALESCE(@assigned_booths, assigned_booths),
-             disabled = COALESCE(@disabled, disabled)
-         WHERE id = @id`,
-        { id, role, name, rights: rightsJson, assigned_booths: assignedBoothsJson, disabled: disabled !== undefined ? (disabled ? 1 : 0) : null }
+         SET name = CASE WHEN @has_name = 1 THEN @name ELSE name END,
+             role = CASE WHEN @has_role = 1 THEN @role ELSE role END,
+             bio = CASE WHEN @has_bio = 1 THEN @bio ELSE bio END,
+             rights = CASE WHEN @has_rights = 1 THEN @rights ELSE rights END,
+             assigned_booths = CASE WHEN @has_booths = 1 THEN @assigned_booths ELSE assigned_booths END,
+             booth_id = CASE WHEN @has_booths = 1 THEN @booth_id ELSE booth_id END,
+             state_id = CASE WHEN @has_state = 1 THEN @state_id ELSE state_id END,
+             district_id = CASE WHEN @has_district = 1 THEN @district_id ELSE district_id END,
+             constituency_id = CASE WHEN @has_constituency = 1 THEN @constituency_id ELSE constituency_id END,
+             election_settings = CASE WHEN @has_election_settings = 1 THEN @election_settings ELSE election_settings END,
+             disabled = CASE WHEN @has_disabled = 1 THEN @disabled ELSE disabled END
+         WHERE id = @targetId`,
+        { 
+          targetId, 
+          name: name !== undefined ? String(name).trim() : null,
+          has_name: name !== undefined ? 1 : 0,
+          role: role !== undefined ? role : null,
+          has_role: role !== undefined ? 1 : 0,
+          bio: bio !== undefined ? bio : null,
+          has_bio: bio !== undefined ? 1 : 0,
+          rights: rightsJson,
+          has_rights: rightsJson !== null ? 1 : 0,
+          assigned_booths: assignedBoothsJson,
+          booth_id: boothIdStr,
+          has_booths: (assigned_booths !== undefined || booth_id !== undefined) ? 1 : 0,
+          state_id: state_id !== undefined ? (state_id || null) : null,
+          has_state: state_id !== undefined ? 1 : 0,
+          district_id: district_id !== undefined ? (district_id || null) : null,
+          has_district: district_id !== undefined ? 1 : 0,
+          constituency_id: constituency_id !== undefined ? (constituency_id || null) : null,
+          has_constituency: constituency_id !== undefined ? 1 : 0,
+          election_settings: electionSettingsJson,
+          has_election_settings: electionSettingsJson !== null ? 1 : 0,
+          disabled: disabled !== undefined ? (disabled ? 1 : 0) : 0,
+          has_disabled: disabled !== undefined ? 1 : 0
+        }
       );
       res.json({ success: true, message: 'User updated successfully' });
     } catch (error: any) {
@@ -603,6 +1255,31 @@ async function startServer() {
   app.delete("/api/users/:id", authenticateUser, async (req, res) => {
     try {
       const { id } = req.params;
+      const { reqUid, reqEmail, isSuperAdmin, isAdmin, userRow } = await getRequesterInfo((req as any).user);
+      let senderPermissions: Record<string, string> = {};
+      try { senderPermissions = userRow?.rights ? (typeof userRow.rights === 'string' ? JSON.parse(userRow.rights) : userRow.rights) : {}; } catch {}
+      const hasUserDelete = isAdmin || (senderPermissions['users'] && senderPermissions['users'].includes('d'));
+
+      if (!hasUserDelete) {
+        return res.status(403).json({ error: 'Forbidden: Insufficient privileges' });
+      }
+
+      const targetUsers = await query(`SELECT * FROM dbo.users WHERE id = @id`, { id });
+      if (targetUsers.length === 0) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      const target = targetUsers[0];
+
+      if (target.email?.toLowerCase() === 'vijaychauhanofficial01@gmail.com') {
+        return res.status(403).json({ error: 'Security Violation: Root Super Admin cannot be deleted.' });
+      }
+
+      if (!isSuperAdmin) {
+        if (target.role === 'super_admin' || target.role === 'admin') {
+          return res.status(403).json({ error: 'Only Super Admin can delete other Admin or Super Admin accounts.' });
+        }
+      }
+
       await execute(`DELETE FROM dbo.users WHERE id = @id`, { id });
       res.json({ success: true, message: 'User deleted' });
     } catch (error: any) {
@@ -617,7 +1294,12 @@ async function startServer() {
   // States
   app.get("/api/states", optionalAuth, async (req, res) => {
     try {
-      const states = await query(`SELECT * FROM dbo.states ORDER BY name ASC`);
+      const states = await query(`
+        SELECT s.*, 
+          (SELECT COUNT(1) FROM dbo.districts d WHERE d.state_id = s.id) as districtCount 
+        FROM dbo.states s 
+        ORDER BY s.name ASC
+      `);
       res.json(states);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -627,9 +1309,22 @@ async function startServer() {
   app.post("/api/states", authenticateUser, async (req, res) => {
     try {
       const { id, name, code } = req.body;
-      const stateId = id || `state_${Date.now()}`;
-      await execute(`INSERT INTO dbo.states (id, name, code) VALUES (@id, @name, @code)`, { id: stateId, name, code: code || '' });
-      res.json({ id: stateId, name, code });
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "State name is required." });
+      }
+      const trimmedName = String(name).trim();
+      const stateCode = (code || trimmedName.substring(0, 3)).trim().toUpperCase();
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(`UPDATE dbo.states SET name = @name, code = @code WHERE id = @id`, { id: Number(id), name: trimmedName, code: stateCode });
+        return res.json({ id: Number(id), name: trimmedName, code: stateCode });
+      }
+      const inserted = await query(
+        `INSERT INTO dbo.states (name, code, created_by) OUTPUT INSERTED.* VALUES (@name, @code, @created_by)`, 
+        { name: trimmedName, code: stateCode, created_by: userId }
+      );
+      res.json(inserted[0] || { name: trimmedName, code: stateCode, created_by: userId });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -637,8 +1332,121 @@ async function startServer() {
 
   app.delete("/api/states/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.states WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const stateId = req.params.id;
+
+      // 1. Unlink users and user invites referencing this state
+      await execute(`UPDATE dbo.users SET state_id = NULL WHERE state_id = @stateId`, { stateId });
+      await execute(`UPDATE dbo.user_invites SET state_id = NULL WHERE state_id = @stateId`, { stateId });
+
+      // 2. Delete voter sentiments and welfare benefits for voters in this state
+      await execute(`
+        DELETE FROM dbo.voter_sentiments WHERE voter_id IN (
+          SELECT CAST(v.id AS VARCHAR(64)) FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+          WHERE v.state_id = @stateId OR c.state_id = @stateId OR d.state_id = @stateId
+        ) OR voter_id IN (
+          SELECT v.voter_id FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+          WHERE v.state_id = @stateId OR c.state_id = @stateId OR d.state_id = @stateId
+        ) OR state_id = @stateId
+      `, { stateId });
+
+      await execute(`
+        DELETE FROM dbo.benefits WHERE voter_doc_id IN (
+          SELECT CAST(v.id AS VARCHAR(64)) FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+          WHERE v.state_id = @stateId OR c.state_id = @stateId OR d.state_id = @stateId
+        ) OR voter_doc_id IN (
+          SELECT v.voter_id FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+          WHERE v.state_id = @stateId OR c.state_id = @stateId OR d.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 3. Delete volunteers
+      await execute(`
+        DELETE FROM dbo.volunteers WHERE voter_doc_id IN (
+          SELECT CAST(v.id AS VARCHAR(64)) FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+          WHERE v.state_id = @stateId OR c.state_id = @stateId OR d.state_id = @stateId
+        ) OR voter_doc_id IN (
+          SELECT v.voter_id FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+          WHERE v.state_id = @stateId OR c.state_id = @stateId OR d.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 4. Delete booth agents for booths in this state
+      await execute(`
+        DELETE FROM dbo.booth_agents WHERE booth_id IN (
+          SELECT b.id FROM dbo.booths b
+          LEFT JOIN dbo.constituencies c ON b.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON c.district_id = d.id
+          WHERE c.state_id = @stateId OR d.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 5. Delete voters in this state
+      await execute(`
+        DELETE FROM dbo.voters WHERE id IN (
+          SELECT v.id FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+          WHERE v.state_id = @stateId OR c.state_id = @stateId OR d.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 6. Delete booths in this state
+      await execute(`
+        DELETE FROM dbo.booths WHERE id IN (
+          SELECT b.id FROM dbo.booths b
+          LEFT JOIN dbo.constituencies c ON b.constituency_id = c.id
+          LEFT JOIN dbo.districts d ON c.district_id = d.id
+          WHERE c.state_id = @stateId OR d.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 7. Delete mandal members in mandals of this state
+      await execute(`
+        DELETE FROM dbo.mandal_members WHERE mandal_id IN (
+          SELECT m.id FROM dbo.mandals m
+          LEFT JOIN dbo.districts d ON m.district_id = d.id
+          LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id
+          WHERE m.state_id = @stateId OR d.state_id = @stateId OR c.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 8. Delete mandals in this state
+      await execute(`
+        DELETE FROM dbo.mandals WHERE id IN (
+          SELECT m.id FROM dbo.mandals m
+          LEFT JOIN dbo.districts d ON m.district_id = d.id
+          LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id
+          WHERE m.state_id = @stateId OR d.state_id = @stateId OR c.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 9. Delete constituencies in this state
+      await execute(`
+        DELETE FROM dbo.constituencies WHERE id IN (
+          SELECT c.id FROM dbo.constituencies c
+          LEFT JOIN dbo.districts d ON c.district_id = d.id
+          WHERE c.state_id = @stateId OR d.state_id = @stateId
+        )
+      `, { stateId });
+
+      // 10. Delete districts in this state
+      await execute(`DELETE FROM dbo.districts WHERE state_id = @stateId`, { stateId });
+
+      // 11. Finally delete the state
+      await execute(`DELETE FROM dbo.states WHERE id = @stateId`, { stateId });
+      res.json({ success: true, message: 'State and all dependent records deleted successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -647,12 +1455,18 @@ async function startServer() {
   // Districts
   app.get("/api/districts", optionalAuth, async (req, res) => {
     try {
-      const { stateId } = req.query;
-      let sqlQuery = `SELECT d.*, s.name as state_name FROM dbo.districts d LEFT JOIN dbo.states s ON d.state_id = s.id`;
+      const { stateId, stateIds } = req.query;
+      let sqlQuery = `
+        SELECT d.*, s.name as state_name,
+          (SELECT COUNT(1) FROM dbo.constituencies c WHERE c.district_id = d.id) as constituencyCount
+        FROM dbo.districts d 
+        LEFT JOIN dbo.states s ON d.state_id = s.id
+        WHERE 1=1
+      `;
       const params: Record<string, any> = {};
-      if (stateId) {
-        sqlQuery += ` WHERE d.state_id = @stateId`;
-        params.stateId = stateId;
+      const stClause = buildSafeInClause(stateId || stateIds, 'dst_st', ['d.state_id', 's.id'], params);
+      if (stClause) {
+        sqlQuery += ` AND ${stClause}`;
       }
       sqlQuery += ` ORDER BY d.name ASC`;
       const districts = await query(sqlQuery, params);
@@ -664,10 +1478,27 @@ async function startServer() {
 
   app.post("/api/districts", authenticateUser, async (req, res) => {
     try {
-      const { id, name, state_id } = req.body;
-      const districtId = id || `dist_${Date.now()}`;
-      await execute(`INSERT INTO dbo.districts (id, name, state_id) VALUES (@id, @name, @state_id)`, { id: districtId, name, state_id });
-      res.json({ id: districtId, name, state_id });
+      const { id, name, state_id, stateId } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "District name is required." });
+      }
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      if (!rawStateId || isNaN(Number(rawStateId))) {
+        return res.status(400).json({ error: "Please select a valid parent state for this district." });
+      }
+      const numStateId = Number(rawStateId);
+      const trimmedName = String(name).trim();
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(`UPDATE dbo.districts SET name = @name, state_id = @state_id WHERE id = @id`, { id: Number(id), name: trimmedName, state_id: numStateId });
+        return res.json({ id: Number(id), name: trimmedName, state_id: numStateId });
+      }
+      const inserted = await query(
+        `INSERT INTO dbo.districts (name, state_id, created_by) OUTPUT INSERTED.* VALUES (@name, @state_id, @created_by)`,
+        { name: trimmedName, state_id: numStateId, created_by: userId }
+      );
+      res.json(inserted[0] || { name: trimmedName, state_id: numStateId, created_by: userId });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -675,8 +1506,101 @@ async function startServer() {
 
   app.delete("/api/districts/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.districts WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const districtId = req.params.id;
+
+      // 1. Unlink users and invites
+      await execute(`UPDATE dbo.users SET district_id = NULL WHERE district_id = @districtId`, { districtId });
+      await execute(`UPDATE dbo.user_invites SET district_id = NULL WHERE district_id = @districtId`, { districtId });
+
+      // 2. Delete voter sentiments and benefits
+      await execute(`
+        DELETE FROM dbo.voter_sentiments WHERE voter_id IN (
+          SELECT CAST(v.id AS VARCHAR(64)) FROM dbo.voters v
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          WHERE v.district_id = @districtId OR c.district_id = @districtId
+        ) OR voter_id IN (
+          SELECT v.voter_id FROM dbo.voters v
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          WHERE v.district_id = @districtId OR c.district_id = @districtId
+        ) OR district_id = @districtId
+      `, { districtId });
+
+      await execute(`
+        DELETE FROM dbo.benefits WHERE voter_doc_id IN (
+          SELECT CAST(v.id AS VARCHAR(64)) FROM dbo.voters v
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          WHERE v.district_id = @districtId OR c.district_id = @districtId
+        ) OR voter_doc_id IN (
+          SELECT v.voter_id FROM dbo.voters v
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          WHERE v.district_id = @districtId OR c.district_id = @districtId
+        )
+      `, { districtId });
+
+      // 3. Delete volunteers
+      await execute(`
+        DELETE FROM dbo.volunteers WHERE voter_doc_id IN (
+          SELECT CAST(v.id AS VARCHAR(64)) FROM dbo.voters v
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          WHERE v.district_id = @districtId OR c.district_id = @districtId
+        ) OR voter_doc_id IN (
+          SELECT v.voter_id FROM dbo.voters v
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          WHERE v.district_id = @districtId OR c.district_id = @districtId
+        )
+      `, { districtId });
+
+      // 4. Delete booth agents
+      await execute(`
+        DELETE FROM dbo.booth_agents WHERE booth_id IN (
+          SELECT b.id FROM dbo.booths b
+          LEFT JOIN dbo.constituencies c ON b.constituency_id = c.id
+          WHERE c.district_id = @districtId
+        )
+      `, { districtId });
+
+      // 5. Delete voters
+      await execute(`
+        DELETE FROM dbo.voters WHERE id IN (
+          SELECT v.id FROM dbo.voters v 
+          LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+          WHERE v.district_id = @districtId OR c.district_id = @districtId
+        )
+      `, { districtId });
+
+      // 6. Delete booths
+      await execute(`
+        DELETE FROM dbo.booths WHERE id IN (
+          SELECT b.id FROM dbo.booths b
+          LEFT JOIN dbo.constituencies c ON b.constituency_id = c.id
+          WHERE c.district_id = @districtId
+        )
+      `, { districtId });
+
+      // 7. Delete mandal members
+      await execute(`
+        DELETE FROM dbo.mandal_members WHERE mandal_id IN (
+          SELECT m.id FROM dbo.mandals m
+          LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id
+          WHERE m.district_id = @districtId OR c.district_id = @districtId
+        )
+      `, { districtId });
+
+      // 8. Delete mandals
+      await execute(`
+        DELETE FROM dbo.mandals WHERE id IN (
+          SELECT m.id FROM dbo.mandals m
+          LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id
+          WHERE m.district_id = @districtId OR c.district_id = @districtId
+        )
+      `, { districtId });
+
+      // 9. Delete constituencies
+      await execute(`DELETE FROM dbo.constituencies WHERE district_id = @districtId`, { districtId });
+
+      // 10. Delete district
+      await execute(`DELETE FROM dbo.districts WHERE id = @districtId`, { districtId });
+      res.json({ success: true, message: 'District and all dependent records deleted successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -685,19 +1609,23 @@ async function startServer() {
   // Constituencies
   app.get("/api/constituencies", optionalAuth, async (req, res) => {
     try {
-      const { districtId, stateId } = req.query;
-      let sqlQuery = `SELECT c.*, d.name as district_name, s.name as state_name 
-                      FROM dbo.constituencies c 
-                      LEFT JOIN dbo.districts d ON c.district_id = d.id
-                      LEFT JOIN dbo.states s ON c.state_id = s.id WHERE 1=1`;
+      const { districtId, districtIds, stateId, stateIds } = req.query;
+      let sqlQuery = `
+        SELECT c.*, ISNULL(c.category, 'General') as category, d.name as district_name, s.name as state_name,
+          (SELECT COUNT(1) FROM dbo.booths b WHERE b.constituency_id = c.id) as boothCount
+        FROM dbo.constituencies c 
+        LEFT JOIN dbo.districts d ON c.district_id = d.id
+        LEFT JOIN dbo.states s ON c.state_id = s.id OR d.state_id = s.id
+        WHERE 1=1
+      `;
       const params: Record<string, any> = {};
-      if (districtId) {
-        sqlQuery += ` AND c.district_id = @districtId`;
-        params.districtId = districtId;
+      const dstClause = buildSafeInClause(districtId || districtIds, 'cst_dst', ['c.district_id', 'd.id'], params);
+      if (dstClause) {
+        sqlQuery += ` AND ${dstClause}`;
       }
-      if (stateId) {
-        sqlQuery += ` AND c.state_id = @stateId`;
-        params.stateId = stateId;
+      const stClause = buildSafeInClause(stateId || stateIds, 'cst_st', ['c.state_id', 'd.state_id', 's.id'], params);
+      if (stClause) {
+        sqlQuery += ` AND ${stClause}`;
       }
       sqlQuery += ` ORDER BY c.name ASC`;
       const constituencies = await query(sqlQuery, params);
@@ -709,11 +1637,83 @@ async function startServer() {
 
   app.post("/api/constituencies", authenticateUser, async (req, res) => {
     try {
-      const { id, name, district_id, state_id } = req.body;
-      const constId = id || `const_${Date.now()}`;
-      await execute(`INSERT INTO dbo.constituencies (id, name, district_id, state_id) VALUES (@id, @name, @district_id, @state_id)`, 
-        { id: constId, name, district_id, state_id });
-      res.json({ id: constId, name, district_id, state_id });
+      const { id, name, district_id, state_id, districtId, stateId, category, seat_type, reservation } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Constituency name is required." });
+      }
+      const rawDistrictId = district_id !== undefined ? district_id : districtId;
+      if (!rawDistrictId || String(rawDistrictId).trim() === '') {
+        return res.status(400).json({ error: "Please select a valid parent district for this constituency." });
+      }
+      const finalDistrictId = !isNaN(Number(rawDistrictId)) ? Number(rawDistrictId) : String(rawDistrictId);
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      let finalStateId = rawStateId ? (!isNaN(Number(rawStateId)) ? Number(rawStateId) : String(rawStateId)) : null;
+      
+      // Auto-lookup state_id from parent district if not supplied
+      if (!finalStateId && finalDistrictId) {
+        const dist = await query(`SELECT state_id FROM dbo.districts WHERE id = @districtId`, { districtId: finalDistrictId });
+        if (dist && dist[0] && dist[0].state_id) {
+          finalStateId = dist[0].state_id;
+        }
+      }
+
+      const trimmedName = String(name).trim();
+      const seatCategory = String(category || seat_type || reservation || 'General').trim();
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+      const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
+
+      if (targetId) {
+        const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
+        await execute(
+          `UPDATE dbo.constituencies SET name = @name, district_id = @district_id, state_id = @state_id, category = @category WHERE id = @id`,
+          { id: parsedId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory }
+        );
+        return res.json({ id: targetId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory });
+      }
+      const inserted = await query(
+        `INSERT INTO dbo.constituencies (name, district_id, state_id, category, created_by) OUTPUT INSERTED.* VALUES (@name, @district_id, @state_id, @category, @created_by)`, 
+        { name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, created_by: userId }
+      );
+      res.json(inserted[0] || { name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, created_by: userId });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/constituencies/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, district_id, state_id, districtId, stateId, category, seat_type, reservation } = req.body;
+      if (!id || String(id).trim() === '') {
+        return res.status(400).json({ error: "Invalid constituency ID." });
+      }
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Constituency name is required." });
+      }
+      const rawDistrictId = district_id !== undefined ? district_id : districtId;
+      if (!rawDistrictId || String(rawDistrictId).trim() === '') {
+        return res.status(400).json({ error: "Please select a valid parent district for this constituency." });
+      }
+      const finalDistrictId = !isNaN(Number(rawDistrictId)) ? Number(rawDistrictId) : String(rawDistrictId);
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      let finalStateId = rawStateId ? (!isNaN(Number(rawStateId)) ? Number(rawStateId) : String(rawStateId)) : null;
+      
+      if (!finalStateId && finalDistrictId) {
+        const dist = await query(`SELECT state_id FROM dbo.districts WHERE id = @districtId`, { districtId: finalDistrictId });
+        if (dist && dist[0] && dist[0].state_id) {
+          finalStateId = dist[0].state_id;
+        }
+      }
+
+      const trimmedName = String(name).trim();
+      const seatCategory = String(category || seat_type || reservation || 'General').trim();
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+
+      await execute(
+        `UPDATE dbo.constituencies SET name = @name, district_id = @district_id, state_id = @state_id, category = @category WHERE id = @id`,
+        { id: parsedId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory }
+      );
+      res.json({ id, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -721,8 +1721,63 @@ async function startServer() {
 
   app.delete("/api/constituencies/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.constituencies WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const constituencyId = req.params.id;
+
+      // 1. Unlink users and invites
+      await execute(`UPDATE dbo.users SET constituency_id = NULL WHERE constituency_id = @constituencyId`, { constituencyId });
+      await execute(`UPDATE dbo.user_invites SET constituency_id = NULL WHERE constituency_id = @constituencyId`, { constituencyId });
+
+      // 2. Delete sentiments and benefits
+      await execute(`
+        DELETE FROM dbo.voter_sentiments WHERE voter_id IN (
+          SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE constituency_id = @constituencyId
+        ) OR voter_id IN (
+          SELECT voter_id FROM dbo.voters WHERE constituency_id = @constituencyId
+        ) OR constituency_id = @constituencyId
+      `, { constituencyId });
+
+      await execute(`
+        DELETE FROM dbo.benefits WHERE voter_doc_id IN (
+          SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE constituency_id = @constituencyId
+        ) OR voter_doc_id IN (
+          SELECT voter_id FROM dbo.voters WHERE constituency_id = @constituencyId
+        )
+      `, { constituencyId });
+
+      // 3. Delete volunteers
+      await execute(`
+        DELETE FROM dbo.volunteers WHERE voter_doc_id IN (
+          SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE constituency_id = @constituencyId
+        ) OR voter_doc_id IN (
+          SELECT voter_id FROM dbo.voters WHERE constituency_id = @constituencyId
+        )
+      `, { constituencyId });
+
+      // 4. Delete booth agents
+      await execute(`
+        DELETE FROM dbo.booth_agents WHERE booth_id IN (
+          SELECT id FROM dbo.booths WHERE constituency_id = @constituencyId
+        )
+      `, { constituencyId });
+
+      // 5. Delete voters
+      await execute(`DELETE FROM dbo.voters WHERE constituency_id = @constituencyId`, { constituencyId });
+
+      // 6. Delete booths
+      await execute(`DELETE FROM dbo.booths WHERE constituency_id = @constituencyId`, { constituencyId });
+
+      // 7. Delete mandal members & mandals
+      await execute(`
+        DELETE FROM dbo.mandal_members WHERE mandal_id IN (
+          SELECT id FROM dbo.mandals WHERE constituency_id = @constituencyId
+        )
+      `, { constituencyId });
+
+      await execute(`DELETE FROM dbo.mandals WHERE constituency_id = @constituencyId`, { constituencyId });
+
+      // 8. Delete constituency
+      await execute(`DELETE FROM dbo.constituencies WHERE id = @constituencyId`, { constituencyId });
+      res.json({ success: true, message: 'Constituency and all dependent records deleted successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -731,20 +1786,22 @@ async function startServer() {
   // Booths
   app.get("/api/booths", optionalAuth, async (req, res) => {
     try {
-      const { constituencyId, mandalId } = req.query;
-      let sqlQuery = `SELECT b.*, c.name as constituency_name, m.name as mandal_name 
+      const { constituencyId, constituencyIds, mandalId, mandalIds, districtId, districtIds, stateId, stateIds } = req.query;
+      let sqlQuery = `SELECT b.*, c.name as constituency_name, m.name as mandal_name, c.district_id, c.state_id 
                       FROM dbo.booths b 
                       LEFT JOIN dbo.constituencies c ON b.constituency_id = c.id
+                      LEFT JOIN dbo.districts d ON c.district_id = d.id
                       LEFT JOIN dbo.mandals m ON b.mandal_id = m.id WHERE 1=1`;
       const params: Record<string, any> = {};
-      if (constituencyId) {
-        sqlQuery += ` AND b.constituency_id = @constituencyId`;
-        params.constituencyId = constituencyId;
-      }
-      if (mandalId) {
-        sqlQuery += ` AND b.mandal_id = @mandalId`;
-        params.mandalId = mandalId;
-      }
+      const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'bth_cst', ['b.constituency_id', 'c.id'], params);
+      if (cstClause) sqlQuery += ` AND ${cstClause}`;
+      const mndClause = buildSafeInClause(mandalId || mandalIds, 'bth_mnd', ['b.mandal_id', 'm.id'], params);
+      if (mndClause) sqlQuery += ` AND ${mndClause}`;
+      const dstClause = buildSafeInClause(districtId || districtIds, 'bth_dst', ['c.district_id', 'd.id'], params);
+      if (dstClause) sqlQuery += ` AND ${dstClause}`;
+      const stClause = buildSafeInClause(stateId || stateIds, 'bth_st', ['c.state_id', 'd.state_id'], params);
+      if (stClause) sqlQuery += ` AND ${stClause}`;
+      
       sqlQuery += ` ORDER BY b.booth_number ASC, b.name ASC`;
       const booths = await query(sqlQuery, params);
       res.json(booths);
@@ -755,14 +1812,69 @@ async function startServer() {
 
   app.post("/api/booths", authenticateUser, async (req, res) => {
     try {
-      const { id, booth_number, name, constituency_id, mandal_id, total_voters, address } = req.body;
-      const boothId = id || `booth_${Date.now()}`;
-      await execute(
-        `INSERT INTO dbo.booths (id, booth_number, name, constituency_id, mandal_id, total_voters, address)
-         VALUES (@id, @booth_number, @name, @constituency_id, @mandal_id, @total_voters, @address)`,
-        { id: boothId, booth_number: String(booth_number), name, constituency_id, mandal_id: mandal_id || null, total_voters: total_voters || 0, address: address || '' }
+      const { id, booth_number, boothNumber, name, constituency_id, constituencyId, mandal_id, mandalId, total_voters, totalVoters, address } = req.body;
+      const cid = constituency_id !== undefined ? constituency_id : constituencyId;
+      if (!cid || String(cid).trim() === '') {
+        return res.status(400).json({ error: "Please select a valid parent constituency for this booth." });
+      }
+      const finalConstituencyId = !isNaN(Number(cid)) ? Number(cid) : String(cid);
+      const mid = mandal_id !== undefined ? mandal_id : mandalId;
+      const finalMandalId = mid && String(mid).trim() !== '' ? (!isNaN(Number(mid)) ? Number(mid) : String(mid)) : null;
+      const bnum = String(booth_number !== undefined ? booth_number : (boothNumber || '1')).trim();
+      const bname = String(name || `Booth #${bnum}`).trim();
+      const vtotal = total_voters !== undefined ? Number(total_voters) : (Number(totalVoters) || 0);
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+      const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
+
+      if (targetId) {
+        const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
+        await execute(
+          `UPDATE dbo.booths 
+           SET booth_number = @booth_number, name = @name, constituency_id = @constituency_id, mandal_id = @mandal_id, total_voters = @total_voters, address = @address 
+           WHERE id = @id`,
+          { id: parsedId, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address: address || '' }
+        );
+        return res.json({ id: targetId, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.booths (booth_number, name, constituency_id, mandal_id, total_voters, address, created_by)
+         OUTPUT INSERTED.*
+         VALUES (@booth_number, @name, @constituency_id, @mandal_id, @total_voters, @address, @created_by)`,
+        { booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address: address || '', created_by: userId }
       );
-      res.json({ id: boothId, booth_number, name, constituency_id, mandal_id, total_voters, address });
+      res.json(inserted[0] || { booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address, created_by: userId });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/booths/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { booth_number, boothNumber, name, constituency_id, constituencyId, mandal_id, mandalId, total_voters, totalVoters, address } = req.body;
+      if (!id || String(id).trim() === '') {
+        return res.status(400).json({ error: "Invalid booth ID." });
+      }
+      const cid = constituency_id !== undefined ? constituency_id : constituencyId;
+      if (!cid || String(cid).trim() === '') {
+        return res.status(400).json({ error: "Please select a valid parent constituency for this booth." });
+      }
+      const finalConstituencyId = !isNaN(Number(cid)) ? Number(cid) : String(cid);
+      const mid = mandal_id !== undefined ? mandal_id : mandalId;
+      const finalMandalId = mid && String(mid).trim() !== '' ? (!isNaN(Number(mid)) ? Number(mid) : String(mid)) : null;
+      const bnum = String(booth_number !== undefined ? booth_number : (boothNumber || '1')).trim();
+      const bname = String(name || `Booth #${bnum}`).trim();
+      const vtotal = total_voters !== undefined ? Number(total_voters) : (Number(totalVoters) || 0);
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+
+      await execute(
+        `UPDATE dbo.booths 
+         SET booth_number = @booth_number, name = @name, constituency_id = @constituency_id, mandal_id = @mandal_id, total_voters = @total_voters, address = @address 
+         WHERE id = @id`,
+        { id: parsedId, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address: address || '' }
+      );
+      res.json({ id, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -770,8 +1882,38 @@ async function startServer() {
 
   app.delete("/api/booths/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.booths WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const boothId = req.params.id;
+      // 1. Delete booth agents
+      await execute(`DELETE FROM dbo.booth_agents WHERE booth_id = @boothId`, { boothId });
+      // 2. Unlink volunteers assigned to this booth
+      await execute(`UPDATE dbo.volunteers SET assigned_booth_id = NULL, assigned_booth_name = NULL WHERE assigned_booth_id = @boothId`, { boothId });
+      // 3. Delete voter sentiments, benefits, volunteers for voters in this booth
+      await execute(`
+        DELETE FROM dbo.voter_sentiments WHERE voter_id IN (
+          SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE booth_id = @boothId
+        ) OR voter_id IN (
+          SELECT voter_id FROM dbo.voters WHERE booth_id = @boothId
+        ) OR booth_id = @boothId
+      `, { boothId });
+      await execute(`
+        DELETE FROM dbo.benefits WHERE voter_doc_id IN (
+          SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE booth_id = @boothId
+        ) OR voter_doc_id IN (
+          SELECT voter_id FROM dbo.voters WHERE booth_id = @boothId
+        )
+      `, { boothId });
+      await execute(`
+        DELETE FROM dbo.volunteers WHERE voter_doc_id IN (
+          SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE booth_id = @boothId
+        ) OR voter_doc_id IN (
+          SELECT voter_id FROM dbo.voters WHERE booth_id = @boothId
+        )
+      `, { boothId });
+      // 4. Delete voters in this booth
+      await execute(`DELETE FROM dbo.voters WHERE booth_id = @boothId`, { boothId });
+      // 5. Delete booth
+      await execute(`DELETE FROM dbo.booths WHERE id = @boothId`, { boothId });
+      res.json({ success: true, message: 'Booth and all dependent records deleted successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -783,15 +1925,31 @@ async function startServer() {
 
   app.get("/api/mandals", optionalAuth, async (req, res) => {
     try {
-      const { constituencyId } = req.query;
-      let sqlQuery = `SELECT m.*, c.name as constituency_name, 
-                      (SELECT COUNT(*) FROM dbo.mandal_members mm WHERE mm.mandal_id = m.id) as member_count
-                      FROM dbo.mandals m 
-                      LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id WHERE 1=1`;
+      const { constituencyId, constituencyIds, districtId, districtIds, stateId, stateIds, search } = req.query;
+      let sqlQuery = `
+        SELECT m.*, 
+               c.name as constituency_name, 
+               d.name as district_name, 
+               s.name as state_name,
+               (SELECT COUNT(*) FROM dbo.mandal_members mm WHERE mm.mandal_id = m.id) as member_count,
+               (SELECT COUNT(*) FROM dbo.booths b WHERE b.mandal_id = m.id) as booth_count,
+               (SELECT COUNT(*) FROM dbo.voters v WHERE v.mandal_id = m.id) as real_voter_count
+        FROM dbo.mandals m 
+        LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON m.district_id = d.id OR c.district_id = d.id
+        LEFT JOIN dbo.states s ON m.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id
+        WHERE 1=1
+      `;
       const params: Record<string, any> = {};
-      if (constituencyId) {
-        sqlQuery += ` AND m.constituency_id = @constituencyId`;
-        params.constituencyId = constituencyId;
+      const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'mnd_cst', ['m.constituency_id', 'c.id'], params);
+      if (cstClause) sqlQuery += ` AND ${cstClause}`;
+      const dstClause = buildSafeInClause(districtId || districtIds, 'mnd_dst', ['m.district_id', 'c.district_id', 'd.id'], params);
+      if (dstClause) sqlQuery += ` AND ${dstClause}`;
+      const stClause = buildSafeInClause(stateId || stateIds, 'mnd_st', ['m.state_id', 'd.state_id', 'c.state_id', 's.id'], params);
+      if (stClause) sqlQuery += ` AND ${stClause}`;
+      if (search && String(search).trim()) {
+        sqlQuery += ` AND (m.name LIKE @search OR m.mandal_code LIKE @search OR m.president_name LIKE @search)`;
+        params.search = `%${String(search).trim()}%`;
       }
       sqlQuery += ` ORDER BY m.name ASC`;
       const mandals = await query(sqlQuery, params);
@@ -803,14 +1961,68 @@ async function startServer() {
 
   app.post("/api/mandals", authenticateUser, async (req, res) => {
     try {
-      const { id, name, mandal_code, president_name, president_phone, voter_count, population, state_id, district_id, constituency_id } = req.body;
-      const mandalId = id || `mandal_${Date.now()}`;
-      await execute(
-        `INSERT INTO dbo.mandals (id, name, mandal_code, president_name, president_phone, voter_count, population, state_id, district_id, constituency_id)
-         VALUES (@id, @name, @mandal_code, @president_name, @president_phone, @voter_count, @population, @state_id, @district_id, @constituency_id)`,
-        { id: mandalId, name, mandal_code, president_name: president_name || '', president_phone: president_phone || '', voter_count: voter_count || 0, population: population || 0, state_id: state_id || null, district_id: district_id || null, constituency_id: constituency_id || null }
+      const { id, name, mandal_code, mandalCode, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Mandal name is required." });
+      }
+      const mcode = (mandal_code || mandalCode || `MAN-${Date.now().toString().slice(-4)}`).trim().toUpperCase();
+      const pname = president_name !== undefined ? president_name : (presidentName || '');
+      const pphone = president_phone !== undefined ? president_phone : (presidentPhone || '');
+      const vcount = parseInt(voter_count || voterCount, 10) || 0;
+      const pop = parseInt(population, 10) || 0;
+      
+      const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
+      const finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
+
+      const rawDid = district_id !== undefined ? district_id : districtId;
+      let finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : null;
+
+      const rawSid = state_id !== undefined ? state_id : stateId;
+      let finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
+      // Auto-lookup district and state if omitted
+      if (finalCid && (!finalDid || !finalSid)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalCid });
+        if (cRow && cRow[0]) {
+          if (!finalDid) finalDid = cRow[0].district_id;
+          if (!finalSid) finalSid = cRow[0].state_id;
+        }
+      }
+      if (finalDid && !finalSid) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDid });
+        if (dRow && dRow[0]) {
+          finalSid = dRow[0].state_id;
+        }
+      }
+
+      const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
+
+      if (targetId) {
+        const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
+        await execute(
+          `UPDATE dbo.mandals 
+           SET name = @name,
+               mandal_code = @mandal_code,
+               president_name = @president_name,
+               president_phone = @president_phone,
+               voter_count = @voter_count,
+               population = @population,
+               state_id = @state_id,
+               district_id = @district_id,
+               constituency_id = @constituency_id
+           WHERE id = @id`,
+          { id: parsedId, name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid }
+        );
+        return res.json({ id: targetId, name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.mandals (name, mandal_code, president_name, president_phone, voter_count, population, state_id, district_id, constituency_id)
+         OUTPUT INSERTED.*
+         VALUES (@name, @mandal_code, @president_name, @president_phone, @voter_count, @population, @state_id, @district_id, @constituency_id)`,
+        { name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid }
       );
-      res.json({ id: mandalId, name, mandal_code });
+      res.json(inserted[0] || { name: String(name).trim(), mandal_code: mcode });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -819,19 +2031,44 @@ async function startServer() {
   app.put("/api/mandals/:id", authenticateUser, async (req, res) => {
     try {
       const { id } = req.params;
-      const { name, mandal_code, president_name, president_phone, voter_count, population } = req.body;
+      const { name, mandal_code, mandalCode, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId } = req.body;
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+      
+      const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
+      const finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
+
+      const rawDid = district_id !== undefined ? district_id : districtId;
+      const finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : null;
+
+      const rawSid = state_id !== undefined ? state_id : stateId;
+      const finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
       await execute(
         `UPDATE dbo.mandals 
-         SET name = COALESCE(@name, name),
-             mandal_code = COALESCE(@mandal_code, mandal_code),
-             president_name = COALESCE(@president_name, president_name),
-             president_phone = COALESCE(@president_phone, president_phone),
+         SET name = COALESCE(NULLIF(@name, ''), name),
+             mandal_code = COALESCE(NULLIF(@mandal_code, ''), mandal_code),
+             president_name = @president_name,
+             president_phone = @president_phone,
              voter_count = COALESCE(@voter_count, voter_count),
-             population = COALESCE(@population, population)
+             population = COALESCE(@population, population),
+             state_id = COALESCE(@state_id, state_id),
+             district_id = COALESCE(@district_id, district_id),
+             constituency_id = COALESCE(@constituency_id, constituency_id)
          WHERE id = @id`,
-        { id, name, mandal_code, president_name, president_phone, voter_count, population }
+        { 
+          id: parsedId, 
+          name: name ? String(name).trim() : null, 
+          mandal_code: (mandal_code || mandalCode) ? String(mandal_code || mandalCode).trim().toUpperCase() : null, 
+          president_name: president_name !== undefined ? president_name : (presidentName || ''), 
+          president_phone: president_phone !== undefined ? president_phone : (presidentPhone || ''), 
+          voter_count: voter_count !== undefined ? parseInt(voter_count, 10) : (voterCount !== undefined ? parseInt(voterCount, 10) : null), 
+          population: population !== undefined ? parseInt(population, 10) : null,
+          state_id: finalSid,
+          district_id: finalDid,
+          constituency_id: finalCid
+        }
       );
-      res.json({ success: true });
+      res.json({ success: true, id });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -839,8 +2076,16 @@ async function startServer() {
 
   app.delete("/api/mandals/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.mandals WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const mandalId = req.params.id;
+      const parsedId = !isNaN(Number(mandalId)) ? Number(mandalId) : String(mandalId);
+      // 1. Delete mandal members
+      await execute(`DELETE FROM dbo.mandal_members WHERE mandal_id = @mandalId`, { mandalId: parsedId });
+      // 2. Unlink booths and voters
+      await execute(`UPDATE dbo.booths SET mandal_id = NULL WHERE mandal_id = @mandalId`, { mandalId: parsedId });
+      await execute(`UPDATE dbo.voters SET mandal_id = NULL WHERE mandal_id = @mandalId`, { mandalId: parsedId });
+      // 3. Delete mandal
+      await execute(`DELETE FROM dbo.mandals WHERE id = @mandalId`, { mandalId: parsedId });
+      res.json({ success: true, message: 'Mandal removed successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -851,8 +2096,9 @@ async function startServer() {
     try {
       const { mandalId } = req.params;
       const { categoryKey } = req.query;
+      const parsedMandalId = !isNaN(Number(mandalId)) ? Number(mandalId) : String(mandalId);
       let sqlQuery = `SELECT * FROM dbo.mandal_members WHERE mandal_id = @mandalId`;
-      const params: Record<string, any> = { mandalId };
+      const params: Record<string, any> = { mandalId: parsedMandalId };
       if (categoryKey) {
         sqlQuery += ` AND category_key = @categoryKey`;
         params.categoryKey = categoryKey;
@@ -868,14 +2114,49 @@ async function startServer() {
   app.post("/api/mandals/:mandalId/members", authenticateUser, async (req, res) => {
     try {
       const { mandalId } = req.params;
-      const { id, name, phone, voter_id, designation, category_key } = req.body;
-      const memberId = id || `member_${Date.now()}_${Math.floor(Math.random()*1000)}`;
-      await execute(
-        `INSERT INTO dbo.mandal_members (id, mandal_id, name, phone, voter_id, designation, category_key)
-         VALUES (@id, @mandal_id, @name, @phone, @voter_id, @designation, @category_key)`,
-        { id: memberId, mandal_id: mandalId, name, phone: phone || '', voter_id: voter_id || '', designation: designation || '', category_key }
+      const { id, name, phone, voter_id, voterId, designation, category_key, categoryKey } = req.body;
+      const parsedMandalId = !isNaN(Number(mandalId)) ? Number(mandalId) : String(mandalId);
+      const catKey = category_key || categoryKey || 'office_bearers';
+      const vid = voter_id || voterId || '';
+
+      if (id && String(id).trim() !== '') {
+        const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+        await execute(
+          `UPDATE dbo.mandal_members 
+           SET name = @name, phone = @phone, voter_id = @voter_id, designation = @designation, category_key = @category_key 
+           WHERE id = @id`,
+          { id: parsedId, name: String(name).trim(), phone: phone || '', voter_id: vid, designation: designation || '', category_key: catKey }
+        );
+        return res.json({ id: parsedId, mandal_id: parsedMandalId, name: String(name).trim(), category_key: catKey });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.mandal_members (mandal_id, name, phone, voter_id, designation, category_key)
+         OUTPUT INSERTED.*
+         VALUES (@mandal_id, @name, @phone, @voter_id, @designation, @category_key)`,
+        { mandal_id: parsedMandalId, name: String(name).trim(), phone: phone || '', voter_id: vid, designation: designation || '', category_key: catKey }
       );
-      res.json({ id: memberId, mandal_id: mandalId, name, category_key });
+      res.json(inserted[0] || { mandal_id: parsedMandalId, name: String(name).trim(), category_key: catKey });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/mandals/members/:memberId", authenticateUser, async (req, res) => {
+    try {
+      const { memberId } = req.params;
+      const { name, phone, voter_id, voterId, designation, category_key, categoryKey } = req.body;
+      const parsedId = !isNaN(Number(memberId)) ? Number(memberId) : String(memberId);
+      const vid = voter_id || voterId || '';
+      const catKey = category_key || categoryKey || 'office_bearers';
+
+      await execute(
+        `UPDATE dbo.mandal_members 
+         SET name = @name, phone = @phone, voter_id = @voter_id, designation = @designation, category_key = @category_key 
+         WHERE id = @id`,
+        { id: parsedId, name: String(name).trim(), phone: phone || '', voter_id: vid, designation: designation || '', category_key: catKey }
+      );
+      res.json({ success: true, id: memberId });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -883,7 +2164,8 @@ async function startServer() {
 
   app.delete("/api/mandals/members/:memberId", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.mandal_members WHERE id = @id`, { id: req.params.memberId });
+      const parsedId = !isNaN(Number(req.params.memberId)) ? Number(req.params.memberId) : String(req.params.memberId);
+      await execute(`DELETE FROM dbo.mandal_members WHERE id = @id`, { id: parsedId });
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -897,66 +2179,130 @@ async function startServer() {
   app.get("/api/voters", optionalAuth, async (req, res) => {
     try {
       const { 
-        boothId, mandalId, constituencyId, search, 
-        gender, caste, voting_status, is_karyakarta,
+        boothId, mandalId, constituencyId, districtId, stateId,
+        boothIds, constituencyIds, districtIds, stateIds,
+        search, gender, caste, voting_status, is_karyakarta,
         page = '1', limit = '50' 
       } = req.query;
 
       let whereConditions: string[] = ['1=1'];
       const params: Record<string, any> = {};
 
-      if (boothId) {
-        whereConditions.push(`v.booth_id = @boothId`);
-        params.boothId = boothId;
+      // 1. Check Authenticated User Profile & Demographic Scoping
+      const reqUser = (req as any).user;
+      if (reqUser) {
+        const { isSuperAdmin, userRow } = await getRequesterInfo(reqUser);
+        if (!isSuperAdmin && userRow) {
+          let electSettings: any = {};
+          try { electSettings = userRow.election_settings ? JSON.parse(userRow.election_settings) : {}; } catch {}
+
+          const rawState = userRow.state_id || electSettings.state_id || electSettings.stateId;
+          const rawDist = userRow.district_id || electSettings.district_id || electSettings.districtId;
+          const rawConst = userRow.constituency_id || electSettings.constituency_id || electSettings.constituencyId;
+          const rawBooth = userRow.booth_id || electSettings.booth_id || electSettings.boothId;
+          const rawBooths = userRow.assigned_booths || electSettings.assigned_booths;
+
+          const userStates = rawState ? String(rawState).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const userDistricts = rawDist ? String(rawDist).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const userConstituencies = rawConst ? String(rawConst).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          let userBooths: string[] = [];
+          try {
+            userBooths = rawBooths ? (typeof rawBooths === 'string' ? JSON.parse(rawBooths) : rawBooths) : [];
+          } catch {}
+          if (!Array.isArray(userBooths) || userBooths.length === 0) {
+            if (rawBooth) userBooths = String(rawBooth).split(',').map((s: string) => s.trim()).filter(Boolean);
+          }
+
+          // Enforce narrowest assigned demographic level
+          if (userBooths.length > 0) {
+            const bClause = buildSafeInClause(userBooths.join(','), 'u_bth', ['v.booth_id', 'b.id'], params);
+            if (bClause) whereConditions.push(bClause);
+          } else if (userConstituencies.length > 0) {
+            const cClause = buildSafeInClause(userConstituencies.join(','), 'u_cst', ['v.constituency_id', 'b.constituency_id', 'c.id'], params);
+            if (cClause) whereConditions.push(cClause);
+          } else if (userDistricts.length > 0) {
+            const dClause = buildSafeInClause(userDistricts.join(','), 'u_dst', ['v.district_id', 'c.district_id', 'd.id'], params);
+            if (dClause) whereConditions.push(dClause);
+          } else if (userStates.length > 0) {
+            const sClause = buildSafeInClause(userStates.join(','), 'u_st', ['v.state_id', 'c.state_id', 'd.state_id', 's.id'], params);
+            if (sClause) whereConditions.push(sClause);
+          }
+        }
       }
-      if (mandalId) {
-        whereConditions.push(`v.mandal_id = @mandalId`);
-        params.mandalId = mandalId;
-      }
-      if (constituencyId) {
-        whereConditions.push(`v.constituency_id = @constituencyId`);
-        params.constituencyId = constituencyId;
-      }
-      if (gender) {
+
+      // 2. Query level filter parameters (from dropdowns or multi-selects)
+      const bClause = buildSafeInClause(boothId || boothIds, 'f_bth', ['v.booth_id', 'b.id'], params);
+      if (bClause) whereConditions.push(bClause);
+
+      const mClause = buildSafeInClause(mandalId, 'f_mnd', ['v.mandal_id', 'b.mandal_id', 'm.id'], params);
+      if (mClause) whereConditions.push(mClause);
+
+      const cClause = buildSafeInClause(constituencyId || constituencyIds, 'f_cst', ['v.constituency_id', 'b.constituency_id', 'c.id'], params);
+      if (cClause) whereConditions.push(cClause);
+
+      const dClause = buildSafeInClause(districtId || districtIds, 'f_dst', ['v.district_id', 'c.district_id', 'd.id'], params);
+      if (dClause) whereConditions.push(dClause);
+
+      const sClause = buildSafeInClause(stateId || stateIds, 'f_st', ['v.state_id', 'c.state_id', 'd.state_id', 's.id'], params);
+      if (sClause) whereConditions.push(sClause);
+
+      if (gender && gender !== 'all') {
         whereConditions.push(`v.gender = @gender`);
         params.gender = gender;
       }
-      if (caste) {
+      if (caste && caste !== 'all') {
         whereConditions.push(`v.caste = @caste`);
         params.caste = caste;
       }
-      if (voting_status) {
+      if (voting_status && voting_status !== 'all') {
         whereConditions.push(`v.voting_status = @voting_status`);
         params.voting_status = voting_status;
       }
-      if (is_karyakarta !== undefined && is_karyakarta !== '') {
+      if (is_karyakarta !== undefined && is_karyakarta !== '' && is_karyakarta !== 'all') {
         whereConditions.push(`v.is_karyakarta = @is_karyakarta`);
         params.is_karyakarta = is_karyakarta === 'true' || is_karyakarta === '1' ? 1 : 0;
       }
-      if (search) {
-        whereConditions.push(`(v.name LIKE @search OR v.voter_id LIKE @search OR v.mobile LIKE @search OR v.house_no LIKE @search)`);
-        params.search = `%${search}%`;
+      if (search && String(search).trim()) {
+        whereConditions.push(`(v.name LIKE @search OR v.voter_id LIKE @search OR v.mobile LIKE @search OR v.house_no LIKE @search OR v.village LIKE @search)`);
+        params.search = `%${String(search).trim()}%`;
       }
 
       const whereSql = whereConditions.join(' AND ');
 
       // Get total count
-      const countResult = await query(`SELECT COUNT(*) as total FROM dbo.voters v WHERE ${whereSql}`, params);
+      const countResult = await query(`
+        SELECT COUNT(*) as total 
+        FROM dbo.voters v 
+        LEFT JOIN dbo.booths b ON v.booth_id = b.id
+        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id OR b.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id OR b.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+        LEFT JOIN dbo.states s ON v.state_id = s.id OR c.state_id = s.id OR d.state_id = s.id
+        WHERE ${whereSql}
+      `, params);
       const total = countResult[0]?.total || 0;
 
       const pageNum = Math.max(1, parseInt(String(page), 10));
-      const limitNum = Math.max(1, Math.min(500, parseInt(String(limit), 10)));
+      const limitNum = Math.max(1, Math.min(2000, parseInt(String(limit), 10)));
       const offset = (pageNum - 1) * limitNum;
 
       params.offset = offset;
       params.limitNum = limitNum;
 
       const sqlQuery = `
-        SELECT v.*, b.name as booth_name, b.booth_number, m.name as mandal_name, c.name as constituency_name
+        SELECT v.*, 
+          b.name as booth_name, 
+          b.booth_number, 
+          m.name as mandal_name, 
+          c.name as constituency_name,
+          d.name as district_name,
+          s.name as state_name
         FROM dbo.voters v
         LEFT JOIN dbo.booths b ON v.booth_id = b.id
-        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id
-        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id OR b.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id OR b.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+        LEFT JOIN dbo.states s ON v.state_id = s.id OR c.state_id = s.id OR d.state_id = s.id
         WHERE ${whereSql}
         ORDER BY v.part_no ASC, CAST(CASE WHEN ISNUMERIC(v.sr_no)=1 THEN v.sr_no ELSE 0 END AS INT) ASC, v.name ASC
         OFFSET @offset ROWS FETCH NEXT @limitNum ROWS ONLY
@@ -980,27 +2326,84 @@ async function startServer() {
   app.post("/api/voters", authenticateUser, async (req, res) => {
     try {
       const v = req.body;
-      const id = v.id || `voter_${Date.now()}_${Math.floor(Math.random()*10000)}`;
-      await execute(
+      const { id } = v;
+      const bid = v.booth_id !== undefined ? v.booth_id : v.boothId;
+      const mid = v.mandal_id !== undefined ? v.mandal_id : v.mandalId;
+      const cid = v.constituency_id !== undefined ? v.constituency_id : v.constituencyId;
+      const sid = v.state_id !== undefined ? v.state_id : v.stateId;
+      const did = v.district_id !== undefined ? v.district_id : v.districtId;
+
+      if (id && String(id).trim() !== '') {
+        const idParam = String(id);
+        await execute(
+          `UPDATE dbo.voters 
+           SET voter_id = COALESCE(@voter_id, voter_id),
+               name = COALESCE(@name, name),
+               relation_name = COALESCE(@relation_name, relation_name),
+               relation_type = COALESCE(@relation_type, relation_type),
+               gender = COALESCE(@gender, gender),
+               age = COALESCE(@age, age),
+               mobile = COALESCE(@mobile, mobile),
+               email = COALESCE(@email, email),
+               address = COALESCE(@address, address),
+               house_no = COALESCE(@house_no, house_no),
+               village = COALESCE(@village, village),
+               caste = COALESCE(@caste, caste),
+               occupation = COALESCE(@occupation, occupation),
+               is_karyakarta = COALESCE(@is_karyakarta, is_karyakarta),
+               voting_status = COALESCE(@voting_status, voting_status),
+               party_inclination = COALESCE(@party_inclination, party_inclination),
+               booth_id = COALESCE(@booth_id, booth_id),
+               mandal_id = COALESCE(@mandal_id, mandal_id),
+               constituency_id = COALESCE(@constituency_id, constituency_id)
+           WHERE voter_id = @idParam OR CAST(id AS VARCHAR(64)) = @idParam`,
+          {
+            idParam,
+            voter_id: v.voter_id || v.voterId,
+            name: v.name,
+            relation_name: v.relation_name || v.relationName || '',
+            relation_type: v.relation_type || v.relationType || 'Father',
+            gender: v.gender || 'Male',
+            age: v.age !== undefined && v.age !== null && v.age !== '' ? parseInt(String(v.age), 10) : null,
+            mobile: v.mobile || '',
+            email: v.email || '',
+            address: v.address || '',
+            house_no: v.house_no || v.houseNo || '',
+            village: v.village || '',
+            caste: v.caste || '',
+            occupation: v.occupation || '',
+            is_karyakarta: v.is_karyakarta || v.isKaryakarta ? 1 : 0,
+            voting_status: v.voting_status || (v.voted ? 'voted' : 'unvoted') || 'unvoted',
+            party_inclination: v.party_inclination || v.partyInclination || 'Neutral',
+            booth_id: bid ? String(bid) : null,
+            mandal_id: mid ? String(mid) : null,
+            constituency_id: cid ? String(cid) : null
+          }
+        );
+        return res.json({ id: idParam, ...v });
+      }
+
+      const inserted = await query(
         `INSERT INTO dbo.voters (
-          id, voter_id, name, relation_name, relation_type, gender, age, 
+          voter_id, name, relation_name, relation_type, gender, age, 
           part_no, sr_no, mobile, email, address, house_no, village, 
           caste, occupation, is_karyakarta, voting_status, party_inclination, 
           booth_id, mandal_id, constituency_id, state_id, district_id
-        ) VALUES (
-          @id, @voter_id, @name, @relation_name, @relation_type, @gender, @age,
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @voter_id, @name, @relation_name, @relation_type, @gender, @age,
           @part_no, @sr_no, @mobile, @email, @address, @house_no, @village,
           @caste, @occupation, @is_karyakarta, @voting_status, @party_inclination,
           @booth_id, @mandal_id, @constituency_id, @state_id, @district_id
         )`,
         {
-          id,
-          voter_id: v.voter_id || v.voterId || id,
+          voter_id: v.voter_id || v.voterId || `EPIC${Date.now()}`,
           name: v.name,
           relation_name: v.relation_name || v.relationName || '',
           relation_type: v.relation_type || v.relationType || 'Father',
           gender: v.gender || 'Male',
-          age: v.age ? parseInt(v.age, 10) : null,
+          age: v.age !== undefined && v.age !== null && v.age !== '' ? parseInt(String(v.age), 10) : null,
           part_no: v.part_no || v.partNo || '',
           sr_no: v.sr_no || v.srNo || '',
           mobile: v.mobile || '',
@@ -1013,78 +2416,159 @@ async function startServer() {
           is_karyakarta: v.is_karyakarta || v.isKaryakarta ? 1 : 0,
           voting_status: v.voting_status || (v.voted ? 'voted' : 'unvoted') || 'unvoted',
           party_inclination: v.party_inclination || v.partyInclination || 'Neutral',
-          booth_id: v.booth_id || v.boothId,
-          mandal_id: v.mandal_id || v.mandalId || null,
-          constituency_id: v.constituency_id || v.constituencyId,
-          state_id: v.state_id || v.stateId || null,
-          district_id: v.district_id || v.districtId || null
+          booth_id: bid ? String(bid) : null,
+          mandal_id: mid ? String(mid) : null,
+          constituency_id: cid ? String(cid) : null,
+          state_id: sid ? String(sid) : null,
+          district_id: did ? String(did) : null
         }
       );
-      res.json({ id, ...v });
+      res.json(inserted[0] || v);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
-  // Bulk voter import
+  // Bulk voter import (supports upsert, insert_only, update_only)
   app.post("/api/voters/bulk", authenticateUser, async (req, res) => {
     try {
-      const { voters } = req.body;
+      const { voters, mode = 'upsert' } = req.body;
       if (!Array.isArray(voters) || voters.length === 0) {
         return res.status(400).json({ error: 'Expected non-empty array of voters' });
       }
 
       let insertedCount = 0;
+      let updatedCount = 0;
+      let skippedCount = 0;
+      let failedCount = 0;
+
       for (const v of voters) {
-        const id = v.id || `voter_${Date.now()}_${Math.floor(Math.random()*100000)}`;
         try {
-          await execute(
-            `IF NOT EXISTS (SELECT 1 FROM dbo.voters WHERE voter_id = @voter_id)
-             BEGIN
-               INSERT INTO dbo.voters (
-                 id, voter_id, name, relation_name, relation_type, gender, age, 
-                 part_no, sr_no, mobile, address, house_no, village, 
-                 caste, is_karyakarta, voting_status, party_inclination, 
-                 booth_id, mandal_id, constituency_id, state_id, district_id
-               ) VALUES (
-                 @id, @voter_id, @name, @relation_name, @relation_type, @gender, @age,
-                 @part_no, @sr_no, @mobile, @address, @house_no, @village,
-                 @caste, @is_karyakarta, @voting_status, @party_inclination,
-                 @booth_id, @mandal_id, @constituency_id, @state_id, @district_id
-               );
-             END`,
-            {
-              id,
-              voter_id: v.voter_id || v.voterId || id,
-              name: v.name,
-              relation_name: v.relation_name || v.relationName || '',
-              relation_type: v.relation_type || v.relationType || 'Father',
-              gender: v.gender || 'Male',
-              age: v.age ? parseInt(v.age, 10) : null,
-              part_no: v.part_no || v.partNo || '',
-              sr_no: v.sr_no || v.srNo || '',
-              mobile: v.mobile || '',
-              address: v.address || '',
-              house_no: v.house_no || v.houseNo || '',
-              village: v.village || '',
-              caste: v.caste || '',
-              is_karyakarta: v.is_karyakarta || v.isKaryakarta ? 1 : 0,
-              voting_status: v.voting_status || (v.voted ? 'voted' : 'unvoted') || 'unvoted',
-              party_inclination: v.party_inclination || v.partyInclination || 'Neutral',
-              booth_id: v.booth_id || v.boothId,
-              mandal_id: v.mandal_id || v.mandalId || null,
-              constituency_id: v.constituency_id || v.constituencyId,
-              state_id: v.state_id || v.stateId || null,
-              district_id: v.district_id || v.districtId || null
+          const rawEpic = v.voter_id || v.voterId || v.epic;
+          const epic = rawEpic ? String(rawEpic).trim().toUpperCase() : null;
+          if (!epic) {
+            skippedCount++;
+            continue;
+          }
+
+          const bid = v.booth_id !== undefined ? v.booth_id : v.boothId;
+          const mid = v.mandal_id !== undefined ? v.mandal_id : v.mandalId;
+          const cid = v.constituency_id !== undefined ? v.constituency_id : v.constituencyId;
+          const sid = v.state_id !== undefined ? v.state_id : v.stateId;
+          const did = v.district_id !== undefined ? v.district_id : v.districtId;
+
+          const userId = (req as any).user?.uid || (req as any).user?.email || 'bulk_import';
+          const isKarya = (
+            v.is_karyakarta === 1 || 
+            v.is_karyakarta === '1' || 
+            v.is_karyakarta === true || 
+            v.is_karyakarta === 'true' || 
+            v.is_karyakarta === 'yes' || 
+            v.is_karyakarta === 'Yes' || 
+            v.isKaryakarta === 1 || 
+            v.isKaryakarta === true
+          ) ? 1 : 0;
+
+          const params = {
+            voter_id: epic,
+            name: v.name || 'Unnamed Voter',
+            relation_name: v.relation_name || v.relationName || '',
+            relation_type: v.relation_type || v.relationType || 'Father',
+            gender: v.gender || 'Male',
+            age: v.age ? parseInt(String(v.age), 10) : null,
+            part_no: v.part_no || v.partNo || '',
+            sr_no: v.sr_no || v.srNo || '',
+            mobile: v.mobile || '',
+            email: v.email || '',
+            address: v.address || '',
+            house_no: v.house_no || v.houseNo || '',
+            village: v.village || '',
+            caste: v.caste || '',
+            occupation: v.occupation || '',
+            is_karyakarta: isKarya,
+            voting_status: v.voting_status || (v.voted ? 'voted' : 'unvoted') || 'unvoted',
+            party_inclination: v.party_inclination || v.partyInclination || 'Neutral',
+            booth_id: bid ? (parseInt(String(bid), 10) || bid) : null,
+            mandal_id: mid ? (parseInt(String(mid), 10) || mid) : null,
+            constituency_id: cid ? (parseInt(String(cid), 10) || cid) : null,
+            state_id: sid ? (parseInt(String(sid), 10) || sid) : null,
+            district_id: did ? (parseInt(String(did), 10) || did) : null,
+            created_by: userId
+          };
+
+          const existing = await query(`SELECT id FROM dbo.voters WHERE voter_id = @voter_id`, { voter_id: epic });
+
+          if (existing.length > 0) {
+            if (mode === 'insert_only') {
+              skippedCount++;
+            } else {
+              // Upsert or Update Only
+              await execute(
+                `UPDATE dbo.voters SET
+                   name = COALESCE(NULLIF(@name, ''), name),
+                   relation_name = CASE WHEN @relation_name <> '' THEN @relation_name ELSE relation_name END,
+                   relation_type = COALESCE(NULLIF(@relation_type, ''), relation_type),
+                   gender = COALESCE(NULLIF(@gender, ''), gender),
+                   age = COALESCE(@age, age),
+                   part_no = CASE WHEN @part_no <> '' THEN @part_no ELSE part_no END,
+                   sr_no = CASE WHEN @sr_no <> '' THEN @sr_no ELSE sr_no END,
+                   mobile = CASE WHEN @mobile <> '' THEN @mobile ELSE mobile END,
+                   email = CASE WHEN @email <> '' THEN @email ELSE email END,
+                   address = CASE WHEN @address <> '' THEN @address ELSE address END,
+                   house_no = CASE WHEN @house_no <> '' THEN @house_no ELSE house_no END,
+                   village = CASE WHEN @village <> '' THEN @village ELSE village END,
+                   caste = CASE WHEN @caste <> '' THEN @caste ELSE caste END,
+                   occupation = CASE WHEN @occupation <> '' THEN @occupation ELSE occupation END,
+                   is_karyakarta = CASE WHEN @is_karyakarta IS NOT NULL THEN @is_karyakarta ELSE is_karyakarta END,
+                   voting_status = COALESCE(NULLIF(@voting_status, ''), voting_status),
+                   party_inclination = COALESCE(NULLIF(@party_inclination, ''), party_inclination),
+                   booth_id = COALESCE(@booth_id, booth_id),
+                   mandal_id = COALESCE(@mandal_id, mandal_id),
+                   constituency_id = COALESCE(@constituency_id, constituency_id),
+                   state_id = COALESCE(@state_id, state_id),
+                   district_id = COALESCE(@district_id, district_id),
+                   updated_at = SYSUTCDATETIME()
+                 WHERE voter_id = @voter_id`,
+                params
+              );
+              updatedCount++;
             }
-          );
-          insertedCount++;
+          } else {
+            if (mode === 'update_only') {
+              skippedCount++;
+            } else {
+              // Insert new voter
+              await execute(
+                `INSERT INTO dbo.voters (
+                   voter_id, name, relation_name, relation_type, gender, age, 
+                   part_no, sr_no, mobile, email, address, house_no, village, 
+                   caste, occupation, is_karyakarta, voting_status, party_inclination, 
+                   booth_id, mandal_id, constituency_id, state_id, district_id, created_by
+                 ) VALUES (
+                   @voter_id, @name, @relation_name, @relation_type, @gender, @age,
+                   @part_no, @sr_no, @mobile, @email, @address, @house_no, @village,
+                   @caste, @occupation, @is_karyakarta, @voting_status, @party_inclination,
+                   @booth_id, @mandal_id, @constituency_id, @state_id, @district_id, @created_by
+                 )`,
+                params
+              );
+              insertedCount++;
+            }
+          }
         } catch (itemErr) {
           console.warn('Skipped voter item due to error:', itemErr);
+          failedCount++;
         }
       }
 
-      res.json({ success: true, count: insertedCount });
+      res.json({ 
+        success: true, 
+        count: insertedCount + updatedCount, 
+        inserted: insertedCount, 
+        updated: updatedCount, 
+        skipped: skippedCount,
+        failed: failedCount 
+      });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1094,6 +2578,7 @@ async function startServer() {
     try {
       const { id } = req.params;
       const v = req.body;
+      const idParam = String(id);
       await execute(
         `UPDATE dbo.voters 
          SET name = COALESCE(@name, name),
@@ -1108,21 +2593,21 @@ async function startServer() {
              party_inclination = COALESCE(@party_inclination, party_inclination),
              booth_id = COALESCE(@booth_id, booth_id),
              mandal_id = COALESCE(@mandal_id, mandal_id)
-         WHERE id = @id`,
+         WHERE voter_id = @idParam OR CAST(id AS VARCHAR(64)) = @idParam`,
         {
-          id,
+          idParam,
           name: v.name,
           relation_name: v.relation_name || v.relationName,
           gender: v.gender,
-          age: v.age !== undefined ? parseInt(v.age, 10) : null,
+          age: v.age !== undefined && v.age !== null && v.age !== '' ? parseInt(String(v.age), 10) : null,
           mobile: v.mobile,
           house_no: v.house_no || v.houseNo,
           caste: v.caste,
           is_karyakarta: v.is_karyakarta !== undefined ? (v.is_karyakarta ? 1 : 0) : (v.isKaryakarta !== undefined ? (v.isKaryakarta ? 1 : 0) : null),
           voting_status: v.voting_status || (v.voted !== undefined ? (v.voted ? 'voted' : 'unvoted') : null),
           party_inclination: v.party_inclination || v.partyInclination,
-          booth_id: v.booth_id || v.boothId,
-          mandal_id: v.mandal_id || v.mandalId
+          booth_id: v.booth_id ? String(v.booth_id) : (v.boothId ? String(v.boothId) : null),
+          mandal_id: v.mandal_id ? String(v.mandal_id) : (v.mandalId ? String(v.mandalId) : null)
         }
       );
       res.json({ success: true, message: 'Voter updated' });
@@ -1133,8 +2618,20 @@ async function startServer() {
 
   app.delete("/api/voters/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.voters WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const voterIdParam = String(req.params.id);
+      const isNum = !isNaN(Number(voterIdParam)) && /^\d+$/.test(voterIdParam);
+      if (isNum) {
+        await execute(`DELETE FROM dbo.voter_sentiments WHERE voter_id = @voterId OR voter_id IN (SELECT voter_id FROM dbo.voters WHERE id = @numId)`, { voterId: voterIdParam, numId: Number(voterIdParam) });
+        await execute(`DELETE FROM dbo.benefits WHERE voter_doc_id = @voterId OR voter_id = @voterId`, { voterId: voterIdParam });
+        await execute(`DELETE FROM dbo.volunteers WHERE voter_doc_id = @voterId OR voter_id = @voterId`, { voterId: voterIdParam });
+        await execute(`DELETE FROM dbo.voters WHERE id = @numId`, { numId: Number(voterIdParam) });
+      } else {
+        await execute(`DELETE FROM dbo.voter_sentiments WHERE voter_id = @voterId`, { voterId: voterIdParam });
+        await execute(`DELETE FROM dbo.benefits WHERE voter_id = @voterId`, { voterId: voterIdParam });
+        await execute(`DELETE FROM dbo.volunteers WHERE voter_id = @voterId`, { voterId: voterIdParam });
+        await execute(`DELETE FROM dbo.voters WHERE voter_id = @voterId`, { voterId: voterIdParam });
+      }
+      res.json({ success: true, message: 'Voter removed successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1146,9 +2643,132 @@ async function startServer() {
 
   app.get("/api/volunteers", optionalAuth, async (req, res) => {
     try {
-      const volunteers = await query(`SELECT * FROM dbo.volunteers ORDER BY created_at DESC`);
-      res.json(volunteers);
+      const { status, boothId, constituencyId, districtId, stateId, search } = req.query;
+      let whereConditions: string[] = ['1=1'];
+      const params: Record<string, any> = {};
+
+      // Check Authenticated User Profile & Demographic Scoping
+      const reqUser = (req as any).user;
+      if (reqUser) {
+        const { isSuperAdmin, userRow } = await getRequesterInfo(reqUser);
+        if (!isSuperAdmin && userRow) {
+          const userStates = userRow.state_id ? String(userRow.state_id).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const userDistricts = userRow.district_id ? String(userRow.district_id).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const userConstituencies = userRow.constituency_id ? String(userRow.constituency_id).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          let userBooths: string[] = [];
+          try {
+            userBooths = userRow.assigned_booths ? (typeof userRow.assigned_booths === 'string' ? JSON.parse(userRow.assigned_booths) : userRow.assigned_booths) : [];
+          } catch {}
+          if (!Array.isArray(userBooths) || userBooths.length === 0) {
+            if (userRow.booth_id) userBooths = String(userRow.booth_id).split(',').map((s: string) => s.trim()).filter(Boolean);
+          }
+
+          if (userBooths.length > 0) {
+            const bClause = buildSafeInClause(userBooths.join(','), 'u_vol_bth', ['vol.assigned_booth_id', 'v.booth_id', 'b.id'], params);
+            if (bClause) whereConditions.push(bClause);
+          } else if (userConstituencies.length > 0) {
+            const cClause = buildSafeInClause(userConstituencies.join(','), 'u_vol_cst', ['v.constituency_id'], params);
+            if (cClause) whereConditions.push(cClause);
+          } else if (userDistricts.length > 0) {
+            const dClause = buildSafeInClause(userDistricts.join(','), 'u_vol_dst', ['v.district_id'], params);
+            if (dClause) whereConditions.push(dClause);
+          } else if (userStates.length > 0) {
+            const sClause = buildSafeInClause(userStates.join(','), 'u_vol_st', ['v.state_id'], params);
+            if (sClause) whereConditions.push(sClause);
+          }
+        }
+      }
+
+      if (status && status !== 'all') {
+        whereConditions.push(`vol.status = @status`);
+        params.status = status;
+      }
+      const bClause = buildSafeInClause(boothId, 'vol_bth', ['vol.assigned_booth_id', 'v.booth_id', 'b.id'], params);
+      if (bClause) whereConditions.push(bClause);
+
+      const cClause = buildSafeInClause(constituencyId, 'vol_cst', ['v.constituency_id'], params);
+      if (cClause) whereConditions.push(cClause);
+
+      const dClause = buildSafeInClause(districtId, 'vol_dst', ['v.district_id'], params);
+      if (dClause) whereConditions.push(dClause);
+
+      const sClause = buildSafeInClause(stateId, 'vol_st', ['v.state_id'], params);
+      if (sClause) whereConditions.push(sClause);
+
+      if (search && String(search).trim()) {
+        whereConditions.push(`(vol.name LIKE @search OR vol.voter_id LIKE @search OR vol.mobile LIKE @search OR v.village LIKE @search)`);
+        params.search = `%${String(search).trim()}%`;
+      }
+
+      const sql = `
+        SELECT 
+          vol.id,
+          vol.voter_doc_id,
+          vol.voter_id,
+          vol.name,
+          vol.aadhar_number,
+          vol.mobile,
+          vol.admin_id,
+          vol.status,
+          vol.tasks,
+          vol.performance_rating,
+          vol.assigned_booth_id,
+          vol.assigned_booth_name,
+          vol.created_at,
+          v.gender,
+          v.age,
+          v.part_no,
+          v.sr_no,
+          v.address,
+          v.house_no,
+          v.village,
+          v.caste,
+          v.occupation,
+          v.party_inclination,
+          v.voting_status,
+          v.state_id,
+          v.district_id,
+          v.constituency_id,
+          v.booth_id as voter_booth_id,
+          b.name as booth_name,
+          b.booth_number
+        FROM dbo.volunteers vol
+        LEFT JOIN dbo.voters v ON CAST(vol.voter_doc_id AS VARCHAR(64)) = CAST(v.id AS VARCHAR(64))
+        LEFT JOIN dbo.booths b ON (
+          vol.assigned_booth_id IS NOT NULL AND CAST(vol.assigned_booth_id AS VARCHAR(64)) = CAST(b.id AS VARCHAR(64))
+        ) OR (
+          vol.assigned_booth_id IS NULL AND CAST(v.booth_id AS VARCHAR(64)) = CAST(b.id AS VARCHAR(64))
+        )
+        WHERE ${whereConditions.join(' AND ')}
+        ORDER BY vol.created_at DESC
+      `;
+
+      const list = await query(sql, params);
+
+      // Parse tasks JSON safely
+      const parsed = list.map((item: any) => {
+        let tasksArray: any[] = [];
+        if (item.tasks) {
+          if (Array.isArray(item.tasks)) {
+            tasksArray = item.tasks;
+          } else if (typeof item.tasks === 'string') {
+            try {
+              tasksArray = JSON.parse(item.tasks);
+            } catch {
+              tasksArray = [];
+            }
+          }
+        }
+        return {
+          ...item,
+          tasks: tasksArray,
+          performance_rating: item.performance_rating !== null && item.performance_rating !== undefined ? Number(item.performance_rating) : 5.0
+        };
+      });
+
+      res.json(parsed);
     } catch (error: any) {
+      console.error('Error fetching volunteers:', error);
       res.status(500).json({ error: sanitizeError(error) });
     }
   });
@@ -1156,41 +2776,369 @@ async function startServer() {
   app.post("/api/volunteers", authenticateUser, async (req, res) => {
     try {
       const v = req.body;
-      const id = v.id || `vol_${Date.now()}`;
-      await execute(
+      const { id } = v;
+      const vdocId = v.voter_doc_id || v.voterDocId;
+      const abId = v.assigned_booth_id || v.assignedBoothId;
+      const adminId = v.admin_id || v.adminId || (req as any).user?.uid || 'admin';
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.volunteers SET
+             name = COALESCE(NULLIF(@name, ''), name),
+             aadhar_number = @aadhar_number,
+             mobile = @mobile,
+             status = @status,
+             tasks = @tasks,
+             performance_rating = @performance_rating,
+             assigned_booth_id = @assigned_booth_id,
+             assigned_booth_name = @assigned_booth_name
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            name: v.name,
+            aadhar_number: v.aadhar_number || v.aadharNumber || '',
+            mobile: v.mobile || '',
+            status: v.status || 'Active',
+            tasks: JSON.stringify(v.tasks || []),
+            performance_rating: v.performance_rating !== undefined ? Number(v.performance_rating) : 5.0,
+            assigned_booth_id: abId ? (parseInt(String(abId), 10) || abId) : null,
+            assigned_booth_name: v.assigned_booth_name || v.assignedBoothName || ''
+          }
+        );
+
+        if (vdocId) {
+          await execute(`UPDATE dbo.voters SET is_karyakarta = 1 WHERE voter_id = @vdocId OR CAST(id AS VARCHAR(64)) = @vdocId`, {
+            vdocId: String(vdocId)
+          }).catch(() => {});
+        }
+
+        return res.json({ id: Number(id), ...v });
+      }
+
+      // Check if volunteer record already exists for this voter
+      if (vdocId) {
+        const existing = await query(
+          `SELECT id FROM dbo.volunteers WHERE voter_doc_id = @vdocId OR voter_id = @vdocId`,
+          { vdocId: String(vdocId) }
+        );
+        if (existing.length > 0) {
+          return res.status(409).json({ error: 'This voter is already registered as a Karyakarta.' });
+        }
+      }
+
+      const inserted = await query(
         `INSERT INTO dbo.volunteers (
-          id, voter_doc_id, voter_id, name, aadhar_number, mobile, admin_id, 
+          voter_doc_id, voter_id, name, aadhar_number, mobile, admin_id, 
           status, tasks, performance_rating, assigned_booth_id, assigned_booth_name
-        ) VALUES (
-          @id, @voter_doc_id, @voter_id, @name, @aadhar_number, @mobile, @admin_id,
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @voter_doc_id, @voter_id, @name, @aadhar_number, @mobile, @admin_id,
           @status, @tasks, @performance_rating, @assigned_booth_id, @assigned_booth_name
         )`,
         {
-          id,
-          voter_doc_id: v.voter_doc_id || v.voterDocId,
-          voter_id: v.voter_id || v.voterId,
-          name: v.name,
+          voter_doc_id: vdocId ? String(vdocId) : null,
+          voter_id: v.voter_id || v.voterId || (vdocId ? String(vdocId) : ''),
+          name: v.name || 'Karyakarta',
           aadhar_number: v.aadhar_number || v.aadharNumber || '',
           mobile: v.mobile || '',
-          admin_id: v.admin_id || v.adminId || (req as any).user.uid,
+          admin_id: adminId,
           status: v.status || 'Active',
           tasks: JSON.stringify(v.tasks || []),
-          performance_rating: v.performance_rating || v.performanceRating || 5.0,
-          assigned_booth_id: v.assigned_booth_id || v.assignedBoothId || null,
+          performance_rating: v.performance_rating !== undefined ? Number(v.performance_rating) : 5.0,
+          assigned_booth_id: abId ? String(abId) : null,
           assigned_booth_name: v.assigned_booth_name || v.assignedBoothName || ''
         }
       );
-      res.json({ id, ...v });
+
+      // Sync voter is_karyakarta flag
+      if (vdocId) {
+        await execute(`UPDATE dbo.voters SET is_karyakarta = 1 WHERE voter_id = @vdocId OR CAST(id AS VARCHAR(64)) = @vdocId`, {
+          vdocId: String(vdocId)
+        }).catch(() => {});
+      }
+
+      res.json(inserted[0] || v);
     } catch (error: any) {
+      console.error('Error creating volunteer:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/volunteers/:id", authenticateUser, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const v = req.body;
+      const abId = v.assigned_booth_id !== undefined ? v.assigned_booth_id : v.assignedBoothId;
+
+      const current = await query(`SELECT * FROM dbo.volunteers WHERE CAST(id AS VARCHAR(64)) = @id`, {
+        id: String(id)
+      });
+
+      if (current.length === 0) {
+        return res.status(404).json({ error: 'Karyakarta not found.' });
+      }
+
+      const curr = current[0];
+      const nextTasks = v.tasks !== undefined ? JSON.stringify(v.tasks) : curr.tasks;
+      const nextRating = v.performance_rating !== undefined ? Number(v.performance_rating) : (curr.performance_rating || 5.0);
+      const nextStatus = v.status || curr.status || 'Active';
+      const nextMobile = v.mobile !== undefined ? v.mobile : curr.mobile;
+      const nextAadhar = v.aadhar_number !== undefined ? v.aadhar_number : (v.aadharNumber !== undefined ? v.aadharNumber : curr.aadhar_number);
+      const nextName = v.name || curr.name;
+      const nextBoothId = abId !== undefined ? (abId ? String(abId) : null) : curr.assigned_booth_id;
+      const nextBoothName = v.assigned_booth_name !== undefined ? v.assigned_booth_name : (v.assignedBoothName !== undefined ? v.assignedBoothName : curr.assigned_booth_name);
+
+      await execute(
+        `UPDATE dbo.volunteers SET
+           name = @name,
+           aadhar_number = @aadhar_number,
+           mobile = @mobile,
+           status = @status,
+           tasks = @tasks,
+           performance_rating = @performance_rating,
+           assigned_booth_id = @assigned_booth_id,
+           assigned_booth_name = @assigned_booth_name
+         WHERE CAST(id AS VARCHAR(64)) = @id`,
+        {
+          id: String(id),
+          name: nextName,
+          aadhar_number: nextAadhar || '',
+          mobile: nextMobile || '',
+          status: nextStatus,
+          tasks: nextTasks,
+          performance_rating: nextRating,
+          assigned_booth_id: nextBoothId,
+          assigned_booth_name: nextBoothName || ''
+        }
+      );
+
+      res.json({ success: true, id, ...v });
+    } catch (error: any) {
+      console.error('Error updating volunteer:', error);
       res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
   app.delete("/api/volunteers/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.volunteers WHERE id = @id`, { id: req.params.id });
+      const { id } = req.params;
+      const targetId = isNaN(Number(id)) ? id : Number(id);
+
+      // Find voter_doc_id first to reset is_karyakarta in voters table
+      const vol = await query(`SELECT voter_doc_id FROM dbo.volunteers WHERE id = @id`, { id: targetId });
+      
+      await execute(`DELETE FROM dbo.volunteers WHERE id = @id`, { id: targetId });
+
+      if (vol.length > 0 && vol[0].voter_doc_id) {
+        const vdoc = String(vol[0].voter_doc_id);
+        await execute(`UPDATE dbo.voters SET is_karyakarta = 0 WHERE CAST(id AS VARCHAR(64)) = @voterDocId OR voter_id = @voterDocId`, {
+          voterDocId: vdoc
+        }).catch(() => {});
+      }
+
       res.json({ success: true });
     } catch (error: any) {
+      console.error('Error deleting volunteer:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Batch recruitment directly from voter list
+  app.post("/api/volunteers/batch-recruit", authenticateUser, async (req, res) => {
+    try {
+      const { voterDocIds, status = 'Active', assignedBoothId = null, assignedBoothName = '' } = req.body;
+      if (!Array.isArray(voterDocIds) || voterDocIds.length === 0) {
+        return res.status(400).json({ error: 'Expected non-empty array of voterDocIds.' });
+      }
+
+      const adminId = (req as any).user?.uid || 'admin';
+      let recruitedCount = 0;
+      let skippedCount = 0;
+
+      for (const vid of voterDocIds) {
+        try {
+          const strVId = String(vid || '').trim();
+          if (!strVId) continue;
+          
+          // Check if already recruited
+          const existing = await query(`SELECT id FROM dbo.volunteers WHERE voter_doc_id = @vid OR voter_id = @vid`, { vid: strVId });
+          if (existing.length > 0) {
+            skippedCount++;
+            continue;
+          }
+
+          // Fetch voter details
+          const vData = await query(`SELECT id, voter_id, name, mobile, booth_id FROM dbo.voters WHERE CAST(id AS VARCHAR(64)) = @vid OR voter_id = @vid`, { vid: strVId });
+          if (vData.length === 0) {
+            skippedCount++;
+            continue;
+          }
+
+          const voter = vData[0];
+          await execute(
+            `INSERT INTO dbo.volunteers (
+              voter_doc_id, voter_id, name, aadhar_number, mobile, admin_id,
+              status, tasks, performance_rating, assigned_booth_id, assigned_booth_name
+            ) VALUES (
+              @voter_doc_id, @voter_id, @name, '', @mobile, @admin_id,
+              @status, '[]', 5.0, @assigned_booth_id, @assigned_booth_name
+            )`,
+            {
+              voter_doc_id: strVId,
+              voter_id: voter.voter_id || strVId,
+              name: voter.name || 'Karyakarta',
+              mobile: voter.mobile || '',
+              admin_id: adminId,
+              status,
+              assigned_booth_id: assignedBoothId ? (parseInt(String(assignedBoothId), 10) || assignedBoothId) : (voter.booth_id || null),
+              assigned_booth_name: assignedBoothName || ''
+            }
+          );
+
+          // Update voter flag
+          await execute(`UPDATE dbo.voters SET is_karyakarta = 1 WHERE CAST(id AS VARCHAR(64)) = @vid OR voter_id = @vid`, { vid: strVId });
+          recruitedCount++;
+        } catch (itemErr) {
+          console.warn('Batch recruit item error:', itemErr);
+          skippedCount++;
+        }
+      }
+
+      res.json({ success: true, recruited: recruitedCount, skipped: skippedCount });
+    } catch (error: any) {
+      console.error('Error in batch recruitment:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Task Management Endpoints
+  app.post("/api/volunteers/:id/tasks", authenticateUser, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { title, description = '', priority = 'Medium', category = 'Voter Outreach', dueDate = '' } = req.body;
+
+      if (!title || !title.trim()) {
+        return res.status(400).json({ error: 'Task title is required.' });
+      }
+
+      const targetId = isNaN(Number(id)) ? id : Number(id);
+      const rows = await query(`SELECT tasks FROM dbo.volunteers WHERE id = @id`, { id: targetId });
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Karyakarta not found.' });
+      }
+
+      let currentTasks: any[] = [];
+      if (rows[0].tasks) {
+        try {
+          currentTasks = Array.isArray(rows[0].tasks) ? rows[0].tasks : JSON.parse(rows[0].tasks);
+        } catch {
+          currentTasks = [];
+        }
+      }
+
+      const newTask = {
+        id: `task_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+        title: title.trim(),
+        description: description.trim(),
+        priority,
+        category,
+        dueDate,
+        status: 'Pending',
+        createdAt: new Date().toISOString()
+      };
+
+      currentTasks.unshift(newTask);
+
+      await execute(
+        `UPDATE dbo.volunteers SET tasks = @tasks WHERE id = @id`,
+        { id: targetId, tasks: JSON.stringify(currentTasks) }
+      );
+
+      res.json({ success: true, task: newTask, tasks: currentTasks });
+    } catch (error: any) {
+      console.error('Error adding task:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/volunteers/:id/tasks/:taskId", authenticateUser, async (req, res) => {
+    try {
+      const { id, taskId } = req.params;
+      const { status, title, description, priority, category, dueDate } = req.body;
+
+      const targetId = isNaN(Number(id)) ? id : Number(id);
+      const rows = await query(`SELECT tasks FROM dbo.volunteers WHERE id = @id`, { id: targetId });
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Karyakarta not found.' });
+      }
+
+      let currentTasks: any[] = [];
+      if (rows[0].tasks) {
+        try {
+          currentTasks = Array.isArray(rows[0].tasks) ? rows[0].tasks : JSON.parse(rows[0].tasks);
+        } catch {
+          currentTasks = [];
+        }
+      }
+
+      const taskIndex = currentTasks.findIndex((t: any) => t.id === taskId);
+      if (taskIndex === -1) {
+        return res.status(404).json({ error: 'Task not found.' });
+      }
+
+      currentTasks[taskIndex] = {
+        ...currentTasks[taskIndex],
+        ...(status !== undefined && { status }),
+        ...(title !== undefined && { title: title.trim() }),
+        ...(description !== undefined && { description: description.trim() }),
+        ...(priority !== undefined && { priority }),
+        ...(category !== undefined && { category }),
+        ...(dueDate !== undefined && { dueDate }),
+        updatedAt: new Date().toISOString()
+      };
+
+      await execute(
+        `UPDATE dbo.volunteers SET tasks = @tasks WHERE id = @id`,
+        { id: targetId, tasks: JSON.stringify(currentTasks) }
+      );
+
+      res.json({ success: true, task: currentTasks[taskIndex], tasks: currentTasks });
+    } catch (error: any) {
+      console.error('Error updating task:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.delete("/api/volunteers/:id/tasks/:taskId", authenticateUser, async (req, res) => {
+    try {
+      const { id, taskId } = req.params;
+      const targetId = isNaN(Number(id)) ? id : Number(id);
+
+      const rows = await query(`SELECT tasks FROM dbo.volunteers WHERE id = @id`, { id: targetId });
+      if (rows.length === 0) {
+        return res.status(404).json({ error: 'Karyakarta not found.' });
+      }
+
+      let currentTasks: any[] = [];
+      if (rows[0].tasks) {
+        try {
+          currentTasks = Array.isArray(rows[0].tasks) ? rows[0].tasks : JSON.parse(rows[0].tasks);
+        } catch {
+          currentTasks = [];
+        }
+      }
+
+      currentTasks = currentTasks.filter((t: any) => t.id !== taskId);
+
+      await execute(
+        `UPDATE dbo.volunteers SET tasks = @tasks WHERE id = @id`,
+        { id: targetId, tasks: JSON.stringify(currentTasks) }
+      );
+
+      res.json({ success: true, tasks: currentTasks });
+    } catch (error: any) {
+      console.error('Error deleting task:', error);
       res.status(500).json({ error: sanitizeError(error) });
     }
   });
@@ -1208,41 +3156,93 @@ async function startServer() {
   app.post("/api/booths/agents", authenticateUser, async (req, res) => {
     try {
       const a = req.body;
-      const id = a.id || `agent_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.booth_agents WHERE id = @id)
-         BEGIN
-           UPDATE dbo.booth_agents SET
+      const { id } = a;
+      const bId = a.booth_id || a.boothId;
+      const aVolId = a.agent_volunteer_id || a.agentVolunteerDocId;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.booth_agents SET
              designation = COALESCE(@designation, designation),
              agent_name = COALESCE(@agent_name, agent_name),
              agent_mobile = COALESCE(@agent_mobile, agent_mobile),
-             agent_aadhar = COALESCE(@agent_aadhar, agent_aadhar)
-           WHERE id = @id
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.booth_agents (
-             id, admin_id, booth_id, booth_number, booth_name, 
-             agent_volunteer_id, agent_name, agent_aadhar, agent_mobile, designation
-           ) VALUES (
-             @id, @admin_id, @booth_id, @booth_number, @booth_name,
-             @agent_volunteer_id, @agent_name, @agent_aadhar, @agent_mobile, @designation
-           )
-         END`,
+             agent_aadhar = COALESCE(@agent_aadhar, agent_aadhar),
+             booth_id = COALESCE(@booth_id, booth_id),
+             booth_number = COALESCE(@booth_number, booth_number),
+             booth_name = COALESCE(@booth_name, booth_name)
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            designation: a.designation || 'Booth President',
+            agent_name: a.agent_name || a.agentName || '',
+            agent_mobile: a.agent_mobile || a.agentMobile || '',
+            agent_aadhar: a.agent_aadhar || a.agentAadhar || '',
+            booth_id: bId ? String(bId) : null,
+            booth_number: a.booth_number || a.boothNumber || '',
+            booth_name: a.booth_name || a.boothName || ''
+          }
+        );
+        return res.json({ id: String(id), ...a });
+      }
+
+      // Check if this volunteer is already assigned to this booth
+      const existing = await query(
+        `SELECT id FROM dbo.booth_agents 
+         WHERE booth_id = @booth_id AND (agent_volunteer_id = @agent_volunteer_id OR CAST(agent_volunteer_id AS VARCHAR(64)) = @agent_volunteer_id)`,
         {
-          id,
+          booth_id: bId ? String(bId) : '',
+          agent_volunteer_id: aVolId ? String(aVolId) : ''
+        }
+      );
+
+      if (existing.length > 0) {
+        // Update designation
+        await execute(
+          `UPDATE dbo.booth_agents SET
+             designation = @designation,
+             agent_name = @agent_name,
+             agent_mobile = @agent_mobile,
+             agent_aadhar = @agent_aadhar,
+             booth_number = @booth_number,
+             booth_name = @booth_name
+           WHERE id = @id`,
+          {
+            id: existing[0].id,
+            designation: a.designation || 'Booth President',
+            agent_name: a.agent_name || a.agentName || '',
+            agent_mobile: a.agent_mobile || a.agentMobile || '',
+            agent_aadhar: a.agent_aadhar || a.agentAadhar || '',
+            booth_number: a.booth_number || a.boothNumber || '',
+            booth_name: a.booth_name || a.boothName || ''
+          }
+        );
+        return res.json({ id: String(existing[0].id), ...a });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.booth_agents (
+          admin_id, booth_id, booth_number, booth_name, 
+          agent_volunteer_id, agent_name, agent_aadhar, agent_mobile, designation
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @admin_id, @booth_id, @booth_number, @booth_name,
+          @agent_volunteer_id, @agent_name, @agent_aadhar, @agent_mobile, @designation
+        )`,
+        {
           admin_id: a.admin_id || a.adminId || (req as any).user.uid,
-          booth_id: a.booth_id || a.boothId || '',
+          booth_id: bId ? String(bId) : null,
           booth_number: a.booth_number || a.boothNumber || '',
           booth_name: a.booth_name || a.boothName || '',
-          agent_volunteer_id: a.agent_volunteer_id || a.agentVolunteerDocId || '',
+          agent_volunteer_id: aVolId ? String(aVolId) : null,
           agent_name: a.agent_name || a.agentName || '',
           agent_aadhar: a.agent_aadhar || a.agentAadhar || '',
           agent_mobile: a.agent_mobile || a.agentMobile || '',
-          designation: a.designation || 'Booth In-charge'
+          designation: a.designation || 'Booth President'
         }
       );
-      res.json({ id, ...a });
+      const resItem = inserted[0] || a;
+      res.json({ id: String(resItem.id), ...resItem });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1266,23 +3266,23 @@ async function startServer() {
       const benefits = await query(`SELECT * FROM dbo.benefits ORDER BY distribution_date DESC, created_at DESC`);
       const formatted = benefits.map(b => {
         let witnesses = [];
-        try { witnesses = b.witnesses ? JSON.parse(b.witnesses) : []; } catch {}
+        try { witnesses = b.witnesses ? (typeof b.witnesses === 'string' ? JSON.parse(b.witnesses) : b.witnesses) : []; } catch {}
         return {
-          id: b.id,
-          voterDocId: b.voter_doc_id,
-          voterId: b.voter_id,
-          voterName: b.voter_name,
-          aadharNumber: b.aadhar_number,
-          amount: b.amount,
-          benefitName: b.benefit_name,
-          benefitType: b.benefit_type,
+          id: String(b.id),
+          voterDocId: b.voter_doc_id ? String(b.voter_doc_id) : '',
+          voterId: b.voter_id || '',
+          voterName: b.voter_name || '',
+          aadharNumber: b.aadhar_number || '',
+          amount: typeof b.amount === 'number' ? b.amount : parseFloat(b.amount || '0'),
+          benefitName: b.benefit_name || '',
+          benefitType: b.benefit_type || 'Government',
           date: b.distribution_date ? new Date(b.distribution_date).toISOString().split('T')[0] : '',
-          adminId: b.admin_id,
-          notes: b.notes,
+          adminId: b.admin_id || '',
+          notes: b.notes || '',
           createdAt: b.created_at,
-          witnessName: b.witness_name,
-          witnessVoterId: b.witness_voter_id,
-          witnessVoterDocId: b.witness_voter_doc_id,
+          witnessName: b.witness_name || '',
+          witnessVoterId: b.witness_voter_id || '',
+          witnessVoterDocId: b.witness_voter_doc_id ? String(b.witness_voter_doc_id) : '',
           witnesses
         };
       });
@@ -1295,21 +3295,49 @@ async function startServer() {
   app.post("/api/benefits", authenticateUser, async (req, res) => {
     try {
       const b = req.body;
-      const id = b.id || `ben_${Date.now()}`;
-      await execute(
+      const { id } = b;
+      const vdocId = b.voter_doc_id || b.voterDocId;
+      const wVdocId = b.witness_voter_doc_id || b.witnessVoterDocId;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.benefits SET
+             voter_name = @voter_name, aadhar_number = @aadhar_number, amount = @amount,
+             benefit_name = @benefit_name, benefit_type = @benefit_type, distribution_date = @distribution_date,
+             notes = @notes, witness_name = @witness_name, witness_voter_id = @witness_voter_id, witnesses = @witnesses
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            voter_name: b.voter_name || b.voterName,
+            aadhar_number: b.aadhar_number || b.aadharNumber || '',
+            amount: b.amount ? parseFloat(b.amount) : 0,
+            benefit_name: b.benefit_name || b.benefitName,
+            benefit_type: b.benefit_type || b.benefitType || 'Government',
+            distribution_date: b.distribution_date || b.date || new Date().toISOString().split('T')[0],
+            notes: b.notes || '',
+            witness_name: b.witness_name || b.witnessName || '',
+            witness_voter_id: b.witness_voter_id || b.witnessVoterId || '',
+            witnesses: JSON.stringify(b.witnesses || [])
+          }
+        );
+        return res.json({ id: String(id), ...b });
+      }
+
+      const inserted = await query(
         `INSERT INTO dbo.benefits (
-          id, voter_doc_id, voter_id, voter_name, aadhar_number, amount, 
+          voter_doc_id, voter_id, voter_name, aadhar_number, amount, 
           benefit_name, benefit_type, distribution_date, admin_id, notes, 
           witness_name, witness_voter_id, witness_voter_doc_id, witnesses
-        ) VALUES (
-          @id, @voter_doc_id, @voter_id, @voter_name, @aadhar_number, @amount,
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @voter_doc_id, @voter_id, @voter_name, @aadhar_number, @amount,
           @benefit_name, @benefit_type, @distribution_date, @admin_id, @notes,
           @witness_name, @witness_voter_id, @witness_voter_doc_id, @witnesses
         )`,
         {
-          id,
-          voter_doc_id: b.voter_doc_id || b.voterDocId,
-          voter_id: b.voter_id || b.voterId,
+          voter_doc_id: vdocId ? String(vdocId) : null,
+          voter_id: b.voter_id || b.voterId || (vdocId ? String(vdocId) : ''),
           voter_name: b.voter_name || b.voterName,
           aadhar_number: b.aadhar_number || b.aadharNumber || '',
           amount: b.amount ? parseFloat(b.amount) : 0,
@@ -1320,11 +3348,51 @@ async function startServer() {
           notes: b.notes || '',
           witness_name: b.witness_name || b.witnessName || '',
           witness_voter_id: b.witness_voter_id || b.witnessVoterId || '',
-          witness_voter_doc_id: b.witness_voter_doc_id || b.witnessVoterDocId || '',
+          witness_voter_doc_id: wVdocId ? String(wVdocId) : null,
           witnesses: JSON.stringify(b.witnesses || [])
         }
       );
-      res.json({ id, ...b });
+      const resItem = inserted[0] || b;
+      res.json({ id: String(resItem.id), ...resItem });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/benefits/:id", authenticateUser, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const b = req.body;
+      const targetId = Number(id) || id;
+      await execute(
+        `UPDATE dbo.benefits SET
+           voter_name = COALESCE(@voter_name, voter_name),
+           aadhar_number = COALESCE(@aadhar_number, aadhar_number),
+           amount = COALESCE(@amount, amount),
+           benefit_name = COALESCE(@benefit_name, benefit_name),
+           benefit_type = COALESCE(@benefit_type, benefit_type),
+           distribution_date = COALESCE(@distribution_date, distribution_date),
+           notes = COALESCE(@notes, notes),
+           witness_name = COALESCE(@witness_name, witness_name),
+           witness_voter_id = COALESCE(@witness_voter_id, witness_voter_id),
+           witnesses = COALESCE(@witnesses, witnesses)
+         WHERE id = @id OR CAST(id AS VARCHAR(64)) = @idStr`,
+        {
+          id: targetId,
+          idStr: String(id),
+          voter_name: b.voter_name || b.voterName,
+          aadhar_number: b.aadhar_number || b.aadharNumber || '',
+          amount: b.amount !== undefined ? parseFloat(b.amount) : null,
+          benefit_name: b.benefit_name || b.benefitName,
+          benefit_type: b.benefit_type || b.benefitType || 'Government',
+          distribution_date: b.distribution_date || b.date || null,
+          notes: b.notes || '',
+          witness_name: b.witness_name || b.witnessName || '',
+          witness_voter_id: b.witness_voter_id || b.witnessVoterId || '',
+          witnesses: b.witnesses ? JSON.stringify(b.witnesses) : null
+        }
+      );
+      res.json({ success: true, id: String(id), ...b });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1332,7 +3400,7 @@ async function startServer() {
 
   app.delete("/api/benefits/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.benefits WHERE id = @id`, { id: req.params.id });
+      await execute(`DELETE FROM dbo.benefits WHERE id = @id OR CAST(id AS VARCHAR(64)) = @id`, { id: req.params.id });
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -1350,9 +3418,9 @@ async function startServer() {
         let allocations = {};
         try { allocations = b.allocations ? JSON.parse(b.allocations) : {}; } catch {}
         return {
-          id: b.id,
+          id: String(b.id),
           adminId: b.admin_id,
-          totalBudget: b.total_budget,
+          totalBudget: parseFloat(b.total_budget) || 0,
           electionYear: b.election_year,
           allocations
         };
@@ -1366,31 +3434,40 @@ async function startServer() {
   app.post("/api/finance/budgets", authenticateUser, async (req, res) => {
     try {
       const b = req.body;
-      const id = b.id || `budget_${Date.now()}`;
       const adminId = b.admin_id || b.adminId || (req as any).user.uid;
       const allocationsJson = JSON.stringify(b.allocations || {});
+      const totalBudget = parseFloat(b.totalBudget || b.total_budget) || 0;
+      const eYear = String(b.electionYear || b.election_year || '2026');
 
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.campaign_budgets WHERE admin_id = @admin_id)
-         BEGIN
-           UPDATE dbo.campaign_budgets 
-           SET total_budget = @total_budget, election_year = @election_year, allocations = @allocations, updated_at = SYSUTCDATETIME()
-           WHERE admin_id = @admin_id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.campaign_budgets (id, admin_id, total_budget, election_year, allocations)
-           VALUES (@id, @admin_id, @total_budget, @election_year, @allocations);
-         END`,
-        {
-          id,
-          admin_id: adminId,
-          total_budget: b.totalBudget || b.total_budget || 0,
-          election_year: String(b.electionYear || b.election_year || '2026'),
-          allocations: allocationsJson
-        }
+      const existing = await query(
+        `SELECT id FROM dbo.campaign_budgets WHERE admin_id = @admin_id AND (election_year = @election_year OR @election_year IS NULL)`,
+        { admin_id: adminId, election_year: eYear }
       );
-      res.json({ id, ...b });
+
+      if (existing.length > 0) {
+        await execute(
+          `UPDATE dbo.campaign_budgets 
+           SET total_budget = @total_budget, election_year = @election_year, allocations = @allocations, updated_at = SYSUTCDATETIME()
+           WHERE id = @id OR CAST(id AS VARCHAR(64)) = @idStr`,
+          {
+            id: existing[0].id,
+            idStr: String(existing[0].id),
+            total_budget: totalBudget,
+            election_year: eYear,
+            allocations: allocationsJson
+          }
+        );
+        return res.json({ id: String(existing[0].id), adminId, totalBudget, electionYear: eYear, allocations: b.allocations });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.campaign_budgets (admin_id, total_budget, election_year, allocations)
+         OUTPUT INSERTED.*
+         VALUES (@admin_id, @total_budget, @election_year, @allocations)`,
+        { admin_id: adminId, total_budget: totalBudget, election_year: eYear, allocations: allocationsJson }
+      );
+      const resBudget = inserted[0] || b;
+      res.json({ id: String(resBudget.id || 'b_' + Date.now()), adminId, totalBudget, electionYear: eYear, allocations: b.allocations });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1400,16 +3477,16 @@ async function startServer() {
     try {
       const transactions = await query(`SELECT * FROM dbo.finance_transactions ORDER BY transaction_date DESC, created_at DESC`);
       const formatted = transactions.map(t => ({
-        id: t.id,
+        id: String(t.id),
         adminId: t.admin_id,
         type: t.type,
         title: t.title,
-        amount: t.amount,
+        amount: parseFloat(t.amount) || 0,
         category: t.category,
-        date: t.transaction_date,
+        date: t.transaction_date ? (t.transaction_date instanceof Date ? t.transaction_date.toISOString().split('T')[0] : String(t.transaction_date).split('T')[0]) : '',
         paymentMethod: t.payment_method,
-        donorName: t.donor_name,
-        notes: t.notes
+        donorName: t.donor_name || '',
+        notes: t.notes || ''
       }));
       res.json(formatted);
     } catch (error: any) {
@@ -1420,45 +3497,105 @@ async function startServer() {
   app.post("/api/finance/transactions", authenticateUser, async (req, res) => {
     try {
       const t = req.body;
-      const id = t.id || `tx_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.finance_transactions WHERE id = @id)
-         BEGIN
-           UPDATE dbo.finance_transactions SET
-             type = @type,
-             title = @title,
-             amount = @amount,
-             category = @category,
-             transaction_date = @transaction_date,
-             payment_method = @payment_method,
-             donor_name = @donor_name,
-             notes = @notes
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.finance_transactions (
-             id, admin_id, type, title, amount, category, 
-             transaction_date, payment_method, donor_name, notes
-           ) VALUES (
-             @id, @admin_id, @type, @title, @amount, @category,
-             @transaction_date, @payment_method, @donor_name, @notes
-           );
-         END`,
+      const { id } = t;
+      const adminId = t.admin_id || t.adminId || (req as any).user.uid;
+      const tAmount = parseFloat(t.amount) || 0;
+      const tDate = t.date || t.transaction_date || new Date().toISOString().split('T')[0];
+
+      if (id) {
+        const numId = Number(id);
+        const targetId = isNaN(numId) ? id : numId;
+        await execute(
+          `UPDATE dbo.finance_transactions SET
+             type = @type, title = @title, amount = @amount, category = @category,
+             transaction_date = @transaction_date, payment_method = @payment_method,
+             donor_name = @donor_name, notes = @notes
+           WHERE id = @id OR CAST(id AS VARCHAR(64)) = @idStr`,
+          {
+            id: targetId,
+            idStr: String(id),
+            type: t.type || 'expense',
+            title: t.title || '',
+            amount: tAmount,
+            category: t.category || 'General',
+            transaction_date: tDate,
+            payment_method: t.paymentMethod || t.payment_method || 'Cash',
+            donor_name: t.donorName || t.donor_name || '',
+            notes: t.notes || ''
+          }
+        );
+        return res.json({ id: String(id), adminId, ...t, amount: tAmount, date: tDate });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.finance_transactions (
+          admin_id, type, title, amount, category, 
+          transaction_date, payment_method, donor_name, notes
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @admin_id, @type, @title, @amount, @category,
+          @transaction_date, @payment_method, @donor_name, @notes
+        )`,
         {
-          id,
-          admin_id: t.admin_id || t.adminId || (req as any).user.uid,
+          admin_id: adminId,
           type: t.type || 'expense',
-          title: t.title,
-          amount: t.amount ? parseFloat(t.amount) : 0,
-          category: t.category,
-          transaction_date: t.date || t.transaction_date || new Date().toISOString().split('T')[0],
+          title: t.title || '',
+          amount: tAmount,
+          category: t.category || 'General',
+          transaction_date: tDate,
           payment_method: t.paymentMethod || t.payment_method || 'Cash',
           donor_name: t.donorName || t.donor_name || '',
           notes: t.notes || ''
         }
       );
-      res.json({ id, ...t });
+      const resTx = inserted[0] || t;
+      res.json({
+        id: String(resTx.id || 'tx_' + Date.now()),
+        adminId,
+        type: t.type || 'expense',
+        title: t.title,
+        amount: tAmount,
+        category: t.category || 'General',
+        date: tDate,
+        paymentMethod: t.paymentMethod || t.payment_method || 'Cash',
+        donorName: t.donorName || t.donor_name || '',
+        notes: t.notes || ''
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/finance/transactions/:id", authenticateUser, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const t = req.body;
+      const numId = Number(id);
+      const targetId = isNaN(numId) ? id : numId;
+      const tAmount = parseFloat(t.amount) || 0;
+      const tDate = t.date || t.transaction_date || new Date().toISOString().split('T')[0];
+
+      await execute(
+        `UPDATE dbo.finance_transactions SET
+           type = @type, title = @title, amount = @amount, category = @category,
+           transaction_date = @transaction_date, payment_method = @payment_method,
+           donor_name = @donor_name, notes = @notes
+         WHERE id = @id OR CAST(id AS VARCHAR(64)) = @idStr`,
+        {
+          id: targetId,
+          idStr: String(id),
+          type: t.type || 'expense',
+          title: t.title || '',
+          amount: tAmount,
+          category: t.category || 'General',
+          transaction_date: tDate,
+          payment_method: t.paymentMethod || t.payment_method || 'Cash',
+          donor_name: t.donorName || t.donor_name || '',
+          notes: t.notes || ''
+        }
+      );
+      res.json({ success: true, id: String(id), ...t, amount: tAmount, date: tDate });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1466,7 +3603,10 @@ async function startServer() {
 
   app.delete("/api/finance/transactions/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.finance_transactions WHERE id = @id`, { id: req.params.id });
+      const { id } = req.params;
+      const numId = Number(id);
+      const targetId = isNaN(numId) ? id : numId;
+      await execute(`DELETE FROM dbo.finance_transactions WHERE id = @id OR CAST(id AS VARCHAR(64)) = @idStr`, { id: targetId, idStr: String(id) });
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -1500,11 +3640,11 @@ async function startServer() {
   app.post("/api/whatsapp/configs", authenticateUser, async (req, res) => {
     try {
       const c = req.body;
-      const id = c.id || `wa_cfg_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.whatsapp_configs WHERE id = @id)
-         BEGIN
-           UPDATE dbo.whatsapp_configs SET
+      const { id } = c;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.whatsapp_configs SET
              tenant_type = @tenant_type,
              vendor_name = @vendor_name,
              phone_number_id = @phone_number_id,
@@ -1512,20 +3652,32 @@ async function startServer() {
              access_token = @access_token,
              phone_number = @phone_number,
              status = @status
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.whatsapp_configs (
-             id, admin_id, tenant_type, vendor_name, phone_number_id, 
-             waba_id, access_token, phone_number, status
-           ) VALUES (
-             @id, @admin_id, @tenant_type, @vendor_name, @phone_number_id,
-             @waba_id, @access_token, @phone_number, @status
-           );
-         END`,
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            tenant_type: c.tenantType || c.tenant_type || 'shared',
+            vendor_name: c.vendorName || c.vendor_name || 'Meta Cloud API',
+            phone_number_id: c.phoneNumberId || c.phone_number_id || '',
+            waba_id: c.wabaId || c.waba_id || '',
+            access_token: c.accessToken || c.access_token || '',
+            phone_number: c.phoneNumber || c.phone_number || '',
+            status: c.status || 'connected'
+          }
+        );
+        return res.json({ id: Number(id), ...c });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.whatsapp_configs (
+          admin_id, tenant_type, vendor_name, phone_number_id, 
+          waba_id, access_token, phone_number, status
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @admin_id, @tenant_type, @vendor_name, @phone_number_id,
+          @waba_id, @access_token, @phone_number, @status
+        )`,
         {
-          id,
           admin_id: c.admin_id || c.adminId || (req as any).user.uid,
           tenant_type: c.tenantType || c.tenant_type || 'shared',
           vendor_name: c.vendorName || c.vendor_name || 'Meta Cloud API',
@@ -1536,7 +3688,7 @@ async function startServer() {
           status: c.status || 'connected'
         }
       );
-      res.json({ id, ...c });
+      res.json(inserted[0] || c);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1572,25 +3724,34 @@ async function startServer() {
   app.post("/api/whatsapp/templates", authenticateUser, async (req, res) => {
     try {
       const t = req.body;
-      const id = t.id || `wa_tpl_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.whatsapp_templates WHERE id = @id)
-         BEGIN
-           UPDATE dbo.whatsapp_templates SET
+      const { id } = t;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.whatsapp_templates SET
              name = @name,
              category = @category,
              language = @language,
              body_text = @body_text,
              status = @status
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.whatsapp_templates (id, admin_id, name, category, language, body_text, status)
-           VALUES (@id, @admin_id, @name, @category, @language, @body_text, @status);
-         END`,
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            name: t.name,
+            category: t.category || 'MARKETING',
+            language: t.language || 'en',
+            body_text: t.bodyText || t.body_text || '',
+            status: t.status || 'APPROVED'
+          }
+        );
+        return res.json({ id: Number(id), ...t });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.whatsapp_templates (admin_id, name, category, language, body_text, status)
+         OUTPUT INSERTED.*
+         VALUES (@admin_id, @name, @category, @language, @body_text, @status)`,
         {
-          id,
           admin_id: t.admin_id || t.adminId || (req as any).user.uid,
           name: t.name,
           category: t.category || 'MARKETING',
@@ -1599,7 +3760,7 @@ async function startServer() {
           status: t.status || 'APPROVED'
         }
       );
-      res.json({ id, ...t });
+      res.json(inserted[0] || t);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1642,11 +3803,13 @@ async function startServer() {
   app.post("/api/whatsapp/broadcasts", authenticateUser, async (req, res) => {
     try {
       const b = req.body;
-      const id = b.id || `broadcast_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.whatsapp_broadcasts WHERE id = @id)
-         BEGIN
-           UPDATE dbo.whatsapp_broadcasts SET
+      const { id } = b;
+      const sCfgId = b.senderConfigId || b.sender_config_id;
+      const tId = b.templateId || b.template_id;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.whatsapp_broadcasts SET
              campaign_name = COALESCE(@campaign_name, campaign_name),
              sender_config_id = COALESCE(@sender_config_id, sender_config_id),
              sender_phone = COALESCE(@sender_phone, sender_phone),
@@ -1658,37 +3821,53 @@ async function startServer() {
              total_count = COALESCE(@total_count, total_count),
              success_count = COALESCE(@success_count, success_count),
              failed_count = COALESCE(@failed_count, failed_count)
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.whatsapp_broadcasts (
-             id, admin_id, campaign_name, sender_config_id, sender_phone, 
-             template_id, template_name, media_url, media_type, status, 
-             total_count, success_count, failed_count
-           ) VALUES (
-             @id, @admin_id, @campaign_name, @sender_config_id, @sender_phone,
-             @template_id, @template_name, @media_url, @media_type, @status,
-             @total_count, @success_count, @failed_count
-           );
-         END`,
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            campaign_name: b.campaignName || b.campaign_name,
+            sender_config_id: sCfgId ? (parseInt(sCfgId, 10) || sCfgId) : null,
+            sender_phone: b.senderPhone || b.sender_phone || '',
+            template_id: tId ? (parseInt(tId, 10) || tId) : null,
+            template_name: b.templateName || b.template_name || '',
+            media_url: b.mediaUrl || b.media_url || null,
+            media_type: b.mediaType || b.media_type || 'none',
+            status: b.status || 'Completed',
+            total_count: b.totalCount !== undefined ? b.totalCount : (b.total_count !== undefined ? b.total_count : 0),
+            success_count: b.successCount !== undefined ? b.successCount : (b.success_count !== undefined ? b.success_count : 0),
+            failed_count: b.failedCount !== undefined ? b.failedCount : (b.failed_count !== undefined ? b.failed_count : 0)
+          }
+        );
+        return res.json({ id: Number(id), ...b });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.whatsapp_broadcasts (
+          admin_id, campaign_name, sender_config_id, sender_phone, 
+          template_id, template_name, media_url, media_type, status, 
+          total_count, success_count, failed_count
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @admin_id, @campaign_name, @sender_config_id, @sender_phone,
+          @template_id, @template_name, @media_url, @media_type, @status,
+          @total_count, @success_count, @failed_count
+        )`,
         {
-          id,
           admin_id: b.admin_id || b.adminId || (req as any).user.uid,
           campaign_name: b.campaignName || b.campaign_name,
-          sender_config_id: b.senderConfigId || b.sender_config_id || '',
+          sender_config_id: parseInt(sCfgId, 10) || sCfgId,
           sender_phone: b.senderPhone || b.sender_phone || '',
-          template_id: b.templateId || b.template_id || null,
+          template_id: tId ? (parseInt(tId, 10) || tId) : null,
           template_name: b.templateName || b.template_name || '',
           media_url: b.mediaUrl || b.media_url || null,
           media_type: b.mediaType || b.media_type || 'none',
-          status: b.status || 'Completed',
+          status: b.status || 'Draft',
           total_count: b.totalCount !== undefined ? b.totalCount : (b.total_count !== undefined ? b.total_count : 0),
           success_count: b.successCount !== undefined ? b.successCount : (b.success_count !== undefined ? b.success_count : 0),
           failed_count: b.failedCount !== undefined ? b.failedCount : (b.failed_count !== undefined ? b.failed_count : 0)
         }
       );
-      res.json({ id, ...b });
+      res.json(inserted[0] || b);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1711,7 +3890,15 @@ async function startServer() {
   app.get("/api/elections", optionalAuth, async (req, res) => {
     try {
       const elections = await query(`SELECT * FROM dbo.elections ORDER BY year DESC`);
-      res.json(elections);
+      const formatted = elections.map(e => ({
+        id: String(e.id),
+        year: e.year,
+        title: e.title || `${e.year} Election`,
+        description: e.description || '',
+        status: e.status || 'Upcoming',
+        createdAt: e.created_at
+      }));
+      res.json(formatted);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1720,31 +3907,33 @@ async function startServer() {
   app.post("/api/elections", authenticateUser, async (req, res) => {
     try {
       const { id, year, title, description, status } = req.body;
-      const electionId = id || `elec_${year || Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.elections WHERE id = @id)
-         BEGIN
-           UPDATE dbo.elections SET
+      const yNum = parseInt(year, 10) || new Date().getFullYear();
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.elections SET
              year = @year,
              title = @title,
              description = @description,
              status = @status
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.elections (id, year, title, description, status)
-           VALUES (@id, @year, @title, @description, @status);
-         END`,
+           WHERE id = @id`,
+          { id: Number(id), year: yNum, title: title || `${yNum} Election`, description: description || '', status: status || 'Upcoming' }
+        );
+        return res.json({ id: Number(id), year: yNum, title, description, status });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.elections (year, title, description, status)
+         OUTPUT INSERTED.*
+         VALUES (@year, @title, @description, @status)`,
         {
-          id: electionId,
-          year: parseInt(year, 10),
-          title: title || `${year} Election`,
+          year: yNum,
+          title: title || `${yNum} Election`,
           description: description || '',
           status: status || 'Upcoming'
         }
       );
-      res.json({ id: electionId, year, title, description, status });
+      res.json(inserted[0] || { year: yNum, title, description, status });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1761,7 +3950,7 @@ async function startServer() {
              description = COALESCE(@description, description),
              status = COALESCE(@status, status)
          WHERE id = @id`,
-        { id, year: year ? parseInt(year, 10) : null, title, description, status }
+        { id: Number(id) || id, year: year ? parseInt(year, 10) : null, title, description, status }
       );
       res.json({ success: true, message: 'Election updated' });
     } catch (error: any) {
@@ -1771,8 +3960,11 @@ async function startServer() {
 
   app.delete("/api/elections/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.elections WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const electionId = req.params.id;
+      await execute(`DELETE FROM dbo.voter_sentiments WHERE election_id = @electionId`, { electionId });
+      await execute(`DELETE FROM dbo.surveys WHERE election_id = @electionId`, { electionId });
+      await execute(`DELETE FROM dbo.elections WHERE id = @electionId`, { electionId });
+      res.json({ success: true, message: 'Election removed successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1799,31 +3991,39 @@ async function startServer() {
   app.post("/api/parties", authenticateUser, async (req, res) => {
     try {
       const { id, name, abbreviation, logoUrl, color } = req.body;
-      const partyId = id || `party_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.political_parties WHERE id = @id)
-         BEGIN
-           UPDATE dbo.political_parties SET
+      const abrv = abbreviation || (name ? name.substring(0, 3).toUpperCase() : 'PTY');
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.political_parties SET
              name = @name,
              abbreviation = @abbreviation,
              logo_url = @logo_url,
              color = @color
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.political_parties (id, name, abbreviation, logo_url, color)
-           VALUES (@id, @name, @abbreviation, @logo_url, @color);
-         END`,
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            name,
+            abbreviation: abrv,
+            logo_url: logoUrl || '',
+            color: color || '#3b82f6'
+          }
+        );
+        return res.json({ id: Number(id), name, abbreviation: abrv, logoUrl, color });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.political_parties (name, abbreviation, logo_url, color)
+         OUTPUT INSERTED.*
+         VALUES (@name, @abbreviation, @logo_url, @color)`,
         {
-          id: partyId,
           name,
-          abbreviation: abbreviation || name.substring(0, 3).toUpperCase(),
+          abbreviation: abrv,
           logo_url: logoUrl || '',
           color: color || '#3b82f6'
         }
       );
-      res.json({ id: partyId, name, abbreviation, logoUrl, color });
+      res.json(inserted[0] || { name, abbreviation: abrv, logoUrl, color });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1840,7 +4040,7 @@ async function startServer() {
              logo_url = COALESCE(@logo_url, logo_url),
              color = COALESCE(@color, color)
          WHERE id = @id`,
-        { id, name, abbreviation, logo_url: logoUrl, color }
+        { id: Number(id) || id, name, abbreviation, logo_url: logoUrl, color }
       );
       res.json({ success: true, message: 'Party updated' });
     } catch (error: any) {
@@ -1850,8 +4050,10 @@ async function startServer() {
 
   app.delete("/api/parties/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.political_parties WHERE id = @id`, { id: req.params.id });
-      res.json({ success: true });
+      const partyId = req.params.id;
+      await execute(`DELETE FROM dbo.voter_sentiments WHERE favored_party_id = @partyId`, { partyId });
+      await execute(`DELETE FROM dbo.political_parties WHERE id = @partyId`, { partyId });
+      res.json({ success: true, message: 'Party removed successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1867,13 +4069,13 @@ async function startServer() {
       const templates = await query(`SELECT * FROM dbo.survey_templates ORDER BY created_at DESC`);
       const formatted = templates.map(t => {
         let fields = [];
-        try { fields = t.fields ? JSON.parse(t.fields) : []; } catch {}
+        try { fields = t.fields ? (typeof t.fields === 'string' ? JSON.parse(t.fields) : t.fields) : []; } catch {}
         return {
-          id: t.id,
+          id: String(t.id),
           name: t.name,
-          description: t.description,
+          description: t.description || '',
           isSystem: Boolean(t.is_system),
-          fields
+          fields: Array.isArray(fields) ? fields : []
         };
       });
       res.json(formatted);
@@ -1885,31 +4087,48 @@ async function startServer() {
   app.post("/api/surveys/templates", authenticateUser, async (req, res) => {
     try {
       const t = req.body;
-      const id = t.id || `tpl_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.survey_templates WHERE id = @id)
-         BEGIN
-           UPDATE dbo.survey_templates SET
+      const { id } = t;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.survey_templates SET
              name = @name,
              description = @description,
              is_system = @is_system,
              fields = @fields
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.survey_templates (id, name, description, is_system, fields)
-           VALUES (@id, @name, @description, @is_system, @fields);
-         END`,
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            name: t.name,
+            description: t.description || '',
+            is_system: t.isSystem || t.is_system ? 1 : 0,
+            fields: JSON.stringify(t.fields || [])
+          }
+        );
+        return res.json({ id: String(id), ...t });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.survey_templates (name, description, is_system, fields)
+         OUTPUT INSERTED.*
+         VALUES (@name, @description, @is_system, @fields)`,
         {
-          id,
           name: t.name,
           description: t.description || '',
           is_system: t.isSystem || t.is_system ? 1 : 0,
           fields: JSON.stringify(t.fields || [])
         }
       );
-      res.json({ id, ...t });
+      const resItem = inserted[0] || t;
+      let parsedFields = [];
+      try { parsedFields = resItem.fields ? (typeof resItem.fields === 'string' ? JSON.parse(resItem.fields) : resItem.fields) : []; } catch {}
+      res.json({
+        id: String(resItem.id),
+        name: resItem.name,
+        description: resItem.description || '',
+        isSystem: Boolean(resItem.is_system),
+        fields: Array.isArray(parsedFields) ? parsedFields : (t.fields || [])
+      });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1926,7 +4145,7 @@ async function startServer() {
              fields = COALESCE(@fields, fields)
          WHERE id = @id`,
         {
-          id,
+          id: Number(id) || id,
           name: t.name,
           description: t.description,
           fields: t.fields ? JSON.stringify(t.fields) : null
@@ -1950,25 +4169,53 @@ async function startServer() {
   // Active Survey Campaigns
   app.get("/api/surveys", optionalAuth, async (req, res) => {
     try {
+      const reqUser = (req as any).user;
+      let isSuperAdmin = false;
+      const userIdentifiers: string[] = [];
+      let info: { isSuperAdmin: boolean; userRow: any } | null = null;
+
+      if (reqUser) {
+        info = await getRequesterInfo(reqUser);
+        isSuperAdmin = info.isSuperAdmin;
+        if (info.userRow) {
+          if (info.userRow.id) userIdentifiers.push(String(info.userRow.id).toLowerCase().trim());
+          if (info.userRow.email) userIdentifiers.push(String(info.userRow.email).toLowerCase().trim());
+          if (info.userRow.name) userIdentifiers.push(String(info.userRow.name).toLowerCase().trim());
+        }
+        if (reqUser.uid) userIdentifiers.push(String(reqUser.uid).toLowerCase().trim());
+        if (reqUser.email) userIdentifiers.push(String(reqUser.email).toLowerCase().trim());
+      }
+
       const surveys = await query(`SELECT * FROM dbo.surveys ORDER BY created_at DESC`);
       const formatted = surveys.map(s => {
         let assignedTo = [];
-        try { assignedTo = s.assigned_to ? JSON.parse(s.assigned_to) : []; } catch {}
+        try { assignedTo = s.assigned_to ? (typeof s.assigned_to === 'string' ? JSON.parse(s.assigned_to) : s.assigned_to) : []; } catch {}
         let linkedPartyIds = [];
-        try { linkedPartyIds = s.linked_party_ids ? JSON.parse(s.linked_party_ids) : []; } catch {}
+        try { linkedPartyIds = s.linked_party_ids ? (typeof s.linked_party_ids === 'string' ? JSON.parse(s.linked_party_ids) : s.linked_party_ids) : []; } catch {}
         return {
-          id: s.id,
+          id: String(s.id),
           title: s.title,
-          description: s.description,
-          electionId: s.election_id,
-          electionYear: s.election_year,
-          status: s.status,
-          templateId: s.template_id,
-          assignedTo,
-          linkedPartyIds
+          description: s.description || '',
+          electionId: String(s.election_id || ''),
+          electionYear: s.election_year || 2026,
+          status: s.status || 'Draft',
+          templateId: s.template_id ? String(s.template_id) : 'political_sentiment',
+          assignedTo: Array.isArray(assignedTo) ? assignedTo : [],
+          linkedPartyIds: Array.isArray(linkedPartyIds) ? linkedPartyIds : []
         };
       });
-      res.json(formatted);
+
+      // Filter: Admins receive all surveys; non-admin users receive assigned surveys
+      const userRole = info?.userRow?.role || reqUser?.role;
+      const isAdminUser = isSuperAdmin || !reqUser || userRole === 'admin' || userRole === 'superadmin' || userRole === 'super_admin' || Boolean(info?.isSuperAdmin);
+      const result = isAdminUser
+        ? formatted 
+        : formatted.filter(s => {
+            if (!Array.isArray(s.assignedTo) || s.assignedTo.length === 0) return false;
+            return s.assignedTo.some((a: string) => userIdentifiers.includes(String(a).toLowerCase().trim()));
+          });
+
+      res.json(result);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1977,11 +4224,16 @@ async function startServer() {
   app.post("/api/surveys", authenticateUser, async (req, res) => {
     try {
       const s = req.body;
-      const id = s.id || `survey_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.surveys WHERE id = @id)
-         BEGIN
-           UPDATE dbo.surveys SET
+      const { id } = s;
+      const eId = s.electionId || s.election_id;
+      const parsedElectionId = (eId && !isNaN(Number(eId))) ? Number(eId) : 1;
+      const tId = s.templateId || s.template_id;
+      const parsedTemplateId = (tId && tId !== 'political_sentiment' && !isNaN(Number(tId))) ? Number(tId) : null;
+      const electionYear = Number(s.electionYear || s.election_year) || 2026;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.surveys SET
              title = @title,
              description = @description,
              election_id = @election_id,
@@ -1990,26 +4242,49 @@ async function startServer() {
              status = @status,
              template_id = @template_id,
              linked_party_ids = @linked_party_ids
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.surveys (id, title, description, election_id, election_year, assigned_to, status, template_id, linked_party_ids)
-           VALUES (@id, @title, @description, @election_id, @election_year, @assigned_to, @status, @template_id, @linked_party_ids);
-         END`,
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            title: s.title,
+            description: s.description || '',
+            election_id: parsedElectionId,
+            election_year: electionYear,
+            assigned_to: JSON.stringify(Array.isArray(s.assignedTo) ? s.assignedTo : []),
+            status: s.status || 'Draft',
+            template_id: parsedTemplateId,
+            linked_party_ids: JSON.stringify(Array.isArray(s.linkedPartyIds) ? s.linkedPartyIds : [])
+          }
+        );
+        return res.json({ id: String(id), ...s });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.surveys (title, description, election_id, election_year, assigned_to, status, template_id, linked_party_ids)
+         OUTPUT INSERTED.*
+         VALUES (@title, @description, @election_id, @election_year, @assigned_to, @status, @template_id, @linked_party_ids)`,
         {
-          id,
           title: s.title,
           description: s.description || '',
-          election_id: s.electionId || s.election_id || 'elec_2026',
-          election_year: s.electionYear || s.election_year || 2026,
-          assigned_to: JSON.stringify(s.assignedTo || []),
+          election_id: parsedElectionId,
+          election_year: electionYear,
+          assigned_to: JSON.stringify(Array.isArray(s.assignedTo) ? s.assignedTo : []),
           status: s.status || 'Draft',
-          template_id: s.templateId || s.template_id || null,
-          linked_party_ids: JSON.stringify(s.linkedPartyIds || [])
+          template_id: parsedTemplateId,
+          linked_party_ids: JSON.stringify(Array.isArray(s.linkedPartyIds) ? s.linkedPartyIds : [])
         }
       );
-      res.json({ id, ...s });
+      const resItem = inserted[0] || s;
+      res.json({
+        id: String(resItem.id || id),
+        title: resItem.title || s.title,
+        description: resItem.description || s.description,
+        electionId: String(resItem.election_id || parsedElectionId),
+        electionYear: resItem.election_year || electionYear,
+        status: resItem.status || s.status,
+        templateId: resItem.template_id ? String(resItem.template_id) : 'political_sentiment',
+        assignedTo: s.assignedTo || [],
+        linkedPartyIds: s.linkedPartyIds || []
+      });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -2019,27 +4294,40 @@ async function startServer() {
     try {
       const { id } = req.params;
       const s = req.body;
+      const eId = s.electionId || s.election_id;
+      const parsedElectionId = (eId && !isNaN(Number(eId))) ? Number(eId) : undefined;
+      const tId = s.templateId !== undefined ? s.templateId : s.template_id;
+      const parsedTemplateId = (tId && tId !== 'political_sentiment' && !isNaN(Number(tId))) ? Number(tId) : null;
+      const electionYear = (s.electionYear || s.election_year) ? Number(s.electionYear || s.election_year) : undefined;
+
+      const assignedToJson = s.assignedTo !== undefined 
+        ? JSON.stringify(Array.isArray(s.assignedTo) ? s.assignedTo : []) 
+        : (s.assigned_to !== undefined ? (typeof s.assigned_to === 'string' ? s.assigned_to : JSON.stringify(s.assigned_to)) : null);
+      const linkedPartyIdsJson = s.linkedPartyIds !== undefined 
+        ? JSON.stringify(Array.isArray(s.linkedPartyIds) ? s.linkedPartyIds : []) 
+        : (s.linked_party_ids !== undefined ? (typeof s.linked_party_ids === 'string' ? s.linked_party_ids : JSON.stringify(s.linked_party_ids)) : null);
+
       await execute(
         `UPDATE dbo.surveys 
          SET title = COALESCE(@title, title),
              description = COALESCE(@description, description),
              election_id = COALESCE(@election_id, election_id),
              election_year = COALESCE(@election_year, election_year),
-             assigned_to = COALESCE(@assigned_to, assigned_to),
+             assigned_to = CASE WHEN @assigned_to IS NOT NULL THEN @assigned_to ELSE assigned_to END,
              status = COALESCE(@status, status),
-             template_id = COALESCE(@template_id, template_id),
-             linked_party_ids = COALESCE(@linked_party_ids, linked_party_ids)
+             template_id = @template_id,
+             linked_party_ids = CASE WHEN @linked_party_ids IS NOT NULL THEN @linked_party_ids ELSE linked_party_ids END
          WHERE id = @id`,
         {
-          id,
+          id: Number(id) || id,
           title: s.title,
           description: s.description,
-          election_id: s.electionId || s.election_id,
-          election_year: s.electionYear || s.election_year,
-          assigned_to: s.assignedTo ? JSON.stringify(s.assignedTo) : null,
+          election_id: parsedElectionId,
+          election_year: electionYear,
+          assigned_to: assignedToJson,
           status: s.status,
-          template_id: s.templateId || s.template_id,
-          linked_party_ids: s.linkedPartyIds ? JSON.stringify(s.linkedPartyIds) : null
+          template_id: parsedTemplateId,
+          linked_party_ids: linkedPartyIdsJson
         }
       );
       res.json({ success: true, message: 'Survey updated' });
@@ -2060,34 +4348,141 @@ async function startServer() {
   // Voter Sentiments
   app.get("/api/voter-sentiments", optionalAuth, async (req, res) => {
     try {
-      const { voterDocId, surveyId } = req.query;
-      let sqlQuery = `SELECT * FROM dbo.voter_sentiments WHERE 1=1`;
+      const { voterDocId, surveyId, boothId, constituencyId } = req.query;
+      let sqlQuery = `
+        SELECT 
+          s.*,
+          COALESCE(v.name, s.voter_name) AS voter_name,
+          COALESCE(v.gender, 'Male') AS voter_gender,
+          COALESCE(v.age, 35) AS voter_age,
+          COALESCE(v.caste, '') AS voter_caste,
+          COALESCE(s.booth_id, CAST(v.booth_id AS VARCHAR(64))) AS effective_booth_id,
+          COALESCE(s.constituency_id, CAST(v.constituency_id AS VARCHAR(64))) AS effective_constituency_id,
+          COALESCE(s.district_id, CAST(v.district_id AS VARCHAR(64))) AS effective_district_id,
+          COALESCE(s.state_id, CAST(v.state_id AS VARCHAR(64))) AS effective_state_id,
+          b.name AS booth_name,
+          c.name AS constituency_name,
+          p.name AS party_name,
+          p.color AS party_color,
+          p.symbol AS party_symbol
+        FROM dbo.voter_sentiments s
+        LEFT JOIN dbo.voters v ON (CAST(v.id AS VARCHAR(64)) = s.voter_id OR v.voter_id = s.voter_id)
+        LEFT JOIN dbo.booths b ON (CAST(b.id AS VARCHAR(64)) = s.booth_id OR CAST(b.id AS VARCHAR(64)) = CAST(v.booth_id AS VARCHAR(64)))
+        LEFT JOIN dbo.constituencies c ON (CAST(c.id AS VARCHAR(64)) = s.constituency_id OR CAST(c.id AS VARCHAR(64)) = CAST(v.constituency_id AS VARCHAR(64)))
+        LEFT JOIN dbo.parties p ON (CAST(p.id AS VARCHAR(64)) = s.favored_party_id)
+        WHERE 1=1
+      `;
       const params: Record<string, any> = {};
-      if (voterDocId) {
-        sqlQuery += ` AND voter_id = @voterDocId`;
-        params.voterDocId = voterDocId;
+
+      const reqUser = (req as any).user;
+      let isSuperAdmin = false;
+      const userIdentifiers: string[] = [];
+      let info: { isSuperAdmin: boolean; userRow: any } | null = null;
+
+      if (reqUser) {
+        info = await getRequesterInfo(reqUser);
+        isSuperAdmin = info.isSuperAdmin;
+        if (info.userRow) {
+          if (info.userRow.id) userIdentifiers.push(String(info.userRow.id).toLowerCase().trim());
+          if (info.userRow.email) userIdentifiers.push(String(info.userRow.email).toLowerCase().trim());
+          if (info.userRow.name) userIdentifiers.push(String(info.userRow.name).toLowerCase().trim());
+        }
+        if (reqUser.uid) userIdentifiers.push(String(reqUser.uid).toLowerCase().trim());
+        if (reqUser.email) userIdentifiers.push(String(reqUser.email).toLowerCase().trim());
       }
-      sqlQuery += ` ORDER BY created_at DESC`;
+
+      if (voterDocId) {
+        sqlQuery += ` AND (
+          s.voter_id = @voterDocId 
+          OR s.voter_id IN (SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE voter_id = @voterDocId OR CAST(id AS VARCHAR(64)) = @voterDocId)
+          OR s.voter_id IN (SELECT voter_id FROM dbo.voters WHERE voter_id = @voterDocId OR CAST(id AS VARCHAR(64)) = @voterDocId)
+        )`;
+        params.voterDocId = String(voterDocId);
+      }
+      if (surveyId) {
+        sqlQuery += ` AND s.survey_id = @surveyId`;
+        params.surveyId = String(surveyId);
+      }
+      if (boothId && boothId !== 'all') {
+        sqlQuery += ` AND (s.booth_id = @boothId OR CAST(v.booth_id AS VARCHAR(64)) = @boothId)`;
+        params.boothId = String(boothId);
+      }
+      if (constituencyId && constituencyId !== 'all') {
+        sqlQuery += ` AND (s.constituency_id = @constituencyId OR CAST(v.constituency_id AS VARCHAR(64)) = @constituencyId)`;
+        params.constituencyId = String(constituencyId);
+      }
+
+      sqlQuery += ` ORDER BY s.created_at DESC`;
       const sentiments = await query(sqlQuery, params);
-      const formatted = sentiments.map(s => {
-        let keyConcerns = [];
-        try { keyConcerns = s.key_concerns ? JSON.parse(s.key_concerns) : []; } catch {}
-        return {
-          id: s.id,
-          voterDocId: s.voter_id,
-          voterName: s.voter_name,
-          electionId: s.election_id,
-          electionYear: s.election_year,
-          favoredPartyId: s.favored_party_id,
-          favoredPartyName: s.favored_party_name,
-          sentimentScore: s.sentiment_score,
-          keyConcerns,
-          constituencyId: s.constituency_id,
-          recordedBy: s.recorded_by,
-          recordedByName: s.recorded_by_name,
-          createdAt: s.created_at
-        };
-      });
+
+      // Scoping: If not super admin, determine assigned survey IDs
+      let assignedSurveyIds: string[] = [];
+      if (!isSuperAdmin && reqUser) {
+        const surveys = await query(`SELECT id, assigned_to FROM dbo.surveys`);
+        assignedSurveyIds = surveys.filter(s => {
+          let aTo = [];
+          try { aTo = s.assigned_to ? (typeof s.assigned_to === 'string' ? JSON.parse(s.assigned_to) : s.assigned_to) : []; } catch {}
+          return Array.isArray(aTo) && aTo.some(a => userIdentifiers.includes(String(a).toLowerCase().trim()));
+        }).map(s => String(s.id));
+      }
+
+      const userRole = info?.userRow?.role || reqUser?.role;
+      const formatted = sentiments
+        .filter(s => {
+          if (isSuperAdmin || !reqUser) return true;
+          if (userRole === 'admin' || userRole === 'superadmin' || userRole === 'super_admin' || Boolean(info?.isSuperAdmin)) return true;
+          if (!s.survey_id) return true;
+          if (s.survey_id && (assignedSurveyIds.length === 0 || assignedSurveyIds.includes(String(s.survey_id)))) return true;
+          if (s.recorded_by && userIdentifiers.includes(String(s.recorded_by).toLowerCase().trim())) return true;
+          return false;
+        })
+        .map(s => {
+          let keyConcerns = [];
+          try { keyConcerns = s.key_concerns ? JSON.parse(s.key_concerns) : []; } catch {}
+          let customAnswers = {};
+          try { customAnswers = s.custom_answers ? JSON.parse(s.custom_answers) : {}; } catch {}
+
+          const score = Number(s.sentiment_score) || 3;
+          let sentimentType: 'Support' | 'Neutral' | 'Oppose' | 'Other Party' = 'Neutral';
+          if (score >= 4) sentimentType = 'Support';
+          else if (score <= 2) sentimentType = 'Oppose';
+          if (s.favored_party_name && s.favored_party_name.toLowerCase().includes('other')) {
+            sentimentType = 'Other Party';
+          }
+
+          return {
+            id: String(s.id),
+            voterDocId: String(s.voter_id || ''),
+            voterName: s.voter_name || 'Voter',
+            gender: s.voter_gender || 'Male',
+            age: Number(s.voter_age) || 35,
+            caste: s.voter_caste || '',
+            electionId: s.election_id ? String(s.election_id) : '',
+            electionYear: s.election_year ? (parseInt(String(s.election_year), 10) || 2026) : 2026,
+            favoredPartyId: (s.favored_party_id === 0 || s.favored_party_id === null || s.favored_party_id === 'none') ? 'none' : String(s.favored_party_id),
+            favoredPartyName: s.party_name || s.favored_party_name || '',
+            partyColor: s.party_color || '#3b82f6',
+            partySymbol: s.party_symbol || '',
+            sentimentScore: score,
+            sentiment: sentimentType,
+            keyConcerns,
+            constituencyId: String(s.effective_constituency_id || s.constituency_id || ''),
+            constituencyName: s.constituency_name || '',
+            stateId: String(s.effective_state_id || s.state_id || ''),
+            districtId: String(s.effective_district_id || s.district_id || ''),
+            boothId: String(s.effective_booth_id || s.booth_id || ''),
+            boothName: s.booth_name || '',
+            mobile: s.mobile || '',
+            email: s.email || '',
+            aadharNumber: s.aadhar_number || '',
+            surveyId: String(s.survey_id || ''),
+            surveyTitle: s.survey_title || '',
+            customAnswers,
+            recordedBy: String(s.recorded_by || ''),
+            recordedByName: s.recorded_by_name || '',
+            createdAt: s.created_at
+          };
+        });
       res.json(formatted);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -2097,46 +4492,155 @@ async function startServer() {
   app.post("/api/voter-sentiments", authenticateUser, async (req, res) => {
     try {
       const s = req.body;
-      const id = s.id || `sent_${Date.now()}`;
-      await execute(
-        `IF EXISTS (SELECT 1 FROM dbo.voter_sentiments WHERE id = @id)
-         BEGIN
-           UPDATE dbo.voter_sentiments SET
+      const { id } = s;
+      const vId = s.voterDocId || s.voter_id;
+      const eId = s.electionId || s.election_id;
+      const rawPartyId = s.favoredPartyId || s.favored_party_id;
+      const cId = s.constituencyId || s.constituency_id;
+      const stId = s.stateId || s.state_id;
+      const dtId = s.districtId || s.district_id;
+      const btId = s.boothId || s.booth_id;
+      const sId = s.surveyId || s.survey_id;
+      const sTitle = s.surveyTitle || s.survey_title;
+      const customAns = s.customAnswers || s.custom_answers || {};
+
+      const partyIdVal = (rawPartyId === 'none' || !rawPartyId) ? 'none' : String(rawPartyId);
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.voter_sentiments SET
              voter_name = @voter_name,
              favored_party_id = @favored_party_id,
              favored_party_name = @favored_party_name,
              sentiment_score = @sentiment_score,
-             key_concerns = @key_concerns
-           WHERE id = @id;
-         END
-         ELSE
-         BEGIN
-           INSERT INTO dbo.voter_sentiments (
-             id, voter_id, voter_name, election_id, election_year, 
-             favored_party_id, favored_party_name, sentiment_score, 
-             key_concerns, constituency_id, recorded_by, recorded_by_name
-           ) VALUES (
-             @id, @voter_id, @voter_name, @election_id, @election_year,
-             @favored_party_id, @favored_party_name, @sentiment_score,
-             @key_concerns, @constituency_id, @recorded_by, @recorded_by_name
-           );
-         END`,
+             key_concerns = @key_concerns,
+             custom_answers = @custom_answers,
+             survey_id = COALESCE(@survey_id, survey_id),
+             survey_title = COALESCE(@survey_title, survey_title)
+           WHERE id = @id`,
+          {
+            id: Number(id),
+            voter_name: s.voterName || s.voter_name,
+            favored_party_id: partyIdVal,
+            favored_party_name: s.favoredPartyName || s.favored_party_name || 'Undecided / No Favor',
+            sentiment_score: parseFloat(s.sentimentScore || s.sentiment_score) || 3.0,
+            key_concerns: JSON.stringify(s.keyConcerns || []),
+            custom_answers: JSON.stringify(customAns),
+            survey_id: sId || null,
+            survey_title: sTitle || null
+          }
+        );
+        return res.json({ id: Number(id), ...s });
+      }
+
+      // Check for duplicate response: One voter can only submit once per survey campaign
+      const checkVoterId = String(vId || '').trim();
+      const dupParams: Record<string, any> = { vId: checkVoterId };
+      let dupSql = '';
+
+      if (sId) {
+        dupSql = `
+          SELECT TOP 1 id, voter_name, survey_title 
+          FROM dbo.voter_sentiments 
+          WHERE survey_id = @surveyId 
+            AND (
+              voter_id = @vId 
+              OR voter_id IN (SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE voter_id = @vId OR CAST(id AS VARCHAR(64)) = @vId)
+              OR voter_id IN (SELECT voter_id FROM dbo.voters WHERE voter_id = @vId OR CAST(id AS VARCHAR(64)) = @vId)
+            )
+        `;
+        dupParams.surveyId = String(sId);
+      } else {
+        dupSql = `
+          SELECT TOP 1 id, voter_name 
+          FROM dbo.voter_sentiments 
+          WHERE (survey_id IS NULL OR survey_id = '')
+            AND CAST(election_id AS VARCHAR(64)) = @electionId
+            AND (
+              voter_id = @vId 
+              OR voter_id IN (SELECT CAST(id AS VARCHAR(64)) FROM dbo.voters WHERE voter_id = @vId OR CAST(id AS VARCHAR(64)) = @vId)
+              OR voter_id IN (SELECT voter_id FROM dbo.voters WHERE voter_id = @vId OR CAST(id AS VARCHAR(64)) = @vId)
+            )
+        `;
+        dupParams.electionId = String(eId || '1');
+      }
+
+      const existingEntries = await query(dupSql, dupParams);
+      if (existingEntries.length > 0) {
+        if (sId) {
+          return res.status(400).json({ 
+            error: `This voter has already submitted a response for this survey campaign (${existingEntries[0].survey_title || sTitle || 'Current Campaign'}). Multiple entries for the same survey are not allowed.` 
+          });
+        } else {
+          // Update existing general sentiment entry for this voter
+          const existingId = existingEntries[0].id;
+          await execute(
+            `UPDATE dbo.voter_sentiments SET
+               voter_name = @voter_name,
+               favored_party_id = @favored_party_id,
+               favored_party_name = @favored_party_name,
+               sentiment_score = @sentiment_score,
+               key_concerns = @key_concerns,
+               custom_answers = @custom_answers,
+               recorded_by = @recorded_by,
+               recorded_by_name = @recorded_by_name
+             WHERE id = @id`,
+            {
+              id: existingId,
+              voter_name: s.voterName || s.voter_name,
+              favored_party_id: partyIdVal,
+              favored_party_name: s.favoredPartyName || s.favored_party_name || 'Undecided / No Favor',
+              sentiment_score: parseFloat(s.sentimentScore || s.sentiment_score) || 3.0,
+              key_concerns: JSON.stringify(s.keyConcerns || []),
+              custom_answers: JSON.stringify(customAns),
+              recorded_by: s.recordedBy || (req as any).user?.uid || 'system',
+              recorded_by_name: s.recordedByName || (req as any).user?.name || 'Staff'
+            }
+          );
+          return res.json({ id: existingId, ...s });
+        }
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.voter_sentiments (
+          voter_id, voter_name, election_id, election_year, 
+          favored_party_id, favored_party_name, sentiment_score, 
+          key_concerns, constituency_id, state_id, district_id, booth_id,
+          mobile, email, aadhar_number, survey_id, survey_title, custom_answers,
+          recorded_by, recorded_by_name
+        ) 
+        OUTPUT INSERTED.*
+        VALUES (
+          @voter_id, @voter_name, @election_id, @election_year,
+          @favored_party_id, @favored_party_name, @sentiment_score,
+          @key_concerns, @constituency_id, @state_id, @district_id, @booth_id,
+          @mobile, @email, @aadhar_number, @survey_id, @survey_title, @custom_answers,
+          @recorded_by, @recorded_by_name
+        )`,
         {
-          id,
-          voter_id: s.voterDocId || s.voter_id,
+          voter_id: vId ? String(vId) : '0',
           voter_name: s.voterName || s.voter_name,
-          election_id: s.electionId || s.election_id || 'elec_2026',
-          election_year: s.electionYear || s.election_year || 2026,
-          favored_party_id: s.favoredPartyId || s.favored_party_id || 'party_default',
-          favored_party_name: s.favoredPartyName || s.favored_party_name || 'BJP',
-          sentiment_score: s.sentimentScore || s.sentiment_score || 5.0,
+          election_id: eId ? String(eId) : '1',
+          election_year: parseInt(s.electionYear || s.election_year, 10) || 2026,
+          favored_party_id: partyIdVal,
+          favored_party_name: s.favoredPartyName || s.favored_party_name || 'Undecided / No Favor',
+          sentiment_score: parseFloat(s.sentimentScore || s.sentiment_score) || 3.0,
           key_concerns: JSON.stringify(s.keyConcerns || []),
-          constituency_id: s.constituencyId || s.constituency_id || null,
+          constituency_id: cId ? (parseInt(String(cId), 10) || String(cId)) : null,
+          state_id: stId ? String(stId) : null,
+          district_id: dtId ? String(dtId) : null,
+          booth_id: btId ? String(btId) : null,
+          mobile: s.mobile || null,
+          email: s.email || null,
+          aadhar_number: s.aadharNumber || s.aadhar_number || null,
+          survey_id: sId ? String(sId) : null,
+          survey_title: sTitle ? String(sTitle) : null,
+          custom_answers: JSON.stringify(customAns),
           recorded_by: s.recordedBy || (req as any).user?.uid || 'system',
           recorded_by_name: s.recordedByName || (req as any).user?.name || 'Staff'
         }
       );
-      res.json({ id, ...s });
+      res.json(inserted[0] || s);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -2233,9 +4737,23 @@ async function startServer() {
     });
   }
 
+  try {
+    await execute(`
+      IF OBJECT_ID(N'dbo.constituencies', N'U') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'constituencies' AND COLUMN_NAME = 'category'
+      )
+      BEGIN
+        ALTER TABLE dbo.constituencies ADD category VARCHAR(50) DEFAULT 'General';
+      END
+    `);
+  } catch (migErr) {
+    console.warn('[Migration] Note on category column check:', migErr);
+  }
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
 startServer();
+

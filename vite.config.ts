@@ -20,7 +20,15 @@ export default defineConfig(({mode}) => {
       },
     },
     server: {
+      port: 3000,
       hmr: process.env.DISABLE_HMR !== 'true',
+      proxy: {
+        '/api': {
+          target: 'https://app.nextgencms.workers.dev',
+          changeOrigin: true,
+          secure: true,
+        },
+      },
     },
   };
 });

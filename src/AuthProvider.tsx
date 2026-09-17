@@ -22,12 +22,21 @@ interface UserProfile {
   rights?: Record<string, string>;
   assigned_booths?: string[];
   boothId?: string;
+  stateId?: string;
+  districtId?: string;
+  constituencyId?: string;
+  state_id?: string;
+  district_id?: string;
+  constituency_id?: string;
+  election_settings?: Record<string, any>;
+  electionSettings?: Record<string, any>;
 }
 
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   isAdmin: boolean;
+  isSuperAdmin: boolean;
   isManager: boolean;
   isStaff: boolean;
   loading: boolean;
@@ -41,6 +50,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isManager, setIsManager] = useState(false);
   const [isStaff, setIsStaff] = useState(false);
@@ -50,10 +60,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setProfile(data);
     const userEmail = (email || data.email || '').toLowerCase();
     const isSuper = data.role === 'super_admin' || userEmail === 'vijaychauhanofficial01@gmail.com';
-    const isMngr = data.role === 'admin' || data.role === 'manager';
-    setIsAdmin(isSuper);
+    const isAdm = isSuper || data.role === 'admin';
+    const isMngr = data.role === 'manager';
+    setIsSuperAdmin(isSuper);
+    setIsAdmin(isAdm);
     setIsManager(isMngr);
-    setIsStaff(isSuper || isMngr);
+    setIsStaff(isAdm || isMngr);
   };
 
   const fetchProfile = async (currentUser: User) => {
@@ -152,13 +164,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const hasPermission = (moduleId: string, right: string) => {
-    if (isAdmin) return true;
+    const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin || isAdmin) return true;
     const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
     return perms.includes(right);
   };
 
   return (
-    <AuthContext.Provider value={{ user, profile, isAdmin, isManager, isStaff, loading, signOut, refreshProfile, hasPermission }}>
+    <AuthContext.Provider value={{ user, profile, isAdmin, isSuperAdmin, isManager, isStaff, loading, signOut, refreshProfile, hasPermission }}>
       {children}
     </AuthContext.Provider>
   );

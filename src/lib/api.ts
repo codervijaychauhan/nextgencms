@@ -36,8 +36,8 @@ export async function apiRequest<T = any>(
   });
 
   if (!response.ok) {
-    const errorBody = await response.json().catch(() => ({ error: response.statusText }));
-    throw new Error(errorBody.error || `HTTP error ${response.status}`);
+    const errorBody: any = await response.json().catch(() => ({ error: response.statusText }));
+    throw new Error(errorBody?.error || `HTTP error ${response.status}`);
   }
 
   return response.json() as Promise<T>;

@@ -1,0 +1,24 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "app",
+  "main": "worker/index.ts",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "nextgencms",
+      "database_id": "95c669a1-dbbd-4edf-a089-ebdf9b4b50d4"
+    }
+  ],
+  "vars": {
+    "JWT_SECRET": "nextgen_cms_secure_secret_2026"
+  }
+}

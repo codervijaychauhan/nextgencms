@@ -3,6 +3,7 @@ import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth } from '../lib/firebase';
 import { Link } from 'react-router-dom';
 import { motion } from 'motion/react';
+import Logo from './Logo';
 import { Mail, CheckCircle, Loader2, AlertCircle } from 'lucide-react';
 
 export default function ForgotPassword() {
@@ -53,11 +54,12 @@ export default function ForgotPassword() {
       <motion.div 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-[380px] space-y-6"
+        className="w-full max-w-[400px] space-y-6"
       >
         <div className="text-center space-y-2 mb-2">
+          <Logo size={42} className="mx-auto mb-2" />
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Reset password</h1>
-          <p className="text-sm text-zinc-500">Enter your email and we'll send you a link</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Enter your email and we'll send you a recovery link</p>
         </div>
 
         <div className="webapp-card p-6 space-y-6">

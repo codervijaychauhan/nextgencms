@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
@@ -28,10 +28,10 @@ import {
   ChevronsRight,
   SlidersHorizontal
 } from 'lucide-react';
-import Papa from 'papaparse';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
 import { useAuth } from '../AuthProvider';
+import BulkImportModal from './BulkImportModal';
 
 interface IndiaState {
   id: string;
@@ -109,7 +109,7 @@ const calculateAge = (dobString: string): number => {
 };
 
 const VoterManagement: React.FC = () => {
-  const { user, isAdmin, profile } = useAuth();
+  const { user, isAdmin, isSuperAdmin, profile } = useAuth();
   
   const hasRight = (moduleId: string, right: string) => {
     if (isAdmin) return true;
@@ -175,6 +175,7 @@ const VoterManagement: React.FC = () => {
   
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [activeFormTab, setActiveFormTab] = useState<'main' | 'contact' | 'health_economy' | 'political_sentiment'>('main');
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
 
@@ -380,19 +381,28 @@ const VoterManagement: React.FC = () => {
     return statsSummary;
   };
 
-  // Bulk Import
-  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [importStatus, setImportStatus] = useState<'idle' | 'parsing' | 'uploading' | 'completed' | 'error'>('idle');
-  const [importProgress, setImportProgress] = useState(0);
-  const [importError, setImportError] = useState('');
-  const [importResults, setImportResults] = useState({ success: 0, failed: 0 });
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Allowed Demographics Based on Role
-  const allowedStateIds = (!isAdmin && profile?.stateId) ? profile.stateId.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const allowedDistrictIds = (!isAdmin && profile?.districtId) ? profile.districtId.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const allowedConstituencyIds = (!isAdmin && profile?.constituencyId) ? profile.constituencyId.split(',').map(s => s.trim()).filter(Boolean) : [];
-  const allowedBoothIds = (!isAdmin && profile?.boothId) ? profile.boothId.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  // Allowed Demographics Based on Role & Profile Scoping
+  const electSettings = profile?.election_settings || profile?.electionSettings || {};
+  const rawState = profile?.stateId || profile?.state_id || electSettings.state_id || electSettings.stateId || '';
+  const rawDistrict = profile?.districtId || profile?.district_id || electSettings.district_id || electSettings.districtId || '';
+  const rawConstituency = profile?.constituencyId || profile?.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '';
+  const rawBooth = profile?.boothId || electSettings.booth_id || electSettings.boothId || '';
+  const rawAssignedBooths = profile?.assigned_booths || electSettings.assigned_booths || [];
+
+  const allowedStateIds = !isSuperAdmin && rawState
+    ? String(rawState).split(',').map(s => s.trim()).filter(Boolean) 
+    : [];
+  const allowedDistrictIds = !isSuperAdmin && rawDistrict
+    ? String(rawDistrict).split(',').map(s => s.trim()).filter(Boolean) 
+    : [];
+  const allowedConstituencyIds = !isSuperAdmin && rawConstituency
+    ? String(rawConstituency).split(',').map(s => s.trim()).filter(Boolean) 
+    : [];
+  const allowedBoothIds = !isSuperAdmin && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
+    ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(Boolean) : rawAssignedBooths) 
+    : [];
 
   // Automatically select all assigned items if restricted
   const initialStatesRef = useRef(false);
@@ -401,48 +411,48 @@ const VoterManagement: React.FC = () => {
   const initialBoothsRef = useRef(false);
 
   useEffect(() => {
-    if (isAdmin) return;
+    if (isSuperAdmin) return;
     if (states.length > 0 && allowedStateIds.length > 0 && !initialStatesRef.current) {
       initialStatesRef.current = true;
-      const allowed = states.filter(s => allowedStateIds.includes(s.id)).map(s => s.id);
+      const allowed = states.filter(s => allowedStateIds.includes(String(s.id))).map(s => String(s.id));
       if (allowed.length > 0) {
         setSelectedStateIds(allowed);
       }
     }
-  }, [states, allowedStateIds, isAdmin]);
+  }, [states, allowedStateIds, isSuperAdmin]);
 
   useEffect(() => {
-    if (isAdmin) return;
+    if (isSuperAdmin) return;
     if (districts.length > 0 && allowedDistrictIds.length > 0 && !initialDistrictsRef.current) {
       initialDistrictsRef.current = true;
-      const allowed = districts.filter(d => allowedDistrictIds.includes(d.id)).map(d => d.id);
+      const allowed = districts.filter(d => allowedDistrictIds.includes(String(d.id))).map(d => String(d.id));
       if (allowed.length > 0) {
         setSelectedDistrictIds(allowed);
       }
     }
-  }, [districts, allowedDistrictIds, isAdmin]);
+  }, [districts, allowedDistrictIds, isSuperAdmin]);
 
   useEffect(() => {
-    if (isAdmin) return;
+    if (isSuperAdmin) return;
     if (constituencies.length > 0 && allowedConstituencyIds.length > 0 && !initialConstituenciesRef.current) {
       initialConstituenciesRef.current = true;
-      const allowed = constituencies.filter(c => allowedConstituencyIds.includes(c.id)).map(c => c.id);
+      const allowed = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id))).map(c => String(c.id));
       if (allowed.length > 0) {
         setSelectedConstituencyIds(allowed);
       }
     }
-  }, [constituencies, allowedConstituencyIds, isAdmin]);
+  }, [constituencies, allowedConstituencyIds, isSuperAdmin]);
 
   useEffect(() => {
-    if (isAdmin) return;
+    if (isSuperAdmin) return;
     if (booths.length > 0 && allowedBoothIds.length > 0 && !initialBoothsRef.current) {
       initialBoothsRef.current = true;
-      const allowed = booths.filter(b => allowedBoothIds.includes(b.id)).map(b => b.id);
+      const allowed = booths.filter(b => allowedBoothIds.includes(String(b.id))).map(b => String(b.id));
       if (allowed.length > 0) {
         setSelectedBoothIds(allowed);
       }
     }
-  }, [booths, allowedBoothIds, isAdmin]);
+  }, [booths, allowedBoothIds, isSuperAdmin]);
 
   const fetchStates = async () => {
     try {
@@ -457,9 +467,9 @@ const VoterManagement: React.FC = () => {
       const allConstituencies = await api.get<IndiaConstituency[]>('/api/constituencies');
       const allBooths = await api.get<IndiaBooth[]>('/api/booths');
 
-      setDistricts(allDistricts.map((d: any) => ({ ...d, stateId: d.state_id || d.stateId })));
-      setConstituencies(allConstituencies.map((c: any) => ({ ...c, stateId: c.state_id || c.stateId, districtId: c.district_id || c.districtId })));
-      setBooths(allBooths.map((b: any) => ({ ...b, boothNumber: b.booth_number || b.boothNumber, constituencyId: b.constituency_id || b.constituencyId, mandalId: b.mandal_id || b.mandalId })));
+      setDistricts(allDistricts.map((d: any) => ({ ...d, stateId: String(d.state_id || d.stateId || '') })));
+      setConstituencies(allConstituencies.map((c: any) => ({ ...c, stateId: String(c.state_id || c.stateId || ''), districtId: String(c.district_id || c.districtId || '') })));
+      setBooths(allBooths.map((b: any) => ({ ...b, boothNumber: String(b.booth_number || b.boothNumber || ''), constituencyId: String(b.constituency_id || b.constituencyId || ''), mandalId: String(b.mandal_id || b.mandalId || '') })));
     } catch (err) { console.error(err); }
   };
 
@@ -467,8 +477,37 @@ const VoterManagement: React.FC = () => {
     setLoading(true);
     try {
       let url = '/api/voters?limit=1000&';
-      if (selectedBoothId !== 'all') url += `boothId=${selectedBoothId}&`;
-      if (selectedConstituencyId !== 'all') url += `constituencyId=${selectedConstituencyId}&`;
+      if (selectedBoothId !== 'all') {
+        url += `boothId=${encodeURIComponent(selectedBoothId)}&`;
+      } else if (selectedBoothIds.length > 0) {
+        url += `boothIds=${encodeURIComponent(selectedBoothIds.join(','))}&`;
+      } else if (!isSuperAdmin && allowedBoothIds.length > 0) {
+        url += `boothIds=${encodeURIComponent(allowedBoothIds.join(','))}&`;
+      }
+
+      if (selectedConstituencyId !== 'all') {
+        url += `constituencyId=${encodeURIComponent(selectedConstituencyId)}&`;
+      } else if (selectedConstituencyIds.length > 0) {
+        url += `constituencyIds=${encodeURIComponent(selectedConstituencyIds.join(','))}&`;
+      } else if (!isSuperAdmin && allowedConstituencyIds.length > 0) {
+        url += `constituencyIds=${encodeURIComponent(allowedConstituencyIds.join(','))}&`;
+      }
+
+      if (selectedDistrictId !== 'all') {
+        url += `districtId=${encodeURIComponent(selectedDistrictId)}&`;
+      } else if (selectedDistrictIds.length > 0) {
+        url += `districtIds=${encodeURIComponent(selectedDistrictIds.join(','))}&`;
+      } else if (!isSuperAdmin && allowedDistrictIds.length > 0) {
+        url += `districtIds=${encodeURIComponent(allowedDistrictIds.join(','))}&`;
+      }
+
+      if (selectedStateId !== 'all') {
+        url += `stateId=${encodeURIComponent(selectedStateId)}&`;
+      } else if (selectedStateIds.length > 0) {
+        url += `stateIds=${encodeURIComponent(selectedStateIds.join(','))}&`;
+      } else if (!isSuperAdmin && allowedStateIds.length > 0) {
+        url += `stateIds=${encodeURIComponent(allowedStateIds.join(','))}&`;
+      }
       
       const res = await api.get<{ data: any[] }>(url);
       const newVoters = (res.data || []).map(d => ({
@@ -484,11 +523,11 @@ const VoterManagement: React.FC = () => {
         isKaryakarta: Boolean(d.is_karyakarta),
         voted: d.voting_status === 'voted' || Boolean(d.voted),
         partyInclination: d.party_inclination || d.partyInclination,
-        boothId: d.booth_id || d.boothId,
-        mandalId: d.mandal_id || d.mandalId,
-        constituencyId: d.constituency_id || d.constituencyId,
-        stateId: d.state_id || d.stateId,
-        districtId: d.district_id || d.districtId
+        boothId: String(d.booth_id || d.boothId || ''),
+        mandalId: String(d.mandal_id || d.mandalId || ''),
+        constituencyId: String(d.constituency_id || d.constituencyId || ''),
+        stateId: String(d.state_id || d.stateId || ''),
+        districtId: String(d.district_id || d.districtId || '')
       })) as Voter[];
       
       setVoters(newVoters);
@@ -622,7 +661,12 @@ const VoterManagement: React.FC = () => {
 
   useEffect(() => {
     fetchVoters();
-  }, [selectedStateId, selectedDistrictId, selectedConstituencyId, selectedBoothId, selectedBoothIds, selectedStateIds, selectedDistrictIds, selectedConstituencyIds, booths]);
+  }, [
+    selectedStateId, selectedDistrictId, selectedConstituencyId, selectedBoothId,
+    selectedBoothIds, selectedStateIds, selectedDistrictIds, selectedConstituencyIds,
+    booths, isSuperAdmin, allowedConstituencyIds.join(','), allowedDistrictIds.join(','),
+    allowedStateIds.join(','), allowedBoothIds.join(',')
+  ]);
 
   // Load admins list for political sentiment mapping
   useEffect(() => {
@@ -801,177 +845,148 @@ const VoterManagement: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  // Bulk Import
-  const handleDownloadSample = () => {
-    const csv = "voterId,name,relationName,gender,dob,age,mobile,email,additionalMobile,address,newAddress,houseNo,village,caste,occupation,education,aadharNumber,partNo,srNo\n" +
-      "EPIC1234,John Doe,Robert Doe,Male,1999-05-15,27,9876543210,john.doe@example.com,,Sample Address,,12-B,Sector 5,General,Worker,Unspecified,123456789012,1,10\n" +
-      "EPIC5678,Jane Smith,John Smith,Female,,,9988776655,9988776644,Another Address,New Res Address,45,,OBC,,Unspecified,,2,15\n" +
-      "EPIC9012,Bob Johnson,Richard Johnson,Male,,45,8877665544,,,78-A,Green Village,,,Private Service,Unspecified,,3,20";
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = "voters_sample_template.csv";
-    link.click();
-  };
+  // Determine scoped items according to narrowest election setting
+  const isRestrictedUser = !isSuperAdmin && (
+    allowedBoothIds.length > 0 ||
+    allowedConstituencyIds.length > 0 ||
+    allowedDistrictIds.length > 0 ||
+    allowedStateIds.length > 0
+  );
 
-  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    if (selectedBoothId === 'all') {
-      setImportError('Please select a specific Booth for bulk import.');
-      setImportStatus('error');
-      return;
+  // Scoped Booth IDs
+  const validScopedBoothIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedBoothIds.length > 0) return allowedBoothIds;
+    if (allowedConstituencyIds.length > 0) {
+      return booths.filter(b => allowedConstituencyIds.includes(String(b.constituencyId))).map(b => String(b.id));
     }
+    if (allowedDistrictIds.length > 0) {
+      const consts = constituencies.filter(c => allowedDistrictIds.includes(String(c.districtId))).map(c => String(c.id));
+      return booths.filter(b => consts.includes(String(b.constituencyId))).map(b => String(b.id));
+    }
+    if (allowedStateIds.length > 0) {
+      const dsts = districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
+      const consts = constituencies.filter(c => dsts.includes(String(c.districtId))).map(c => String(c.id));
+      return booths.filter(b => consts.includes(String(b.constituencyId))).map(b => String(b.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
 
-    setImportStatus('parsing');
-    setImportError('');
-    
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        const data = results.data as Record<string, string>[];
-        if (data.length === 0) {
-          setImportStatus('error');
-          setImportError('Empty CSV file.');
-          return;
-        }
+  // Scoped Constituency IDs
+  const validScopedConstituencyIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedBoothIds.length > 0) {
+      const matched = booths.filter(b => allowedBoothIds.includes(String(b.id))).map(b => String(b.constituencyId));
+      return Array.from(new Set(matched));
+    }
+    if (allowedConstituencyIds.length > 0) return allowedConstituencyIds;
+    if (allowedDistrictIds.length > 0) {
+      return constituencies.filter(c => allowedDistrictIds.includes(String(c.districtId))).map(c => String(c.id));
+    }
+    if (allowedStateIds.length > 0) {
+      const dsts = districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
+      return constituencies.filter(c => dsts.includes(String(c.districtId))).map(c => String(c.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
 
-        setImportStatus('uploading');
-        let success = 0;
-        let failed = 0;
+  // Scoped District IDs
+  const validScopedDistrictIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedBoothIds.length > 0) {
+      const cIds = booths.filter(b => allowedBoothIds.includes(String(b.id))).map(b => String(b.constituencyId));
+      const matched = constituencies.filter(c => cIds.includes(String(c.id))).map(c => String(c.districtId));
+      return Array.from(new Set(matched));
+    }
+    if (allowedConstituencyIds.length > 0) {
+      const matched = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id))).map(c => String(c.districtId));
+      return Array.from(new Set(matched));
+    }
+    if (allowedDistrictIds.length > 0) return allowedDistrictIds;
+    if (allowedStateIds.length > 0) {
+      return districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
 
-        // Helper to resolve keys case-insensitively and trim values safely
-        const getValue = (row: Record<string, string>, keys: string[], defaultValue: string = ''): string => {
-          for (const k of keys) {
-            if (row[k] !== undefined) return row[k].trim();
-            const foundKey = Object.keys(row).find(rk => rk.toLowerCase() === k.toLowerCase());
-            if (foundKey && row[foundKey] !== undefined) return row[foundKey].trim();
-          }
-          return defaultValue;
-        };
+  // Scoped State IDs
+  const validScopedStateIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedBoothIds.length > 0 || allowedConstituencyIds.length > 0) {
+      const dstIds = validScopedDistrictIds || [];
+      const matched = districts.filter(d => dstIds.includes(String(d.id))).map(d => String(d.stateId));
+      return Array.from(new Set(matched));
+    }
+    if (allowedDistrictIds.length > 0) {
+      const matched = districts.filter(d => allowedDistrictIds.includes(String(d.id))).map(d => String(d.stateId));
+      return Array.from(new Set(matched));
+    }
+    if (allowedStateIds.length > 0) return allowedStateIds;
+    return null;
+  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, validScopedDistrictIds, districts]);
 
-        const votersToInsert: any[] = [];
-        for (let i = 0; i < data.length; i++) {
-          const row = data[i];
-          const rawName = getValue(row, ['name', 'voter name', 'full name', 'voterName']);
-          const finalName = rawName || 'Unnamed Voter';
 
-          const rawVId = getValue(row, ['voterId', 'voter id', 'epic', 'epic_no', 'epic no', 'epicId']);
-          const finalVId = rawVId ? rawVId.toUpperCase() : `TEMP-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
-
-          const rowDob = getValue(row, ['dob', 'date of birth', 'birthdate', 'birthDate']);
-          const rawAge = getValue(row, ['age', 'age_yrs', 'ageYrs']);
-          let rowAgeNum = 18;
-          if (rowDob) {
-            rowAgeNum = calculateAge(rowDob);
-          } else if (rawAge) {
-            const num = parseInt(rawAge, 10);
-            if (!isNaN(num)) rowAgeNum = num;
-          }
-
-          const rawGender = getValue(row, ['gender', 'sex']);
-          let finalGender = 'Male';
-          if (rawGender) {
-            const firstChar = rawGender.trim().charAt(0).toUpperCase();
-            if (firstChar === 'M') finalGender = 'Male';
-            else if (firstChar === 'F') finalGender = 'Female';
-            else if (firstChar === 'O') finalGender = 'Other';
-            else finalGender = rawGender;
-          }
-
-          const mobileVal = getValue(row, ['mobile', 'phone', 'contact']);
-          const emailVal = getValue(row, ['email', 'emailAddress', 'email_address', 'mail', 'email address']);
-          const relationNameVal = getValue(row, ['relationName', 'relation name', 'fatherName', "father's name", 'father name', 'husbandName', "husband's name", 'husband name', 'guardian', 'guardianName', 'relativeName', 'relation_name', 'father_husband_name']);
-          const additionalMobileVal = getValue(row, ['additionalMobile', 'alternate mobile', 'alt mobile', 'altPhone']);
-          const addressVal = getValue(row, ['address', 'current address', 'currentAddress']);
-          const newAddressVal = getValue(row, ['newAddress', 'new address', 'newAddress']);
-          const houseNoVal = getValue(row, ['houseNo', 'house no', 'h no', 'h.no']);
-          const villageVal = getValue(row, ['village', 'area', 'colony', 'villageName']);
-
-          const casteVal = getValue(row, ['caste', 'category', 'casteCategory']) || 'General';
-          const occupationVal = getValue(row, ['occupation', 'work', 'job', 'profession']) || 'Private Service';
-          const educationVal = getValue(row, ['education', 'academic']) || 'Unspecified';
-
-          const partNoVal = getValue(row, ['partNo', 'part no', 'part_no']);
-          const srNoVal = getValue(row, ['srNo', 'sr no', 'sr_no', 'serial no', 'serial_no']);
-
-          votersToInsert.push({
-            voterId: finalVId,
-            name: finalName,
-            relationName: relationNameVal,
-            aadharNumber: getValue(row, ['aadharNumber', 'aadhar', 'aadhar number']) || '',
-            gender: finalGender,
-            age: rowAgeNum,
-            dob: rowDob,
-            mobile: mobileVal,
-            email: emailVal,
-            additionalMobile: additionalMobileVal,
-            address: addressVal,
-            newAddress: newAddressVal,
-            houseNo: houseNoVal,
-            village: villageVal,
-            caste: casteVal,
-            occupation: occupationVal,
-            education: educationVal,
-            isKaryakarta: false,
-            voted: false,
-            partNo: partNoVal,
-            srNo: srNoVal,
-            stateId: selectedStateId,
-            districtId: selectedDistrictId,
-            constituencyId: selectedConstituencyId,
-            boothId: selectedBoothId,
-            vitalStatus: 'Active',
-            physicalProfile: '',
-            disabilityCategory: '',
-            eciAssistanceNeeded: false,
-            economicCategory: '',
-            incomeRange: '',
-            landOwnership: ''
-          });
-        }
-
-        // Send in batches of 100
-        const batchSize = 100;
-        success = 0;
-        failed = 0;
-        for (let i = 0; i < votersToInsert.length; i += batchSize) {
-          const chunk = votersToInsert.slice(i, i + batchSize);
-          try {
-            const res = await api.post<any>('/api/voters/bulk', { voters: chunk });
-            success += (res?.count || chunk.length);
-          } catch (err) {
-            console.error('Batch import error:', err);
-            failed += chunk.length;
-          }
-          setImportProgress(Math.min(100, Math.round(((i + chunk.length) / votersToInsert.length) * 100)));
-        }
-
-        setImportResults({ success, failed });
-        setImportStatus('completed');
-        fetchVoters();
-      }
-    });
-  };
 
   const filteredVoters = voters.filter(v => {
-    const matchesSearch = (
-      v.name.toLowerCase().includes(searchTerm.toLowerCase()) || 
-      v.voterId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      v.mobile?.includes(searchTerm)
-    );
+    // 1. Full text search matching
+    const term = searchTerm.trim().toLowerCase();
+    if (term) {
+      const matchesSearch = (
+        v.name?.toLowerCase().includes(term) || 
+        v.voterId?.toLowerCase().includes(term) ||
+        v.mobile?.includes(term) ||
+        v.aadharNumber?.includes(term) ||
+        v.houseNo?.toLowerCase().includes(term) ||
+        v.village?.toLowerCase().includes(term) ||
+        v.address?.toLowerCase().includes(term)
+      );
+      if (!matchesSearch) return false;
+    }
 
-    if (!matchesSearch) return false;
+    // Resolve hierarchical IDs dynamically
+    const resolvedBoothId = String(v.boothId || '');
+    const boothObj = booths.find(b => String(b.id) === resolvedBoothId);
+    const resolvedConstituencyId = String(v.constituencyId || '') || (boothObj ? String(boothObj.constituencyId || '') : '');
+    const constObj = constituencies.find(c => String(c.id) === resolvedConstituencyId);
+    const resolvedDistrictId = String(v.districtId || '') || (constObj ? String(constObj.districtId || '') : '');
+    const distObj = districts.find(d => String(d.id) === resolvedDistrictId);
+    const resolvedStateId = String(v.stateId || '') || (distObj ? String(distObj.stateId || '') : '') || (constObj ? String(constObj.stateId || '') : '');
 
-    // Secure scope enforcement (second layer of protection)
-    if (!isAdmin) {
-      if (allowedStateIds.length > 0 && !allowedStateIds.includes(v.stateId)) return false;
-      if (allowedDistrictIds.length > 0 && !allowedDistrictIds.includes(v.districtId)) return false;
-      if (allowedConstituencyIds.length > 0 && !allowedConstituencyIds.includes(v.constituencyId)) return false;
-      if (allowedBoothIds.length > 0 && !allowedBoothIds.includes(v.boothId)) return false;
+    // 2. Secure demographic scope enforcement for non-Super Admins
+    if (isRestrictedUser) {
+      if (validScopedBoothIds && (!resolvedBoothId || !validScopedBoothIds.includes(resolvedBoothId))) return false;
+      if (validScopedConstituencyIds && (!resolvedConstituencyId || !validScopedConstituencyIds.includes(resolvedConstituencyId))) return false;
+      if (validScopedDistrictIds && (!resolvedDistrictId || !validScopedDistrictIds.includes(resolvedDistrictId))) return false;
+      if (validScopedStateIds && (!resolvedStateId || !validScopedStateIds.includes(resolvedStateId))) return false;
+    }
+
+    // 3. Instant On-Screen Demographic Dropdown Filters
+    // State filter
+    if (selectedStateIds.length > 0) {
+      if (!resolvedStateId || !selectedStateIds.includes(resolvedStateId)) return false;
+    } else if (selectedStateId && selectedStateId !== 'all') {
+      if (resolvedStateId !== selectedStateId) return false;
+    }
+
+    // District filter
+    if (selectedDistrictIds.length > 0) {
+      if (!resolvedDistrictId || !selectedDistrictIds.includes(resolvedDistrictId)) return false;
+    } else if (selectedDistrictId && selectedDistrictId !== 'all') {
+      if (resolvedDistrictId !== selectedDistrictId) return false;
+    }
+
+    // Constituency filter
+    if (selectedConstituencyIds.length > 0) {
+      if (!resolvedConstituencyId || !selectedConstituencyIds.includes(resolvedConstituencyId)) return false;
+    } else if (selectedConstituencyId && selectedConstituencyId !== 'all') {
+      if (resolvedConstituencyId !== selectedConstituencyId) return false;
+    }
+
+    // Booth filter
+    if (selectedBoothIds.length > 0) {
+      if (!resolvedBoothId || !selectedBoothIds.includes(resolvedBoothId)) return false;
+    } else if (selectedBoothId && selectedBoothId !== 'all') {
+      if (resolvedBoothId !== selectedBoothId) return false;
     }
 
     // Filter by vital status
@@ -1009,12 +1024,11 @@ const VoterManagement: React.FC = () => {
       if (filterSentiment !== sVal) return false;
     }
 
-    // Filter by Completeness
+    // Filter by Profile Completeness
     if (filterCompleteness !== 'all') {
-      const compVal = getCompletenessPercent(v);
-      if (filterCompleteness === 'low' && compVal >= 40) return false;
-      if (filterCompleteness === 'medium' && (compVal < 40 || compVal >= 75)) return false;
-      if (filterCompleteness === 'high' && compVal < 75) return false;
+      const comp = getCompletenessPercent(v);
+      if (filterCompleteness === 'complete' && comp < 80) return false;
+      if (filterCompleteness === 'incomplete' && comp >= 80) return false;
     }
 
     // Filter by Karyakarta (Volunteer)
@@ -1027,35 +1041,41 @@ const VoterManagement: React.FC = () => {
     return true;
   });
 
-  const filterableStates = states;
+  const filterableStates = states.filter(s => 
+    !validScopedStateIds || validScopedStateIds.includes(String(s.id))
+  );
   const searchedStates = filterableStates.filter(s =>
     s.name.toLowerCase().includes(stateSearchText.toLowerCase())
   );
 
-  const filterableDistricts = districts.filter(d => selectedStateIds.length === 0 || selectedStateIds.includes(d.stateId));
+  const filterableDistricts = districts.filter(d => {
+    const isScoped = !validScopedDistrictIds || validScopedDistrictIds.includes(String(d.id));
+    const matchesSelectedState = selectedStateIds.length === 0 || selectedStateIds.includes(String(d.stateId));
+    return isScoped && matchesSelectedState;
+  });
   const searchedDistricts = filterableDistricts.filter(d =>
     d.name.toLowerCase().includes(districtSearchText.toLowerCase())
   );
 
   const filterableConstituencies = constituencies.filter(c => {
-    const dist = districts.find(d => d.id === c.districtId);
-    if (!dist) return false;
-    const matchesState = selectedStateIds.length === 0 || selectedStateIds.includes(dist.stateId);
-    const matchesDistrict = selectedDistrictIds.length === 0 || selectedDistrictIds.includes(c.districtId);
-    return matchesState && matchesDistrict;
+    const dist = districts.find(d => String(d.id) === String(c.districtId));
+    const isScoped = !validScopedConstituencyIds || validScopedConstituencyIds.includes(String(c.id));
+    const matchesSelectedState = selectedStateIds.length === 0 || (dist && selectedStateIds.includes(String(dist.stateId)));
+    const matchesSelectedDistrict = selectedDistrictIds.length === 0 || selectedDistrictIds.includes(String(c.districtId));
+    return isScoped && matchesSelectedState && matchesSelectedDistrict;
   });
   const searchedConstituencies = filterableConstituencies.filter(c =>
     c.name.toLowerCase().includes(constituencySearchText.toLowerCase())
   );
 
   const filterableBooths = booths.filter(b => {
-    const conn = constituencies.find(c => c.id === b.constituencyId);
-    const dist = districts.find(d => d.id === conn?.districtId);
-    if (!conn) return false;
-    const matchesState = selectedStateIds.length === 0 || (dist && selectedStateIds.includes(dist.stateId));
-    const matchesDistrict = selectedDistrictIds.length === 0 || (conn && selectedDistrictIds.includes(conn.districtId));
-    const matchesConstituency = selectedConstituencyIds.length === 0 || selectedConstituencyIds.includes(b.constituencyId);
-    return matchesState && matchesDistrict && matchesConstituency;
+    const conn = constituencies.find(c => String(c.id) === String(b.constituencyId));
+    const dist = districts.find(d => String(d.id) === String(conn?.districtId));
+    const isScoped = !validScopedBoothIds || validScopedBoothIds.includes(String(b.id));
+    const matchesSelectedState = selectedStateIds.length === 0 || (dist && selectedStateIds.includes(String(dist.stateId)));
+    const matchesSelectedDistrict = selectedDistrictIds.length === 0 || (conn && selectedDistrictIds.includes(String(conn.districtId)));
+    const matchesSelectedConstituency = selectedConstituencyIds.length === 0 || selectedConstituencyIds.includes(String(b.constituencyId));
+    return isScoped && matchesSelectedState && matchesSelectedDistrict && matchesSelectedConstituency;
   });
   const searchedBooths = filterableBooths.filter(b => 
     b.name.toLowerCase().includes(boothSearchText.toLowerCase()) || 
@@ -1101,53 +1121,61 @@ const VoterManagement: React.FC = () => {
 
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
           {hasRight('voters', 'c') && (
-            <button 
-              onClick={() => {
-                setEditingVoter(null);
-                setFormData({
-                  voterId: '', 
-                  name: '', 
-                  gender: 'Male', 
-                  age: 18, 
-                  dob: '', 
-                  mobile: '', 
-                  email: '',
-                  additionalMobile: '',
-                  address: '', 
-                  newAddress: '',
-                  houseNo: '', 
-                  village: '', 
-                  caste: 'General', 
-                  occupation: 'Private Service', 
-                  isKaryakarta: false, 
-                  voted: false, 
-                  partNo: '', 
-                  srNo: '',
-                  stateId: selectedStateIds.length > 0 ? selectedStateIds[0] : (selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '')),
-                  districtId: selectedDistrictIds.length > 0 ? selectedDistrictIds[0] : (selectedDistrictId !== 'all' ? selectedDistrictId : ''),
-                  constituencyId: selectedConstituencyIds.length > 0 ? selectedConstituencyIds[0] : (selectedConstituencyId !== 'all' ? selectedConstituencyId : ''),
-                  boothId: selectedBoothIds.length > 0 ? selectedBoothIds[0] : (selectedBoothId !== 'all' ? selectedBoothId : ''),
-                  vitalStatus: 'Active',
-                  physicalProfile: 'General',
-                  disabilityCategory: 'None',
-                  eciAssistanceNeeded: false,
-                  economicCategory: 'APL',
-                  incomeRange: '₹15,000 - ₹30,000',
-                  landOwnership: 'Small Farmer',
-                  education: 'Unspecified',
-                });
-                setSentimentStatus('Neutral');
-                setSentimentNotes('');
-                setLastSentimentUpdatedBy('');
-                setLastSentimentUpdatedAt('');
-                setSentimentAdminId(user?.uid || '');
-                setActiveFormTab('main');
-                setIsModalOpen(true);
-              }}
-              className="webapp-button-primary h-11 px-6 flex items-center justify-center gap-2 text-[10px] uppercase tracking-wider font-black shadow-lg shadow-blue-600/10"
-            >
-              <Plus size={18} /> Add Voter
-            </button>
+            <>
+              <button 
+                onClick={() => setIsImportModalOpen(true)}
+                className="h-11 px-5 rounded-[14px] bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-black text-[10px] uppercase tracking-wider hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all flex items-center justify-center gap-2 shadow-sm"
+              >
+                <Upload size={14} /> Bulk Import Voters
+              </button>
+              <button 
+                onClick={() => {
+                  setEditingVoter(null);
+                  setFormData({
+                    voterId: '', 
+                    name: '', 
+                    gender: 'Male', 
+                    age: 18, 
+                    dob: '', 
+                    mobile: '', 
+                    email: '',
+                    additionalMobile: '',
+                    address: '', 
+                    newAddress: '',
+                    houseNo: '', 
+                    village: '', 
+                    caste: 'General', 
+                    occupation: 'Private Service', 
+                    isKaryakarta: false, 
+                    voted: false, 
+                    partNo: '', 
+                    srNo: '',
+                    stateId: selectedStateIds.length > 0 ? selectedStateIds[0] : (selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '')),
+                    districtId: selectedDistrictIds.length > 0 ? selectedDistrictIds[0] : (selectedDistrictId !== 'all' ? selectedDistrictId : ''),
+                    constituencyId: selectedConstituencyIds.length > 0 ? selectedConstituencyIds[0] : (selectedConstituencyId !== 'all' ? selectedConstituencyId : ''),
+                    boothId: selectedBoothIds.length > 0 ? selectedBoothIds[0] : (selectedBoothId !== 'all' ? selectedBoothId : ''),
+                    vitalStatus: 'Active',
+                    physicalProfile: 'General',
+                    disabilityCategory: 'None',
+                    eciAssistanceNeeded: false,
+                    economicCategory: 'APL',
+                    incomeRange: '₹15,000 - ₹30,000',
+                    landOwnership: 'Small Farmer',
+                    education: 'Unspecified',
+                  });
+                  setSentimentStatus('Neutral');
+                  setSentimentNotes('');
+                  setLastSentimentUpdatedBy('');
+                  setLastSentimentUpdatedAt('');
+                  setSentimentAdminId(user?.uid || '');
+                  setActiveFormTab('main');
+                  setIsModalOpen(true);
+                }}
+                className="webapp-button-primary h-11 px-6 flex items-center justify-center gap-2 text-[10px] uppercase tracking-wider font-black shadow-lg shadow-blue-600/10"
+              >
+                <Plus size={18} /> Add Voter
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -1165,7 +1193,7 @@ const VoterManagement: React.FC = () => {
               color: "text-emerald-600 dark:text-emerald-400",
               bgColor: "bg-emerald-50 dark:bg-emerald-950/20",
               borderColor: "border-emerald-100 dark:border-emerald-900/30",
-              progressColor: "bg-emerald-505 bg-emerald-500",
+              progressColor: "bg-emerald-500",
               filledFields: stats.main.totalFilledFields,
               blankFields: stats.main.totalBlankFields,
               totalFieldsCount: 8,
@@ -1179,7 +1207,7 @@ const VoterManagement: React.FC = () => {
               color: "text-blue-600 dark:text-blue-400",
               bgColor: "bg-blue-50 dark:bg-blue-950/20",
               borderColor: "border-blue-100 dark:border-blue-900/30",
-              progressColor: "bg-blue-505 bg-blue-500",
+              progressColor: "bg-blue-500",
               filledFields: stats.address.totalFilledFields,
               blankFields: stats.address.totalBlankFields,
               totalFieldsCount: 10,
@@ -1193,7 +1221,7 @@ const VoterManagement: React.FC = () => {
               color: "text-purple-600 dark:text-purple-400",
               bgColor: "bg-purple-50 dark:bg-purple-950/15",
               borderColor: "border-purple-100 dark:border-purple-900/30",
-              progressColor: "bg-purple-505 bg-purple-500",
+              progressColor: "bg-purple-500",
               filledFields: stats.health.totalFilledFields,
               blankFields: stats.health.totalBlankFields,
               totalFieldsCount: 4,
@@ -1204,14 +1232,14 @@ const VoterManagement: React.FC = () => {
               desc: "Category, Income, Land ownership",
               filled: stats.economy.filledVoters,
               blank: stats.economy.blankVoters,
-              color: "text-orange-600 dark:text-orange-300",
+              color: "text-orange-600 dark:text-orange-400",
               bgColor: "bg-orange-50 dark:bg-orange-950/20",
               borderColor: "border-orange-100 dark:border-orange-900/30",
-              progressColor: "bg-orange-505 bg-orange-500",
+              progressColor: "bg-orange-500",
               filledFields: stats.economy.totalFilledFields,
               blankFields: stats.economy.totalBlankFields,
               totalFieldsCount: 3,
-              icon: <Coins className="w-5 h-5 text-orange-600 dark:text-orange-355" />
+              icon: <Coins className="w-5 h-5 text-orange-600 dark:text-orange-400" />
             },
             {
               title: "Political Sentiment",
@@ -1221,7 +1249,7 @@ const VoterManagement: React.FC = () => {
               color: "text-amber-600 dark:text-amber-400",
               bgColor: "bg-amber-50 dark:bg-amber-950/20",
               borderColor: "border-amber-100 dark:border-amber-900/30",
-              progressColor: "bg-amber-505 bg-amber-500",
+              progressColor: "bg-amber-500",
               filledFields: stats.political.totalFilledFields,
               blankFields: stats.political.totalBlankFields,
               totalFieldsCount: 1,
@@ -1242,13 +1270,13 @@ const VoterManagement: React.FC = () => {
                     <div className={`p-2 rounded-xl ${sec.bgColor} ${sec.color}`}>
                       {sec.icon}
                     </div>
-                    <span className="text-[10px] font-black uppercase text-zinc-400 bg-zinc-50 dark:bg-zinc-900 px-2 py-0.5 rounded-full select-none">
+                    <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900 px-2 py-0.5 rounded-full select-none">
                       {compPercent}% Filled
                     </span>
                   </div>
                   <div>
-                    <h3 className="text-xs font-black text-zinc-800 dark:text-zinc-205 tracking-tight leading-none">{sec.title}</h3>
-                    <p className="text-[9px] text-zinc-400 dark:text-zinc-500 font-bold mt-1 leading-tight truncate" title={sec.desc}>
+                    <h3 className="text-xs font-black text-zinc-800 dark:text-zinc-200 tracking-tight leading-none">{sec.title}</h3>
+                    <p className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold mt-1 leading-tight truncate" title={sec.desc}>
                       {sec.desc}
                     </p>
                   </div>
@@ -1266,17 +1294,17 @@ const VoterManagement: React.FC = () => {
                   {/* Counts */}
                   <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 dark:border-zinc-900 pt-2 flex-wrap">
                     <div>
-                      <div className="text-[8px] font-black uppercase text-zinc-400 tracking-widest leading-none">Filled</div>
+                      <div className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-widest leading-none">Filled</div>
                       <div className="text-[13px] font-black text-zinc-800 dark:text-zinc-100 mt-1 flex items-baseline gap-0.5">
                         <span>{sec.filled}</span>
-                        <span className="text-[9px] text-zinc-400 font-bold">V</span>
+                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold">V</span>
                       </div>
                     </div>
                     <div className="border-l border-zinc-100 dark:border-zinc-900 pl-2">
-                      <div className="text-[8px] font-black uppercase text-zinc-450 tracking-widest leading-none font-bold">Blank</div>
-                      <div className="text-[13px] font-black text-zinc-400 dark:text-zinc-500 mt-1 flex items-baseline gap-0.5">
+                      <div className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-widest leading-none font-bold">Blank</div>
+                      <div className="text-[13px] font-black text-zinc-500 dark:text-zinc-400 mt-1 flex items-baseline gap-0.5">
                         <span>{sec.blank}</span>
-                        <span className="text-[9px] text-zinc-400 font-bold">V</span>
+                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold">V</span>
                       </div>
                     </div>
                   </div>
@@ -2201,19 +2229,19 @@ const VoterManagement: React.FC = () => {
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-white dark:bg-zinc-950 flex flex-col w-full h-full overflow-hidden animate-in fade-in duration-100">
           <div className="relative w-full h-full flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0">
+            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 shrink-0">
                 <div className="max-w-4xl mx-auto w-full flex justify-between items-center">
                   <div>
                      <h3 className="text-xl font-black text-zinc-900 dark:text-white">{editingVoter ? 'Update Voter' : 'New Voter Entry'}</h3>
-                     <p className="text-[10px] font-black text-zinc-500 uppercase tracking-widest">Election Registry Management</p>
+                     <p className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Election Registry Management</p>
                   </div>
-                  <button onClick={() => setIsModalOpen(false)} className="p-2 text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all"><X size={20} /></button>
+                  <button onClick={() => setIsModalOpen(false)} className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"><X size={20} /></button>
                 </div>
               </div>
 
               {/* Horizontal scrollable or wrap container for modular tabs */}
-              <div className="border-b border-zinc-150 dark:border-zinc-800 bg-zinc-50/30 dark:bg-zinc-900/10 shrink-0">
-                <div className="max-w-4xl mx-auto w-full px-6 py-3 flex gap-1 overflow-x-auto scrollbar-none">
+              <div className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 shrink-0">
+                <div className="max-w-4xl mx-auto w-full px-6 py-3 flex gap-1.5 overflow-x-auto scrollbar-none">
                   {[
                     { id: 'main', label: '1. Main Details' },
                     { id: 'contact', label: '2. Address & Contacts' },
@@ -2224,10 +2252,10 @@ const VoterManagement: React.FC = () => {
                       key={tab.id}
                       type="button"
                       onClick={() => setActiveFormTab(tab.id as 'main' | 'contact' | 'health_economy' | 'political_sentiment')}
-                      className={`px-5 py-2.5 text-[10px] uppercase tracking-wider font-extrabold rounded-lg whitespace-nowrap transition-all ${
+                      className={`px-5 py-2.5 text-[11px] uppercase tracking-wider font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer ${
                         activeFormTab === tab.id
-                          ? 'bg-zinc-950 dark:bg-zinc-150 text-white dark:text-zinc-950 shadow-sm'
-                          : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100/50 dark:hover:bg-zinc-800/20'
+                          ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 shadow-sm'
+                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/60'
                       }`}
                     >
                       {tab.label}
@@ -2244,29 +2272,29 @@ const VoterManagement: React.FC = () => {
                     <div className="space-y-6 animate-in fade-in duration-200">
                       {/* Basic Identity Details */}
                       <div className="space-y-4">
-                        <h4 className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] border-b border-zinc-100 dark:border-zinc-800 pb-1">Basic Identity</h4>
+                        <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Basic Identity</h4>
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Voter ID (EPIC NO)</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Voter ID (EPIC NO)</label>
                             <input required value={formData.voterId} onChange={e => setFormData({ ...formData, voterId: e.target.value.toUpperCase() })} className="webapp-input w-full h-11 text-sm font-black" placeholder="e.g. ABC1234567" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Full Name</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Full Name</label>
                             <input required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="As per voter list" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Father / Husband Name</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Father / Husband Name</label>
                             <input value={formData.relationName || ''} onChange={e => setFormData({ ...formData, relationName: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="Father's or Husband's Name" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Aadhar Number</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Aadhar Number</label>
                             <input value={formData.aadharNumber} onChange={e => setFormData({ ...formData, aadharNumber: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 1234 5678 9012" />
                           </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Gender</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Gender</label>
                             <select value={formData.gender} onChange={e => setFormData({ ...formData, gender: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="Male">Male</option>
                               <option value="Female">Female</option>
@@ -2274,7 +2302,7 @@ const VoterManagement: React.FC = () => {
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Date of Birth</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Date of Birth</label>
                             <input 
                               type="date" 
                               required
@@ -2287,19 +2315,19 @@ const VoterManagement: React.FC = () => {
                             />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Age (Calculated)</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Age (Calculated)</label>
                             <input 
                               type="text" 
                               readOnly 
                               value={formData.age > 0 ? `${formData.age} Years` : 'Select DOB'} 
-                              className="webapp-input w-full h-11 text-sm font-bold bg-zinc-55 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 cursor-not-allowed select-none" 
+                              className="webapp-input w-full h-11 text-sm font-bold bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 cursor-not-allowed select-none" 
                             />
                           </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Caste / Category</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Caste / Category</label>
                             <select value={formData.caste || 'General'} onChange={e => setFormData({ ...formData, caste: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="General">General</option>
                               <option value="OBC">OBC (Other Backward Classes)</option>
@@ -2309,7 +2337,7 @@ const VoterManagement: React.FC = () => {
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Occupation</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Occupation</label>
                             <select value={formData.occupation || 'Private Service'} onChange={e => setFormData({ ...formData, occupation: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="Farmer">Farmer / Agriculture</option>
                               <option value="Government Service">Government Service</option>
@@ -2323,7 +2351,7 @@ const VoterManagement: React.FC = () => {
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Education Qualification</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Education Qualification</label>
                             <select value={formData.education || 'Unspecified'} onChange={e => setFormData({ ...formData, education: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="Unspecified">Unspecified / None</option>
                               <option value="Illiterate">Illiterate / No Formal</option>
@@ -2340,18 +2368,18 @@ const VoterManagement: React.FC = () => {
                       </div>
 
                       {/* Deployment / Administrative Location Details */}
-                      <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                        <h4 className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] border-b border-zinc-100 dark:border-zinc-800 pb-1">Deployment & Geography</h4>
+                      <div className="space-y-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                        <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Deployment & Geography</h4>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">State</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">State</label>
                             <select required value={formData.stateId} onChange={e => setFormData({ ...formData, stateId: e.target.value, districtId: '', constituencyId: '', boothId: '' })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="" disabled>Select State</option>
                               {states.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">District</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">District</label>
                             <select required value={formData.districtId} onChange={e => setFormData({ ...formData, districtId: e.target.value, constituencyId: '', boothId: '' })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="" disabled>Select District</option>
                               {districts.filter(d => d.stateId === formData.stateId).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
@@ -2361,14 +2389,14 @@ const VoterManagement: React.FC = () => {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Constituency</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Constituency</label>
                             <select required value={formData.constituencyId} onChange={e => setFormData({ ...formData, constituencyId: e.target.value, boothId: '' })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="" disabled>Select Constituency</option>
                               {constituencies.filter(c => c.districtId === formData.districtId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Booth</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Booth</label>
                             <select required value={formData.boothId} onChange={e => setFormData({ ...formData, boothId: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="" disabled>Select Booth</option>
                               {booths.filter(b => b.constituencyId === formData.constituencyId).map(b => <option key={b.id} value={b.id}>#{b.boothNumber} - {b.name}</option>)}
@@ -2378,11 +2406,11 @@ const VoterManagement: React.FC = () => {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Part No</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Part No</label>
                             <input value={formData.partNo} onChange={e => setFormData({ ...formData, partNo: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 52" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Serial No</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Serial No</label>
                             <input value={formData.srNo} onChange={e => setFormData({ ...formData, srNo: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 142" />
                           </div>
                         </div>
@@ -2394,38 +2422,38 @@ const VoterManagement: React.FC = () => {
                     <div className="space-y-6 animate-in fade-in duration-200">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1.5 flex flex-col">
-                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Primary Mobile</label>
+                          <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Primary Mobile</label>
                           <input type="tel" value={formData.mobile} onChange={e => setFormData({ ...formData, mobile: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 9876543210" />
                         </div>
                         <div className="space-y-1.5 flex flex-col">
-                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Additional Mobile (Optional)</label>
+                          <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Additional Mobile (Optional)</label>
                           <input type="tel" value={formData.additionalMobile} onChange={e => setFormData({ ...formData, additionalMobile: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="Alternate, Sub-contact" />
                         </div>
                       </div>
 
                       <div className="space-y-1.5 flex flex-col">
-                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Email Address</label>
-                        <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold placeholder-zinc-350 dark:placeholder-zinc-650" placeholder="e.g. name@domain.com" />
+                        <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Email Address</label>
+                        <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold placeholder-zinc-400 dark:placeholder-zinc-500" placeholder="e.g. name@domain.com" />
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1.5 flex flex-col">
-                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">House No</label>
+                          <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">House No</label>
                           <input value={formData.houseNo} onChange={e => setFormData({ ...formData, houseNo: e.target.value })} className="webapp-input w-full h-11 text-sm" placeholder="e.g. 154-C" />
                         </div>
                         <div className="space-y-1.5 flex flex-col">
-                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Village / Society</label>
+                          <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Village / Society</label>
                           <input value={formData.village} onChange={e => setFormData({ ...formData, village: e.target.value })} className="webapp-input w-full h-11 text-sm" placeholder="e.g. Green Meadows" />
                         </div>
                       </div>
 
                       <div className="space-y-1.5 flex flex-col">
-                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Full Address</label>
+                        <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Full Address</label>
                         <textarea value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} className="webapp-input w-full h-20 text-sm py-2" placeholder="Full residential physical address details..." />
                       </div>
 
                       <div className="space-y-1.5 flex flex-col">
-                        <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">New Address (Shifted/Migrated Track)</label>
+                        <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">New Address (Shifted/Migrated Track)</label>
                         <textarea value={formData.newAddress} onChange={e => setFormData({ ...formData, newAddress: e.target.value })} className="webapp-input w-full h-16 text-sm py-2" placeholder="If voter shifted, track current location here..." />
                       </div>
                     </div>
@@ -2435,19 +2463,19 @@ const VoterManagement: React.FC = () => {
                     <div className="space-y-6 animate-in fade-in duration-200">
                       {/* Health Section */}
                       <div className="space-y-4">
-                        <h4 className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] border-b border-zinc-100 dark:border-zinc-800 pb-1">Health & Vital Status</h4>
+                        <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Health & Vital Status</h4>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Vital Status</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Vital Status</label>
                             <select value={formData.vitalStatus} onChange={e => setFormData({ ...formData, vitalStatus: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="Active">Active (On List)</option>
                               <option value="Deceased">Deceased</option>
                               <option value="Migrated/Shifted">Migrated / Shifted</option>
                             </select>
-                            <p className="text-[9px] text-zinc-400 leading-tight">Rule: Archived status will automatically exclude the voter from active operational lists by default.</p>
+                            <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">Rule: Archived status will automatically exclude the voter from active operational lists by default.</p>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Physical / Health Profile</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Physical / Health Profile</label>
                             <select value={formData.physicalProfile} onChange={e => setFormData({ ...formData, physicalProfile: e.target.value, disabilityCategory: e.target.value === 'PwD' ? formData.disabilityCategory : 'None' })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="General">General / Healthy</option>
                               <option value="PwD">PwD (Person with Disability)</option>
@@ -2459,12 +2487,12 @@ const VoterManagement: React.FC = () => {
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className={`text-[10px] font-black uppercase tracking-wider ${formData.physicalProfile !== 'PwD' ? 'text-zinc-300' : 'text-zinc-400'}`}>Disability Category</label>
+                            <label className={`text-[10px] font-black uppercase tracking-wider ${formData.physicalProfile !== 'PwD' ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'}`}>Disability Category</label>
                             <select 
                               disabled={formData.physicalProfile !== 'PwD'} 
                               value={formData.disabilityCategory} 
                               onChange={e => setFormData({ ...formData, disabilityCategory: e.target.value })} 
-                              className={`webapp-input w-full h-11 text-sm font-bold ${formData.physicalProfile !== 'PwD' ? 'opacity-50 cursor-not-allowed bg-zinc-50 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800' : ''}`}
+                              className={`webapp-input w-full h-11 text-sm font-bold ${formData.physicalProfile !== 'PwD' ? 'opacity-50 cursor-not-allowed bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 text-zinc-400 dark:text-zinc-500' : ''}`}
                             >
                               <option value="None">None</option>
                               <option value="Locomotor">Locomotor Disability</option>
@@ -2475,8 +2503,8 @@ const VoterManagement: React.FC = () => {
                           </div>
                           
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">ECI Assistance Needed</label>
-                            <div className="flex bg-zinc-100 dark:bg-zinc-900 p-0.5 rounded-xl border border-zinc-250 dark:border-zinc-850 h-11 items-center">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">ECI Assistance Needed</label>
+                            <div className="flex bg-zinc-100 dark:bg-zinc-900 p-0.5 rounded-xl border border-zinc-200 dark:border-zinc-800 h-11 items-center">
                               {[
                                 { label: 'No Assistance', value: false },
                                 { label: 'ECI Assist', value: true }
@@ -2485,10 +2513,10 @@ const VoterManagement: React.FC = () => {
                                   key={String(item.value)}
                                   type="button"
                                   onClick={() => setFormData({ ...formData, eciAssistanceNeeded: item.value })}
-                                  className={`flex-1 text-[10px] uppercase font-black tracking-tight py-2 rounded-lg transition-all ${
+                                  className={`flex-1 text-[10px] uppercase font-black tracking-tight py-2 rounded-lg transition-all cursor-pointer ${
                                     formData.eciAssistanceNeeded === item.value 
-                                      ? 'bg-zinc-950 dark:bg-zinc-100 text-white dark:text-zinc-950 shadow-sm'
-                                      : 'text-zinc-500 hover:text-zinc-800'
+                                      ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 shadow-sm'
+                                      : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100'
                                   }`}
                                 >
                                   {item.label}
@@ -2500,11 +2528,11 @@ const VoterManagement: React.FC = () => {
                       </div>
 
                       {/* Economic Section */}
-                      <div className="space-y-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                        <h4 className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] border-b border-zinc-100 dark:border-zinc-800 pb-1">Economic & Welfare Intelligence</h4>
+                      <div className="space-y-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                        <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Economic & Welfare Intelligence</h4>
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Economic Category</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Economic Category</label>
                             <select value={formData.economicCategory || 'APL'} onChange={e => setFormData({ ...formData, economicCategory: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="APL">APL (Above Poverty Line)</option>
                               <option value="BPL">BPL (Below Poverty Line)</option>
@@ -2512,7 +2540,7 @@ const VoterManagement: React.FC = () => {
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Monthly Household Income Range</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Monthly Household Income Range</label>
                             <select value={formData.incomeRange || '₹15,000 - ₹30,000'} onChange={e => setFormData({ ...formData, incomeRange: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="Under ₹15,000">Under ₹15,000</option>
                               <option value="₹15,000 - ₹30,000">₹15,000 - ₹30,000</option>
@@ -2523,7 +2551,7 @@ const VoterManagement: React.FC = () => {
                         </div>
 
                         <div className="space-y-1.5 flex flex-col">
-                          <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Land Ownership Type</label>
+                          <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Land Ownership Type</label>
                           <select value={formData.landOwnership || 'Small Farmer'} onChange={e => setFormData({ ...formData, landOwnership: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                             <option value="Landless">Landless</option>
                             <option value="Small Farmer">Small Farmer</option>
@@ -2533,31 +2561,31 @@ const VoterManagement: React.FC = () => {
                           </select>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-                          <div className="flex items-center gap-4 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${formData.isKaryakarta ? 'bg-orange-500 text-white shadow-md' : 'bg-zinc-200 text-zinc-400'}`}>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+                          <div className="flex items-center gap-4 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${formData.isKaryakarta ? 'bg-orange-500 text-white shadow-md' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
                               <UserCheck size={18} />
                             </div>
                             <div className="flex-1">
-                              <label className="text-[9px] font-black uppercase text-zinc-500 tracking-wider">Karyakarta Staff</label>
+                              <label className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Karyakarta Staff</label>
                               <div className="flex justify-between items-center mt-0.5">
-                                <span className="text-xs font-bold">{formData.isKaryakarta ? 'Active Staff' : 'Standard'}</span>
-                                <button type="button" onClick={() => setFormData({ ...formData, isKaryakarta: !formData.isKaryakarta })} className={`w-8 h-5 rounded-full relative transition-all ${formData.isKaryakarta ? 'bg-orange-500' : 'bg-zinc-350'}`}>
+                                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{formData.isKaryakarta ? 'Active Staff' : 'Standard'}</span>
+                                <button type="button" onClick={() => setFormData({ ...formData, isKaryakarta: !formData.isKaryakarta })} className={`w-8 h-5 rounded-full relative transition-all cursor-pointer ${formData.isKaryakarta ? 'bg-orange-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
                                   <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${formData.isKaryakarta ? 'right-0.5' : 'left-0.5'}`} />
                                 </button>
                               </div>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-4 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${formData.voted ? 'bg-green-500 text-white shadow-md' : 'bg-zinc-200 text-zinc-400'}`}>
+                          <div className="flex items-center gap-4 p-3 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${formData.voted ? 'bg-green-500 text-white shadow-md' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
                               <CheckCircle size={18} />
                             </div>
                             <div className="flex-1">
-                              <label className="text-[9px] font-black uppercase text-zinc-500 tracking-wider">Voting Status</label>
+                              <label className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Voting Status</label>
                               <div className="flex justify-between items-center mt-0.5">
-                                <span className="text-xs font-bold">{formData.voted ? 'Voted' : 'Pending'}</span>
-                                <button type="button" onClick={() => setFormData({ ...formData, voted: !formData.voted })} className={`w-8 h-5 rounded-full relative transition-all ${formData.voted ? 'bg-green-500' : 'bg-zinc-350'}`}>
+                                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{formData.voted ? 'Voted' : 'Pending'}</span>
+                                <button type="button" onClick={() => setFormData({ ...formData, voted: !formData.voted })} className={`w-8 h-5 rounded-full relative transition-all cursor-pointer ${formData.voted ? 'bg-green-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}>
                                   <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${formData.voted ? 'right-0.5' : 'left-0.5'}`} />
                                 </button>
                               </div>
@@ -2577,12 +2605,12 @@ const VoterManagement: React.FC = () => {
                         </div>
                       ) : (
                         <div className="space-y-4">
-                          <h4 className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em] border-b border-zinc-100 dark:border-zinc-800 pb-1">Political Sentiment Profile</h4>
+                          <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Political Sentiment Profile</h4>
                           
                           {/* Admin Context Selector - visible to Super Admin or read-only info for other roles */}
                           {isAdmin ? (
                             <div className="space-y-1.5 flex flex-col">
-                              <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Admin Profile Context</label>
+                              <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Admin Profile Context</label>
                               <select 
                                 value={sentimentAdminId} 
                                 onChange={e => setSentimentAdminId(e.target.value)} 
@@ -2593,44 +2621,41 @@ const VoterManagement: React.FC = () => {
                                   <option key={adm.uid} value={adm.uid}>{adm.username} ({adm.role === 'super_admin' ? 'Super Admin' : 'Admin'} - {adm.email})</option>
                                 ))}
                               </select>
-                              <p className="text-[9px] text-zinc-400 leading-tight">*As Super Admin, you can record or view voter sentiment from any administrator's point of view.</p>
+                              <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">*As Super Admin, you can record or view voter sentiment from any administrator's point of view.</p>
                             </div>
                           ) : (
                             <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
                               <div>
-                                <span className="text-[9px] font-black uppercase text-zinc-400 tracking-wider block">Campaign Administrator Context</span>
-                                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                <span className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider block">Campaign Administrator Context</span>
+                                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
                                   {profile?.username || profile?.email?.split('@')[0]} ({profile?.role === 'manager' ? 'Campaign Manager' : (profile?.role === 'volunteer' ? 'Karyakarta Staff' : 'Admin Staff')})
                                 </span>
                               </div>
-                              <span className="text-[9px] bg-blue-100 dark:bg-zinc-800 text-blue-800 dark:text-zinc-350 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Locked</span>
+                              <span className="text-[9px] bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-400 border border-blue-200 dark:border-blue-900/50 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Locked</span>
                             </div>
                           )}
 
                           {/* Sentiment Status Selection */}
                           <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider block">Voter Sentiment Status</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider block">Voter Sentiment Status</label>
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                               {[
-                                { value: 'Support', label: 'Support' },
-                                { value: 'Neutral', label: 'Neutral' },
-                                { value: 'Oppose', label: 'Oppose' },
-                                { value: 'Other Party', label: 'Other Party' }
+                                { value: 'Support', label: 'Support', activeClass: 'border-emerald-600 bg-emerald-600 text-white font-black shadow-md' },
+                                { value: 'Neutral', label: 'Neutral', activeClass: 'border-zinc-600 bg-zinc-600 text-white font-black shadow-md' },
+                                { value: 'Oppose', label: 'Oppose', activeClass: 'border-rose-600 bg-rose-600 text-white font-black shadow-md' },
+                                { value: 'Other Party', label: 'Other Party', activeClass: 'border-amber-600 bg-amber-600 text-white font-black shadow-md' }
                               ].map(item => {
                                 const isSelected = sentimentStatus === item.value;
-                                let btnBg = 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 text-zinc-600 dark:text-zinc-400';
-                                if (isSelected) {
-                                  if (item.value === 'Support') btnBg = 'border-emerald-500 bg-emerald-500 text-white dark:text-zinc-950 font-black shadow-sm';
-                                  else if (item.value === 'Neutral') btnBg = 'border-zinc-500 bg-zinc-500 text-white dark:text-zinc-950 font-black shadow-sm';
-                                  else if (item.value === 'Oppose') btnBg = 'border-red-500 bg-red-500 text-white dark:text-zinc-950 font-black shadow-sm';
-                                  else if (item.value === 'Other Party') btnBg = 'border-amber-500 bg-amber-500 text-white dark:text-zinc-950 font-black shadow-sm';
-                                }
                                 return (
                                   <button
                                     key={item.value}
                                     type="button"
                                     onClick={() => setSentimentStatus(item.value as 'Support' | 'Neutral' | 'Oppose' | 'Other Party')}
-                                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-xs font-bold transition-all ${btnBg}`}
+                                    className={`flex flex-col items-center justify-center p-3 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                                      isSelected
+                                        ? item.activeClass
+                                        : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                                    }`}
                                   >
                                     <span>{item.label}</span>
                                   </button>
@@ -2641,26 +2666,26 @@ const VoterManagement: React.FC = () => {
 
                           {/* Sentiment Strength (1-5) */}
                           <div className="space-y-2">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider block">Sentiment Strength / Intensity (1 - 5)</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider block">Sentiment Strength / Intensity (1 - 5)</label>
                             <div className="flex flex-wrap items-center gap-2">
                               {[1, 2, 3, 4, 5].map(rating => {
                                 const isSelected = sentimentStrength === rating;
-                                let starColor = 'border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-900/40 text-zinc-650 dark:text-zinc-400';
-                                if (isSelected) {
-                                  starColor = 'border-amber-500 bg-amber-500 text-white dark:text-zinc-950 font-extrabold shadow-sm';
-                                }
                                 return (
                                   <button
                                     key={rating}
                                     type="button"
                                     onClick={() => setSentimentStrength(rating)}
-                                    className={`w-10 h-10 rounded-xl border text-sm font-black flex items-center justify-center transition-all ${starColor}`}
+                                    className={`w-10 h-10 rounded-xl border text-sm font-black flex items-center justify-center transition-all cursor-pointer ${
+                                      isSelected
+                                        ? 'border-amber-500 bg-amber-500 text-white font-black shadow-md'
+                                        : 'border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                                    }`}
                                   >
                                     {rating}
                                   </button>
                                 );
                               })}
-                              <span className="text-xs font-bold text-zinc-500 dark:text-zinc-450 ml-1.5">
+                              <span className="text-xs font-bold text-zinc-500 dark:text-zinc-400 ml-1.5">
                                 {sentimentStrength === 1 && '1 - Highly Volatile / Very Weak'}
                                 {sentimentStrength === 2 && '2 - Weak / Soft support'}
                                 {sentimentStrength === 3 && '3 - Moderate / Uncertain'}
@@ -2671,14 +2696,14 @@ const VoterManagement: React.FC = () => {
                           </div>
 
                           {/* Mark as Karyakarta Toggle */}
-                          <div className="flex items-center gap-4 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-150/10 dark:border-zinc-800">
-                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${sentimentIsKaryakarta ? 'bg-orange-500 text-white shadow-md' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-600'}`}>
+                          <div className="flex items-center gap-4 p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800">
+                            <div className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all ${sentimentIsKaryakarta ? 'bg-orange-500 text-white shadow-md' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500'}`}>
                               <UserCheck size={18} />
                             </div>
                             <div className="flex-1">
-                              <label className="text-[9px] font-black uppercase text-zinc-450 dark:text-zinc-50 tracking-wider">Local Connection Volunteer</label>
+                              <label className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Local Connection Volunteer</label>
                               <div className="flex justify-between items-center mt-0.5">
-                                <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
                                   {sentimentIsKaryakarta ? 'Marked as local Karyakarta/Volunteer' : 'Mark as connection volunteer'}
                                 </span>
                                 <button 
@@ -2687,7 +2712,7 @@ const VoterManagement: React.FC = () => {
                                     setSentimentIsKaryakarta(!sentimentIsKaryakarta);
                                     setFormData(prev => ({ ...prev, isKaryakarta: !sentimentIsKaryakarta }));
                                   }} 
-                                  className={`w-8 h-5 rounded-full relative transition-all ${sentimentIsKaryakarta ? 'bg-orange-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
+                                  className={`w-8 h-5 rounded-full relative transition-all cursor-pointer ${sentimentIsKaryakarta ? 'bg-orange-500' : 'bg-zinc-300 dark:bg-zinc-700'}`}
                                 >
                                   <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${sentimentIsKaryakarta ? 'right-0.5' : 'left-0.5'}`} />
                                 </button>
@@ -2697,7 +2722,7 @@ const VoterManagement: React.FC = () => {
 
                           {/* Notes & Feedback */}
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Campaign Intel Notes & Feedback</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Campaign Intel Notes & Feedback</label>
                             <textarea 
                               value={sentimentNotes} 
                               onChange={e => setSentimentNotes(e.target.value)} 
@@ -2708,9 +2733,9 @@ const VoterManagement: React.FC = () => {
 
                           {/* Last Update Metadata */}
                           {lastSentimentUpdatedBy && (
-                            <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 text-[10px] text-zinc-400 font-bold uppercase tracking-wider space-y-1">
-                              <div>Last Updated By: <span className="text-zinc-700 dark:text-zinc-300">{lastSentimentUpdatedBy}</span></div>
-                              {lastSentimentUpdatedAt && <div>Date & Time: <span className="text-zinc-700 dark:text-zinc-300">{lastSentimentUpdatedAt}</span></div>}
+                            <div className="p-3 rounded-xl bg-zinc-50 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-[10px] text-zinc-500 dark:text-zinc-400 font-bold uppercase tracking-wider space-y-1">
+                              <div>Last Updated By: <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{lastSentimentUpdatedBy}</span></div>
+                              {lastSentimentUpdatedAt && <div>Date & Time: <span className="text-zinc-800 dark:text-zinc-200 font-semibold">{lastSentimentUpdatedAt}</span></div>}
                             </div>
                           )}
                         </div>
@@ -2721,10 +2746,10 @@ const VoterManagement: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 shrink-0 p-6">
+                <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 shrink-0 p-6">
                   <div className="max-w-4xl mx-auto w-full flex flex-col sm:flex-row justify-between gap-3">
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => setIsModalOpen(false)} className="webapp-button-secondary px-5 py-2.5 text-xs">Abort</button>
+                      <button type="button" onClick={() => setIsModalOpen(false)} className="webapp-button-secondary px-5 py-2.5 text-xs font-bold cursor-pointer">Abort</button>
                       {activeFormTab !== 'main' && (
                         <button 
                           type="button" 
@@ -2733,7 +2758,7 @@ const VoterManagement: React.FC = () => {
                             const curIdx = tabSequence.indexOf(activeFormTab);
                             if (curIdx > 0) setActiveFormTab(tabSequence[curIdx - 1]);
                           }} 
-                          className="webapp-button-secondary px-5 py-2.5 text-xs font-bold"
+                          className="webapp-button-secondary px-5 py-2.5 text-xs font-bold cursor-pointer"
                         >
                           Back
                         </button>
@@ -2750,12 +2775,12 @@ const VoterManagement: React.FC = () => {
                               setActiveFormTab(tabSequence[curIdx + 1]);
                             }
                           }} 
-                          className="webapp-button-primary px-6 py-2.5 text-xs bg-zinc-900 border-zinc-900 text-white"
+                          className="webapp-button-primary px-6 py-2.5 text-xs font-bold cursor-pointer"
                         >
                           Continue
                         </button>
                       ) : (
-                        <button type="submit" disabled={actionLoading} className="webapp-button-primary px-8 py-2.5 text-xs flex justify-center items-center gap-2">
+                        <button type="submit" disabled={actionLoading} className="webapp-button-primary px-8 py-2.5 text-xs flex justify-center items-center gap-2 font-bold cursor-pointer">
                           {actionLoading ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
                           {editingVoter ? 'Sync Updates' : 'Confirm Entry'}
                         </button>
@@ -2769,72 +2794,16 @@ const VoterManagement: React.FC = () => {
         )}
 
        {/* Bulk Import Modal */}
-       <AnimatePresence>
-        {isImportModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => setIsImportModalOpen(false)} className="absolute inset-0 bg-black/60 backdrop-blur-sm" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative webapp-card w-full max-w-md shadow-2xl p-8 space-y-6">
-              <div className="flex justify-between items-center">
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white">Bulk Voter Import</h3>
-                <button onClick={() => setIsImportModalOpen(false)} className="text-zinc-400 hover:text-zinc-600"><X size={20} /></button>
-              </div>
-
-              {importStatus === 'idle' && (
-                <div className="space-y-6 text-center">
-                  <div className="w-16 h-16 bg-zinc-100 dark:bg-zinc-800 rounded-full flex items-center justify-center text-zinc-400 mx-auto">
-                    <FileSpreadsheet size={32} />
-                  </div>
-                  <div className="space-y-4">
-                    <p className="text-sm text-zinc-600 dark:text-zinc-400 px-4">Upload a CSV file containing voter details. Make sure you have selected a specific booth first.</p>
-                    <button onClick={handleDownloadSample} className="text-[10px] font-black uppercase text-blue-600 hover:underline flex items-center justify-center gap-1 mx-auto">
-                      <Download size={12} /> Download CSV Sample
-                    </button>
-                  </div>
-                  <div className="flex justify-center">
-                    <input type="file" ref={fileInputRef} accept=".csv" onChange={handleFileUpload} className="hidden" />
-                    <button onClick={() => fileInputRef.current?.click()} className="webapp-button-primary w-full h-12 flex items-center justify-center gap-2">
-                       <Upload size={18} /> Select CSV File
-                    </button>
-                  </div>
-                </div>
-              )}
-
-              {importStatus === 'uploading' && (
-                <div className="space-y-4">
-                  <div className="h-2 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                    <motion.div initial={{ width: 0 }} animate={{ width: `${importProgress}%` }} className="h-full bg-blue-600" />
-                  </div>
-                  <div className="flex justify-between text-[10px] font-black uppercase text-zinc-400">
-                    <span>Processing {importProgress}%</span>
-                    <span>{importResults.success} Success</span>
-                  </div>
-                </div>
-              )}
-
-              {importStatus === 'completed' && (
-                <div className="space-y-6">
-                  <div className="text-center space-y-2">
-                    <div className="w-12 h-12 bg-green-500/10 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4"><CheckCircle size={32} /></div>
-                    <h4 className="font-bold">Sync Completed</h4>
-                    <p className="text-xs text-zinc-500">{importResults.success} voters were successfully added to the booth.</p>
-                  </div>
-                  <button onClick={() => setIsImportModalOpen(false)} className="webapp-button-primary w-full">Great, thanks!</button>
-                </div>
-              )}
-
-              {importStatus === 'error' && (
-                <div className="space-y-6">
-                  <div className="bg-red-50 dark:bg-red-950/20 p-4 rounded-2xl border border-red-200 dark:border-red-900/50 flex gap-3 text-red-600">
-                    <AlertCircle size={20} className="shrink-0" />
-                    <p className="text-xs font-medium">{importError}</p>
-                  </div>
-                  <button onClick={() => setImportStatus('idle')} className="webapp-button-secondary w-full">Try Again</button>
-                </div>
-              )}
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+       <BulkImportModal
+         isOpen={isImportModalOpen}
+         onClose={() => setIsImportModalOpen(false)}
+         onSuccess={fetchVoters}
+         states={states}
+         initialStateId={selectedStateId !== 'all' ? selectedStateId : (selectedStateIds[0] || '')}
+         initialDistrictId={selectedDistrictId !== 'all' ? selectedDistrictId : (selectedDistrictIds[0] || '')}
+         initialConstituencyId={selectedConstituencyId !== 'all' ? selectedConstituencyId : (selectedConstituencyIds[0] || '')}
+         initialBoothId={selectedBoothId !== 'all' ? selectedBoothId : (selectedBoothIds[0] || '')}
+       />
 
       {/* Delete Confirmation */}
       <AnimatePresence>

@@ -904,8 +904,8 @@ export default function WBSender() {
                   </div>
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs">
+                <div className="overflow-x-auto custom-scrollbar">
+                  <table className="w-full text-left text-xs min-w-[750px]">
                     <thead className="bg-zinc-50 dark:bg-zinc-800/30 text-zinc-500 font-bold border-b border-zinc-200 dark:border-zinc-800 uppercase tracking-wider text-[10px]">
                       <tr>
                         <th className="px-6 py-4">Campaign Details</th>

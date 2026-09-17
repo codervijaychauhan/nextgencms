@@ -1,30 +1,39 @@
 -- ============================================================================
--- Database: nextgencms
--- Target: Microsoft SQL Server / SQL Server Management Studio (SSMS)
+-- 1. Create / Update Server Login in master
 -- ============================================================================
-
--- 1. Create Database
-IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'nextgencms')
-BEGIN
-    CREATE DATABASE nextgencms;
-END
+USE [master];
 GO
 
-USE nextgencms;
-GO
-
--- 2. Create Login and Database User (Optional local credentials)
--- Note: Replace 'StrongPassword!123' with your secure password if desired
 IF NOT EXISTS (SELECT name FROM sys.server_principals WHERE name = N'election_user')
 BEGIN
-    CREATE LOGIN election_user WITH PASSWORD = N'Election@2026#Secure', CHECK_POLICY = OFF;
+    CREATE LOGIN [election_user] WITH PASSWORD = N'Election@2026#Secure', CHECK_POLICY = OFF;
 END
+ELSE
+BEGIN
+    ALTER LOGIN [election_user] WITH PASSWORD = N'Election@2026#Secure', CHECK_POLICY = OFF;
+    ALTER LOGIN [election_user] ENABLE;
+END
+GO
+
+ALTER SERVER ROLE [sysadmin] ADD MEMBER [election_user];
+GO
+
+-- ============================================================================
+-- 2. Create Database nextgencms and Database User
+-- ============================================================================
+IF NOT EXISTS (SELECT name FROM sys.databases WHERE name = N'nextgencms')
+BEGIN
+    CREATE DATABASE [nextgencms];
+END
+GO
+
+USE [nextgencms];
 GO
 
 IF NOT EXISTS (SELECT name FROM sys.database_principals WHERE name = N'election_user')
 BEGIN
-    CREATE USER election_user FOR LOGIN election_user;
-    ALTER ROLE db_owner ADD MEMBER election_user;
+    CREATE USER [election_user] FOR LOGIN [election_user];
+    ALTER ROLE [db_owner] ADD MEMBER [election_user];
 END
 GO
 
@@ -65,6 +74,7 @@ BEGIN
         name VARCHAR(255) NOT NULL,
         district_id VARCHAR(64) NOT NULL,
         state_id VARCHAR(64) NOT NULL,
+        category VARCHAR(50) DEFAULT 'General',
         created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
         CONSTRAINT fk_constituencies_district FOREIGN KEY (district_id) REFERENCES dbo.districts(id) ON DELETE CASCADE,
         CONSTRAINT fk_constituencies_state FOREIGN KEY (state_id) REFERENCES dbo.states(id) ON DELETE NO ACTION
@@ -153,9 +163,11 @@ BEGIN
         role VARCHAR(50) DEFAULT 'volunteer', -- 'admin', 'super_admin', 'volunteer', 'manager', 'guest'
         assigned_booths NVARCHAR(MAX) NULL,   -- JSON array of booth IDs e.g. ["booth_1", "booth_2"]
         rights NVARCHAR(MAX) DEFAULT '{}',    -- JSON module permissions e.g. {"voters": "vcud"}
-        state_id VARCHAR(64) NULL,
-        district_id VARCHAR(64) NULL,
-        constituency_id VARCHAR(64) NULL,
+        state_id NVARCHAR(MAX) NULL,
+        district_id NVARCHAR(MAX) NULL,
+        constituency_id NVARCHAR(MAX) NULL,
+        booth_id NVARCHAR(MAX) NULL,
+        election_settings NVARCHAR(MAX) NULL,
         disabled BIT NOT NULL DEFAULT 0,
         created_at DATETIME2 DEFAULT SYSUTCDATETIME()
     );

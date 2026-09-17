@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Plus, 
-  Edit2, 
-  Trash2, 
-  Loader2, 
-  CheckCircle, 
+import {
+  Plus,
+  Edit2,
+  Trash2,
+  Loader2,
+  CheckCircle,
   X,
   Save,
   Layers,
@@ -194,25 +194,23 @@ export default function ElectionSetup() {
           </h1>
           <p className="text-zinc-500 dark:text-zinc-400">Manage election cycles and political organizations</p>
         </div>
-        
+
         <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl w-fit">
           <button
             onClick={() => setActiveTab('elections')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'elections' 
-                ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-sm' 
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'elections'
+              ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-sm'
+              : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              }`}
           >
             Election Years
           </button>
           <button
             onClick={() => setActiveTab('parties')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-              activeTab === 'parties' 
-                ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-sm' 
-                : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
-            }`}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'parties'
+              ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-sm'
+              : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+              }`}
           >
             Political Parties
           </button>
@@ -277,14 +275,14 @@ export default function ElectionSetup() {
               )}
             </div>
 
-            <div className="overflow-x-auto">
-              <table className="w-full text-left">
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left min-w-[650px]">
                 <thead className="bg-zinc-50 dark:bg-zinc-800/50">
                   <tr>
                     {activeTab === 'elections' ? (
                       <>
-                        <th className="px-6 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Year</th>
                         <th className="px-6 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Title</th>
+                        <th className="px-6 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Description</th>
                         <th className="px-6 py-4 text-xs font-semibold text-zinc-500 uppercase tracking-wider">Status</th>
                       </>
                     ) : (
@@ -330,23 +328,21 @@ export default function ElectionSetup() {
                             {ele.description || 'No description'}
                           </td>
                           <td className="px-6 py-4">
-                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${
-                              ele.status === 'Active' 
-                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                                : ele.status === 'Completed'
+                            <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${ele.status === 'Active'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
+                              : ele.status === 'Completed'
                                 ? 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-400'
                                 : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
-                            }`}>
-                              <span className={`w-1.5 h-1.5 rounded-full ${
-                                ele.status === 'Active' ? 'bg-emerald-500' : ele.status === 'Completed' ? 'bg-zinc-500' : 'bg-blue-500'
-                              }`} />
+                              }`}>
+                              <span className={`w-1.5 h-1.5 rounded-full ${ele.status === 'Active' ? 'bg-emerald-500' : ele.status === 'Completed' ? 'bg-zinc-500' : 'bg-blue-500'
+                                }`} />
                               {ele.status}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               {canEdit && (
-                                <button 
+                                <button
                                   onClick={() => {
                                     setEditingElection(ele);
                                     setElectionForm({
@@ -363,7 +359,7 @@ export default function ElectionSetup() {
                                 </button>
                               )}
                               {canDelete && (
-                                <button 
+                                <button
                                   onClick={() => setDeleteConfirmation({ id: ele.id, type: 'elections', label: ele.title ? `${ele.title} (${ele.year})` : String(ele.year) })}
                                   className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
                                 >
@@ -382,7 +378,7 @@ export default function ElectionSetup() {
                               {party.logoUrl ? (
                                 <img src={party.logoUrl} alt={party.name} className="w-10 h-10 rounded-xl object-cover" />
                               ) : (
-                                <div 
+                                <div
                                   className="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-xs"
                                   style={{ backgroundColor: party.color || '#3b82f6' }}
                                 >
@@ -397,9 +393,9 @@ export default function ElectionSetup() {
                           </td>
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
-                              <div 
-                                className="w-4 h-4 rounded-full border border-black/10" 
-                                style={{ backgroundColor: party.color }} 
+                              <div
+                                className="w-4 h-4 rounded-full border border-black/10"
+                                style={{ backgroundColor: party.color }}
                               />
                               <span className="text-sm text-zinc-500 font-mono uppercase">{party.color}</span>
                             </div>
@@ -407,7 +403,7 @@ export default function ElectionSetup() {
                           <td className="px-6 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
                               {canEdit && (
-                                <button 
+                                <button
                                   onClick={() => {
                                     setEditingParty(party);
                                     setPartyForm({
@@ -424,7 +420,7 @@ export default function ElectionSetup() {
                                 </button>
                               )}
                               {canDelete && (
-                                <button 
+                                <button
                                   onClick={() => setDeleteConfirmation({ id: party.id, type: 'parties', label: `${party.name} (${party.abbreviation})` })}
                                   className="p-2 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
                                 >
@@ -465,7 +461,7 @@ export default function ElectionSetup() {
                 <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
                   {editingElection ? 'Edit Election Year' : 'Add Election Year'}
                 </h3>
-                <button 
+                <button
                   onClick={() => setIsElectionModalOpen(false)}
                   className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
                 >
@@ -566,7 +562,7 @@ export default function ElectionSetup() {
                 <h3 className="text-xl font-bold text-zinc-900 dark:text-white">
                   {editingParty ? 'Edit Political Party' : 'Add Political Party'}
                 </h3>
-                <button 
+                <button
                   onClick={() => setIsPartyModalOpen(false)}
                   className="p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
                 >

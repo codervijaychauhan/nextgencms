@@ -163,12 +163,12 @@ export default function BoothAgentManagement() {
       ]);
 
       let list: PollingBooth[] = (boothsData || []).map((data: any) => ({
-        id: data.id,
+        id: String(data.id),
         name: data.name || '',
-        boothNumber: data.boothNumber || data.booth_number || '',
+        boothNumber: String(data.boothNumber || data.booth_number || ''),
         address: data.address || '',
         village: data.village || '',
-        constituencyId: data.constituencyId || data.constituency_id || '',
+        constituencyId: String(data.constituencyId || data.constituency_id || ''),
         constituencyName: data.constituencyName || data.constituency_name || ''
       }));
 
@@ -197,9 +197,9 @@ export default function BoothAgentManagement() {
       setBooths(list);
 
       const volList: Volunteer[] = (volData || []).filter((d: any) => (d.status || 'Active') === 'Active').map((data: any) => ({
-        id: data.id,
+        id: String(data.id),
         name: data.name || '',
-        voterId: data.voterId || data.voter_id || '',
+        voterId: String(data.voterId || data.voter_id || ''),
         aadharNumber: data.aadharNumber || data.aadhar_number || '',
         mobile: data.mobile || '',
         status: data.status || 'Active'
@@ -207,12 +207,12 @@ export default function BoothAgentManagement() {
       setVolunteers(volList);
 
       const assignList: BoothAssignment[] = (assignData || []).map((data: any) => ({
-        id: data.id,
-        adminId: data.adminId || data.admin_id || '',
-        boothId: data.boothId || data.booth_id || '',
-        boothNumber: data.boothNumber || data.booth_number || '',
+        id: String(data.id),
+        adminId: String(data.adminId || data.admin_id || ''),
+        boothId: String(data.boothId || data.booth_id || ''),
+        boothNumber: String(data.boothNumber || data.booth_number || ''),
         boothName: data.boothName || data.booth_name || '',
-        agentVolunteerDocId: data.agentVolunteerDocId || data.agent_volunteer_id || '',
+        agentVolunteerDocId: String(data.agentVolunteerDocId || data.agent_volunteer_id || ''),
         agentName: data.agentName || data.agent_name || '',
         agentAadhar: data.agentAadhar || data.agent_aadhar || '',
         agentMobile: data.agentMobile || data.agent_mobile || '',
@@ -244,10 +244,10 @@ export default function BoothAgentManagement() {
       const assignmentData = {
         id: docId,
         adminId: user.uid,
-        boothId: activeBoothForAssignment.id,
+        boothId: String(activeBoothForAssignment.id),
         boothNumber: activeBoothForAssignment.boothNumber,
         boothName: activeBoothForAssignment.name,
-        agentVolunteerDocId: volunteer.id,
+        agentVolunteerDocId: String(volunteer.id),
         agentName: volunteer.name,
         agentAadhar: volunteer.aadharNumber || '',
         agentMobile: volunteer.mobile || '',
@@ -259,7 +259,7 @@ export default function BoothAgentManagement() {
       // Update volunteer assigned booth
       try {
         await api.put(`/api/volunteers/${volunteer.id}`, {
-          assignedBoothId: activeBoothForAssignment.id,
+          assignedBoothId: String(activeBoothForAssignment.id),
           assignedBoothName: `#${activeBoothForAssignment.boothNumber} - ${activeBoothForAssignment.name}`
         });
       } catch (volErr) {
@@ -546,8 +546,8 @@ export default function BoothAgentManagement() {
           </div>
         ) : (
           viewMode === 'table' ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+            <div className="overflow-x-auto custom-scrollbar">
+              <table className="w-full text-left border-collapse min-w-[750px]">
                 <thead>
                   <tr className="bg-zinc-50 dark:bg-zinc-900/50 text-[10px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
                     <th className="px-6 py-4 w-12">#</th>
@@ -560,7 +560,7 @@ export default function BoothAgentManagement() {
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                   {filteredBooths.map((b, idx) => {
-                    const boothAssignments = assignmentsFilteredByAdmin.filter(as => as.boothId === b.id);
+                    const boothAssignments = assignmentsFilteredByAdmin.filter(as => String(as.boothId).trim() === String(b.id).trim());
                     const isExpanded = !!expandedBooths[b.id];
                     return (
                       <React.Fragment key={b.id}>
@@ -657,8 +657,8 @@ export default function BoothAgentManagement() {
                                     )}
                                   </div>
                                 ) : (
-                                  <div className="overflow-x-auto">
-                                    <table className="w-full text-left border-collapse text-xs">
+                                  <div className="overflow-x-auto custom-scrollbar">
+                                    <table className="w-full text-left border-collapse text-xs min-w-[650px]">
                                       <thead>
                                         <tr className="bg-zinc-100/30 dark:bg-zinc-900/50 text-[9px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
                                           <th className="px-4 py-2 w-10">#</th>
@@ -767,7 +767,7 @@ export default function BoothAgentManagement() {
           ) : viewMode === 'frame' ? (
             <div className="p-6 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 bg-zinc-50/50 dark:bg-zinc-950/10 border-t border-zinc-100 dark:border-zinc-800">
               {filteredBooths.map((b) => {
-                const boothAssignments = assignmentsFilteredByAdmin.filter(as => as.boothId === b.id);
+                const boothAssignments = assignmentsFilteredByAdmin.filter(as => String(as.boothId).trim() === String(b.id).trim());
                 return (
                   <div key={b.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-xs flex flex-col justify-between hover:shadow-md transition-all gap-4">
                     <div className="space-y-3">
@@ -872,7 +872,7 @@ export default function BoothAgentManagement() {
           ) : (
             <div className="p-6 space-y-8 bg-zinc-50/50 dark:bg-zinc-950/10 border-t border-zinc-100 dark:border-zinc-800">
               {filteredBooths.map((b) => {
-                const boothAssignments = assignmentsFilteredByAdmin.filter(as => as.boothId === b.id);
+                const boothAssignments = assignmentsFilteredByAdmin.filter(as => String(as.boothId).trim() === String(b.id).trim());
                 return (
                   <div key={b.id} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden shadow-xs flex flex-col hover:shadow-md transition-all">
                     {/* Booth Info Header Strip */}
@@ -912,14 +912,14 @@ export default function BoothAgentManagement() {
                     </div>
 
                     {/* Table of Karyakartas for this Booth */}
-                    <div className="overflow-x-auto">
+                    <div className="overflow-x-auto custom-scrollbar">
                       {boothAssignments.length === 0 ? (
                         <div className="py-10 text-center flex flex-col items-center justify-center">
                           <p className="text-xs font-bold text-zinc-400">No coverage team deployed to this station</p>
                           <p className="text-[10px] text-zinc-500 mt-1">Deploy a Karyakarta helper to track this physical voter booth.</p>
                         </div>
                       ) : (
-                        <table className="w-full text-left border-collapse">
+                        <table className="w-full text-left border-collapse min-w-[700px]">
                           <thead>
                             <tr className="bg-zinc-50/50 dark:bg-zinc-900/20 text-[9px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
                               <th className="px-6 py-3 w-10">#</th>
@@ -1107,13 +1107,13 @@ export default function BoothAgentManagement() {
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-black uppercase text-zinc-400 tracking-[0.2em]">Deployed Karyakartas</span>
                     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300">
-                      {assignmentsFilteredByAdmin.filter(as => as.boothId === selectedBoothDetails.id).length} Active
+                      {assignmentsFilteredByAdmin.filter(as => String(as.boothId).trim() === String(selectedBoothDetails.id).trim()).length} Active
                     </span>
                   </div>
 
                   <div className="space-y-3">
                     {(() => {
-                      const boothAssignments = assignmentsFilteredByAdmin.filter(as => as.boothId === selectedBoothDetails.id);
+                      const boothAssignments = assignmentsFilteredByAdmin.filter(as => String(as.boothId).trim() === String(selectedBoothDetails.id).trim());
                       if (boothAssignments.length === 0) {
                         return (
                           <div className="p-5 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl bg-zinc-50/20 dark:bg-zinc-950 text-center">
@@ -1405,9 +1405,9 @@ export default function BoothAgentManagement() {
                       }
 
                       const alreadyAssignedVolIds = assignments
-                        .filter(as => as.boothId === activeBoothForAssignment.id)
-                        .map(as => as.agentVolunteerDocId);
-                      const deployable = volunteers.filter(vol => !alreadyAssignedVolIds.includes(vol.id));
+                        .filter(as => String(as.boothId).trim() === String(activeBoothForAssignment.id).trim())
+                        .map(as => String(as.agentVolunteerDocId).trim());
+                      const deployable = volunteers.filter(vol => !alreadyAssignedVolIds.includes(String(vol.id).trim()));
 
                       if (deployable.length === 0) {
                         return (

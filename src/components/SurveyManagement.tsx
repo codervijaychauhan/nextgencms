@@ -5,7 +5,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { 
   ClipboardList, Plus, Search, Loader2, AlertCircle, CheckCircle, 
   Trash2, Edit2, X, Save, FileText, Check, RefreshCw, ChevronDown, ChevronUp,
-  Wrench, ArrowUp, ArrowDown
+  Wrench, ArrowUp, ArrowDown, Users
 } from 'lucide-react';
 
 interface UserData {
@@ -25,7 +25,7 @@ interface Election {
 interface SurveyField {
   id: string;
   label: string;
-  type: 'select' | 'multiselect' | 'scale' | 'text' | 'checkbox' | 'number';
+  type: 'select' | 'multiselect' | 'scale' | 'text' | 'textarea' | 'checkbox' | 'number';
   options?: string[];
   required?: boolean;
 }
@@ -127,6 +127,7 @@ export default function SurveyManagement() {
   const [partyDropdownOpen, setPartyDropdownOpen] = useState(false);
   const [personnelDropdownOpen, setPersonnelDropdownOpen] = useState(false);
   const [userSearchTerm, setUserSearchTerm] = useState('');
+  const [partySearchTerm, setPartySearchTerm] = useState('');
 
   useEffect(() => {
     fetchInitialData();
@@ -155,8 +156,12 @@ export default function SurveyManagement() {
       // 5. Fetch Custom Survey Templates
       try {
         const customTemplates = await apiFetch<SurveyTemplate[]>('/api/surveys/templates').catch(() => []);
-        const filteredTemplates = (customTemplates || []).filter(t => t.id !== 'political_sentiment');
-        setTemplates([POLITICAL_SENTIMENT_TEMPLATE, ...filteredTemplates]);
+        const formatted = (customTemplates || []).map(t => ({
+          ...t,
+          id: String(t.id),
+          fields: Array.isArray(t.fields) ? t.fields : []
+        })).filter(t => t.id !== 'political_sentiment');
+        setTemplates([POLITICAL_SENTIMENT_TEMPLATE, ...formatted]);
       } catch (templateError) {
         console.warn("Survey templates fetch failed:", templateError);
         setTemplates([POLITICAL_SENTIMENT_TEMPLATE]);
@@ -173,7 +178,7 @@ export default function SurveyManagement() {
     setEditingSurvey(null);
     setTitle('');
     setDescription('');
-    setSelectedElectionId(elections[0]?.id || '');
+    setSelectedElectionId(elections[0]?.id ? String(elections[0].id) : '');
     setAssignedTo([]);
     setStatus('Draft');
     setLinkedPartyIds([]);
@@ -188,7 +193,7 @@ export default function SurveyManagement() {
     setEditingSurvey(survey);
     setTitle(survey.title);
     setDescription(survey.description);
-    setSelectedElectionId(survey.electionId);
+    setSelectedElectionId(survey.electionId ? String(survey.electionId) : (elections[0]?.id ? String(elections[0].id) : ''));
     setAssignedTo(survey.assignedTo || []);
     setStatus(survey.status);
     setLinkedPartyIds(survey.linkedPartyIds || []);
@@ -199,12 +204,23 @@ export default function SurveyManagement() {
     setIsModalOpen(true);
   };
 
-  const handleSelectUser = (uid: string) => {
-    setAssignedTo(prev => 
-      prev.includes(uid) 
-        ? prev.filter(id => id !== uid) 
-        : [...prev, uid]
-    );
+  const isUserMatchingAssigned = (u: UserData, assignedList: string[]): boolean => {
+    if (!Array.isArray(assignedList) || assignedList.length === 0) return false;
+    const ids = [u.uid, (u as any).id, u.email].filter(Boolean).map(x => String(x).toLowerCase().trim());
+    return assignedList.some(assignedId => ids.includes(String(assignedId).toLowerCase().trim()));
+  };
+
+  const handleSelectUser = (u: UserData) => {
+    const targetId = u.uid || (u as any).id || u.email;
+    const userIds = [u.uid, (u as any).id, u.email].filter(Boolean).map(x => String(x).toLowerCase().trim());
+    setAssignedTo(prev => {
+      const isSelected = prev.some(a => userIds.includes(String(a).toLowerCase().trim()));
+      if (isSelected) {
+        return prev.filter(a => !userIds.includes(String(a).toLowerCase().trim()));
+      } else {
+        return [...prev, targetId];
+      }
+    });
   };
 
   const handleOpenCreateTemplateModal = () => {
@@ -424,11 +440,9 @@ export default function SurveyManagement() {
       return;
     }
 
-    const matchedElection = elections.find(el => el.id === selectedElectionId);
-    if (!matchedElection) {
-      setError('Selected election is invalid');
-      return;
-    }
+    const targetElectionId = String(selectedElectionId || (elections[0]?.id ? String(elections[0].id) : ''));
+    const matchedElection = elections.find(el => String(el.id) === targetElectionId) || elections[0];
+    const electionYear = matchedElection ? matchedElection.year : (editingSurvey?.electionYear || new Date().getFullYear());
 
     setActionLoading(true);
     setError('');
@@ -436,8 +450,8 @@ export default function SurveyManagement() {
     const surveyData = {
       title: title.trim(),
       description: description.trim(),
-      electionId: selectedElectionId,
-      electionYear: matchedElection.year,
+      electionId: matchedElection ? String(matchedElection.id) : (targetElectionId || '1'),
+      electionYear: electionYear,
       assignedTo: assignedTo,
       status: status,
       linkedPartyIds: linkedPartyIds,
@@ -450,13 +464,13 @@ export default function SurveyManagement() {
           method: 'PUT',
           body: JSON.stringify(surveyData)
         });
-        setSuccess('Survey updated successfully');
+        setSuccess('Survey campaign updated successfully');
       } else {
         await apiFetch('/api/surveys', {
           method: 'POST',
           body: JSON.stringify(surveyData)
         });
-        setSuccess('New survey campaign created');
+        setSuccess('New survey campaign created successfully');
       }
 
       setIsModalOpen(false);
@@ -505,6 +519,14 @@ export default function SurveyManagement() {
       u.username.toLowerCase().includes(term) ||
       u.email.toLowerCase().includes(term) ||
       u.role.toLowerCase().includes(term)
+    );
+  });
+
+  const filteredPartiesForAssignment = parties.filter(p => {
+    const term = partySearchTerm.toLowerCase();
+    return (
+      p.name.toLowerCase().includes(term) ||
+      p.abbreviation.toLowerCase().includes(term)
     );
   });
 
@@ -655,8 +677,8 @@ export default function SurveyManagement() {
             </div>
           ) : (
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-left border-collapse min-w-[800px]">
                   <thead>
                     <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-400 uppercase tracking-wider bg-zinc-50/50 dark:bg-zinc-900/35">
                       <th className="px-6 py-4">Campaign Title & Info</th>
@@ -669,9 +691,9 @@ export default function SurveyManagement() {
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
                     {filteredSurveys.map(campaign => {
-                      const matchedElection = elections.find(el => el.id === campaign.electionId);
-                      const assignedStaff = users.filter(u => campaign.assignedTo?.includes(u.uid));
-                      const campaignTemplate = templates.find(t => t.id === campaign.templateId) || templates.find(t => t.id === 'political_sentiment') || POLITICAL_SENTIMENT_TEMPLATE;
+                      const matchedElection = elections.find(el => String(el.id).trim() === String(campaign.electionId).trim());
+                      const assignedStaff = users.filter(u => isUserMatchingAssigned(u, campaign.assignedTo || []));
+                      const campaignTemplate = templates.find(t => String(t.id).trim() === String(campaign.templateId).trim()) || templates.find(t => t.id === 'political_sentiment') || POLITICAL_SENTIMENT_TEMPLATE;
 
                   return (
                     <tr key={campaign.id} className="hover:bg-zinc-50/20 dark:hover:bg-zinc-900/40">
@@ -722,21 +744,18 @@ export default function SurveyManagement() {
                         </div>
                       </td>
 
-                      {/* Assigned staff */}
-                      <td className="px-6 py-4 max-w-xs">
-                        <div className="flex flex-wrap gap-1 items-center">
+                      {/* Assigned Personnel Count */}
+                      <td className="px-6 py-4">
+                        <div>
                           {assignedStaff.length > 0 ? (
-                            assignedStaff.map(staff => (
-                              <span 
-                                key={staff.uid} 
-                                className="text-[10px] bg-blue-50 dark:bg-blue-950/20 text-blue-700 dark:text-blue-400 font-bold px-2 py-0.5 rounded-md border border-blue-100 dark:border-blue-900/35"
-                              >
-                                {staff.username}
-                              </span>
-                            ))
+                            <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-xl border border-blue-200 dark:border-blue-800 shadow-2xs">
+                              <Users className="w-3.5 h-3.5 text-blue-500" />
+                              <span>{assignedStaff.length} {assignedStaff.length === 1 ? 'Karyakarta' : 'Karyakartas'}</span>
+                            </span>
                           ) : (
-                            <span className="text-[10px] text-yellow-600 font-bold bg-yellow-50 dark:bg-yellow-950/25 px-2 py-0.5 rounded-md border border-yellow-100 dark:border-yellow-900/35">
-                              Unassigned / Pool Wide
+                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20">
+                              <Users className="w-3.5 h-3.5 text-amber-500" />
+                              <span>None Assigned (0)</span>
                             </span>
                           )}
                         </div>
@@ -898,147 +917,203 @@ export default function SurveyManagement() {
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
-              animate={{ opacity: 0.5 }}
+              animate={{ opacity: 0.6 }}
               exit={{ opacity: 0 }}
               onClick={() => setIsModalOpen(false)}
-              className="fixed inset-0 bg-black/60 backdrop-blur-xs"
+              className="fixed inset-0 bg-black/60 backdrop-blur-sm"
             />
 
             {/* Modal Body */}
-            <div className="flex min-h-full items-center justify-center p-4">
+            <div className="flex min-h-full items-center justify-center p-4 sm:p-6 lg:p-8">
               <motion.div
                 initial={{ opacity: 0, scale: 0.95, y: 15 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
                 exit={{ opacity: 0, scale: 0.95, y: 15 }}
-                className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-lg p-6 shadow-2xl space-y-5 overflow-hidden"
+                className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl w-full max-w-3xl lg:max-w-4xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
               >
-                {/* Modal Title Row */}
-                <div className="flex items-center justify-between border-b border-zinc-150 dark:border-zinc-800 pb-4">
-                  <div>
-                    <h3 className="font-bold text-zinc-900 dark:text-white flex items-center gap-1.5 text-sm uppercase tracking-wide">
-                      <FileText className="w-4 h-4 text-blue-500" />
-                      {editingSurvey ? 'Refine Survey Campaign' : 'Configure New Survey'}
-                    </h3>
-                    <p className="text-[10px] text-zinc-400 mt-0.5">Determine the target election, Karyakartas, and operational status</p>
+                {/* Sticky Header */}
+                <div className="flex items-center justify-between px-6 sm:px-8 py-5 border-b border-zinc-150 dark:border-zinc-800 bg-white/80 dark:bg-zinc-900/80 backdrop-blur-sm shrink-0">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 rounded-2xl bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-800 flex items-center justify-center text-blue-600 dark:text-blue-400 shrink-0 shadow-xs">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-bold text-zinc-900 dark:text-white text-base tracking-tight">
+                        {editingSurvey ? 'Refine Survey Campaign' : 'Configure New Survey'}
+                      </h3>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                        Setup campaign parameters, target elections, karyakartas, and survey template
+                      </p>
+                    </div>
                   </div>
                   <button
                     onClick={() => setIsModalOpen(false)}
-                    className="p-1.5 text-zinc-400 hover:text-zinc-650 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded-xl"
+                    className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors cursor-pointer"
+                    title="Close modal"
                   >
-                    <X size={16} />
+                    <X size={18} />
                   </button>
                 </div>
 
-                {/* Form fields */}
-                <form onSubmit={handleSaveSurvey} className="space-y-4">
-                  {/* Campaign Title */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Campaign Title *</label>
-                    <input
-                      type="text"
-                      required
-                      value={title}
-                      onChange={e => setTitle(e.target.value)}
-                      placeholder="e.g. Assembly Election Household Roster"
-                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-800 dark:text-white"
-                    />
-                  </div>
+                {/* Scrollable Form fields */}
+                <form id="survey-form" onSubmit={handleSaveSurvey} className="flex-1 overflow-y-auto custom-scrollbar p-6 sm:p-8 space-y-6">
+                  {/* Basic Information Section */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-xs font-black uppercase text-zinc-400 tracking-wider">
+                      <span>1. Campaign Overview</span>
+                      <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800" />
+                    </div>
 
-                  {/* Description */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Description & Guidance *</label>
-                    <textarea
-                      required
-                      rows={3}
-                      value={description}
-                      onChange={e => setDescription(e.target.value)}
-                      placeholder="Specify campaign goals, talking points, or area scopes for Karyakartas..."
-                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-800 dark:text-white"
-                    />
-                  </div>
-
-                  {/* Survey Template Layout Selector */}
-                  <div className="space-y-1">
-                    <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Survey Template Layout *</label>
-                    <select
-                      required
-                      value={selectedTemplateId}
-                      onChange={e => setSelectedTemplateId(e.target.value)}
-                      className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-805 dark:text-white font-extrabold"
-                    >
-                      {templates.map(st => (
-                        <option key={st.id} value={st.id}>
-                          {st.name} {st.isSystem ? '(Default)' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
-                  {/* Target Election and Campaign Status side-by-side Grid */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Election Cycle *</label>
-                      <select
+                    {/* Campaign Title */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                        Campaign Title <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="text"
                         required
-                        value={selectedElectionId}
-                        onChange={e => setSelectedElectionId(e.target.value)}
-                        className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-800 dark:text-white"
-                      >
-                        <option value="" disabled>Select target</option>
-                        {elections.map(el => (
-                          <option key={el.id} value={el.id}>
-                            {el.year} — {el.title || 'Untitled'} ({el.status})
-                          </option>
-                        ))}
-                      </select>
+                        value={title}
+                        onChange={e => setTitle(e.target.value)}
+                        placeholder="e.g. Assembly Election 2026 Household Voter Sentiment Roster"
+                        className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all text-zinc-800 dark:text-white placeholder:text-zinc-400"
+                      />
                     </div>
 
-                    <div className="space-y-1">
-                      <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Campaign Status</label>
-                      <select
-                        value={status}
-                        onChange={e => setStatus(e.target.value as 'Draft' | 'Active' | 'Completed')}
-                        className="w-full px-3.5 py-2.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-800 dark:text-white"
-                      >
-                        <option value="Draft">Draft Mode</option>
-                        <option value="Active">Operational / Active</option>
-                        <option value="Completed">Completed / Archived</option>
-                      </select>
+                    {/* Description & Guidance */}
+                    <div className="space-y-1.5">
+                      <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                        Description & Field Guidance <span className="text-red-500">*</span>
+                      </label>
+                      <textarea
+                        required
+                        rows={3}
+                        value={description}
+                        onChange={e => setDescription(e.target.value)}
+                        placeholder="Detail the operational survey goals, instructions for Karyakartas, talking points, or area scopes..."
+                        className="w-full px-4 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-sm transition-all text-zinc-800 dark:text-white placeholder:text-zinc-400"
+                      />
                     </div>
                   </div>
 
-                  {/* Assigned Personnel Selection */}
-                  <div className="space-y-2 flex flex-col relative">
-                    <div>
-                      <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Assign Personnel / Karyakartas</label>
-                      <p className="text-[10px] text-zinc-400">Select Karyakartas who can access and fill out this survey campaign</p>
+                  {/* Configuration & Targeting Section */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-xs font-black uppercase text-zinc-400 tracking-wider">
+                      <span>2. Template & Election Cycle</span>
+                      <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800" />
                     </div>
 
-                    <div className="relative">
-                      {/* Trigger Button */}
-                      <button
-                        type="button"
-                        onClick={() => setPersonnelDropdownOpen(prev => !prev)}
-                        className="w-full flex items-center justify-between text-left p-3 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 rounded-xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-all text-xs"
-                      >
-                        <div className="flex flex-wrap gap-1 items-center min-w-0 pr-2">
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      {/* Survey Template Layout */}
+                      <div className="space-y-1.5 md:col-span-1">
+                        <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                          Template Layout <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          required
+                          value={selectedTemplateId}
+                          onChange={e => setSelectedTemplateId(e.target.value)}
+                          className="w-full px-3.5 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-800 dark:text-white font-medium"
+                        >
+                          {templates.map(st => (
+                            <option key={st.id} value={st.id}>
+                              {st.name} {st.isSystem ? '(Default)' : ''}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Target Election */}
+                      <div className="space-y-1.5 md:col-span-1">
+                        <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                          Election Cycle <span className="text-red-500">*</span>
+                        </label>
+                        <select
+                          required
+                          value={selectedElectionId}
+                          onChange={e => setSelectedElectionId(e.target.value)}
+                          className="w-full px-3.5 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-800 dark:text-white font-medium"
+                        >
+                          <option value="" disabled>Select target election</option>
+                          {elections.map(el => (
+                            <option key={el.id} value={el.id}>
+                              {el.year} — {el.title || 'Untitled'} ({el.status})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Status */}
+                      <div className="space-y-1.5 md:col-span-1">
+                        <label className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                          Operational Status
+                        </label>
+                        <select
+                          value={status}
+                          onChange={e => setStatus(e.target.value as 'Draft' | 'Active' | 'Completed')}
+                          className="w-full px-3.5 py-3 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 text-xs transition-all text-zinc-800 dark:text-white font-medium"
+                        >
+                          <option value="Draft">Draft Mode</option>
+                          <option value="Active">Operational / Active</option>
+                          <option value="Completed">Completed / Archived</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Ground Operations & Personnel Section */}
+                  <div className="space-y-4">
+                    <div className="flex items-center gap-2 text-xs font-black uppercase text-zinc-400 tracking-wider">
+                      <span>3. Field Personnel & Political Scope</span>
+                      <div className="flex-1 h-px bg-zinc-200 dark:bg-zinc-800" />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+                      {/* Assigned Personnel Selection */}
+                      <div className="bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 space-y-3.5 transition-all">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="text-xs font-bold text-zinc-800 dark:text-zinc-200 block">
+                              Assign Karyakartas / Field Agents
+                            </label>
+                            <p className="text-[10px] text-zinc-400 mt-0.5">
+                              {assignedTo.length === 0 ? 'No personnel assigned (Restricted access)' : `${assignedTo.length} personnel assigned`}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPersonnelDropdownOpen(prev => !prev)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                              personnelDropdownOpen
+                                ? 'bg-blue-600 text-white shadow-xs'
+                                : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>{personnelDropdownOpen ? 'Done' : 'Manage'}</span>
+                            {personnelDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          </button>
+                        </div>
+
+                        {/* Selected chips display */}
+                        <div className="flex flex-wrap gap-1.5 min-h-[36px] p-2 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl items-center">
                           {assignedTo.length === 0 ? (
-                            <span className="text-zinc-400 dark:text-zinc-500">None assigned — accessible to all system users</span>
+                            <span className="text-[11px] text-amber-600 dark:text-amber-400 px-1 italic">
+                              None assigned — only explicitly assigned karyakartas will have access
+                            </span>
                           ) : (
-                            users.filter(u => assignedTo.includes(u.uid)).map(u => (
+                            users.filter(u => isUserMatchingAssigned(u, assignedTo)).map(u => (
                               <span 
-                                key={u.uid}
-                                className="text-[9px] font-extrabold pl-2 pr-1.5 py-0.5 rounded border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 inline-flex items-center gap-1 group/badge"
+                                key={u.uid || u.email}
+                                className="text-[10px] font-bold pl-2.5 pr-1.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 inline-flex items-center gap-1.5 shadow-2xs"
                               >
-                                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-blue-500 animate-pulse" />
-                                <span className="truncate max-w-[80px]">{u.username}</span>
+                                <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-blue-500" />
+                                <span className="truncate max-w-[110px]">{u.username}</span>
                                 <span
                                   role="button"
                                   onClick={(e) => {
                                     e.stopPropagation();
-                                    setAssignedTo(prev => prev.filter(id => id !== u.uid));
+                                    handleSelectUser(u);
                                   }}
-                                  className="w-3.5 h-3.5 rounded-md inline-flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 transition-all cursor-pointer font-sans"
+                                  className="w-4 h-4 rounded hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 transition-colors inline-flex items-center justify-center cursor-pointer"
                                   title={`Remove ${u.username}`}
                                 >
                                   <X size={10} strokeWidth={2.5} />
@@ -1047,61 +1122,49 @@ export default function SurveyManagement() {
                             ))
                           )}
                         </div>
-                        <div className="shrink-0 text-zinc-450">
-                          {personnelDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        </div>
-                      </button>
 
-                      {/* Dropdown Menu */}
-                      {personnelDropdownOpen && (
-                        <>
-                          {/* Invisible backdrop to capture outside clicks and close the dropdown */}
-                          <div 
-                            className="fixed inset-0 z-40" 
-                            onClick={() => setPersonnelDropdownOpen(false)}
-                          />
-                          
-                          <div className="absolute z-50 left-0 right-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl p-3 space-y-2.5 max-h-72 overflow-y-auto">
-                            
-                            {/* Personnel Search bar inside dropdown */}
+                        {/* Expanded Selection Panel */}
+                        {personnelDropdownOpen && (
+                          <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3 space-y-2.5 animate-in fade-in duration-150">
+                            {/* Search box */}
                             <div className="relative">
                               <input
                                 type="text"
-                                placeholder="Search personnel by username, email, or role..."
+                                placeholder="Search by name, email, or role..."
                                 value={userSearchTerm}
                                 onChange={e => setUserSearchTerm(e.target.value)}
-                                className="w-full pl-9 pr-8 py-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-1 focus:ring-blue-550 text-xs transition-all text-zinc-800 dark:text-white"
+                                className="w-full pl-8 pr-7 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-xs text-zinc-800 dark:text-white"
                               />
-                              <Search className="absolute left-3 top-2.5 w-3.5 h-3.5 text-zinc-400" />
+                              <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-zinc-400" />
                               {userSearchTerm && (
                                 <button
                                   type="button"
                                   onClick={() => setUserSearchTerm('')}
-                                  className="absolute right-3 top-2 p-0.5 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-md text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 transition-colors"
-                                  title="Clear search"
+                                  className="absolute right-2 top-2 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
                                 >
                                   <X size={12} />
                                 </button>
                               )}
                             </div>
 
-                            {/* Quick batch selectors inside dropdown */}
+                            {/* Batch controls */}
                             {users.length > 0 && (
-                              <div className="flex justify-between items-center px-1 text-[9px] font-black uppercase text-zinc-450 select-none">
-                                <span>{filteredUsersForAssignment.length} of {users.length} found</span>
-                                <div className="flex gap-2 items-center">
+                              <div className="flex justify-between items-center px-1 text-[10px] font-bold text-zinc-400">
+                                <span>{filteredUsersForAssignment.length} of {users.length} karyakartas</span>
+                                <div className="flex items-center gap-2">
                                   <button
                                     type="button"
                                     onClick={() => {
                                       const newIds = [...assignedTo];
                                       filteredUsersForAssignment.forEach(u => {
-                                        if (!newIds.includes(u.uid)) {
-                                          newIds.push(u.uid);
+                                        const uTarget = u.uid || (u as any).id || u.email;
+                                        if (!isUserMatchingAssigned(u, newIds)) {
+                                          newIds.push(uTarget);
                                         }
                                       });
                                       setAssignedTo(newIds);
                                     }}
-                                    className="hover:text-blue-500 transition-colors cursor-pointer"
+                                    className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
                                   >
                                     Select All
                                   </button>
@@ -1109,46 +1172,50 @@ export default function SurveyManagement() {
                                   <button
                                     type="button"
                                     onClick={() => {
-                                      const filteredUids = filteredUsersForAssignment.map(u => u.uid);
-                                      setAssignedTo(prev => prev.filter(id => !filteredUids.includes(id)));
+                                      const filteredUserIds = filteredUsersForAssignment.flatMap(u => [u.uid, (u as any).id, u.email].filter(Boolean).map(x => String(x).toLowerCase().trim()));
+                                      setAssignedTo(prev => prev.filter(id => !filteredUserIds.includes(String(id).toLowerCase().trim())));
                                     }}
-                                    className="hover:text-red-500 transition-colors cursor-pointer"
+                                    className="text-red-500 hover:underline cursor-pointer"
                                   >
-                                    Clear Visible
+                                    Clear
                                   </button>
                                 </div>
                               </div>
                             )}
 
-                            {/* Registered personnel items */}
-                            <div className="space-y-0.5 max-h-40 overflow-y-auto">
+                            {/* Scrollable list */}
+                            <div className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar pr-1">
                               {users.length === 0 ? (
-                                <p className="text-[10px] text-zinc-400 text-center py-4">No system Karyakartas enrolled</p>
+                                <p className="text-xs text-zinc-400 text-center py-4">No enrolled karyakartas found</p>
                               ) : filteredUsersForAssignment.length === 0 ? (
-                                <p className="text-[10px] text-zinc-400 text-center py-4">No personnel matches the search criteria</p>
+                                <p className="text-xs text-zinc-400 text-center py-4">No karyakartas match filter</p>
                               ) : (
                                 filteredUsersForAssignment.map(u => {
-                                  const isChecked = assignedTo.includes(u.uid);
+                                  const isChecked = isUserMatchingAssigned(u, assignedTo);
                                   return (
-                                    <div 
-                                      key={u.uid}
-                                      onClick={() => handleSelectUser(u.uid)}
-                                      className="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer text-xs"
+                                    <div
+                                      key={u.uid || u.email}
+                                      onClick={() => handleSelectUser(u)}
+                                      className={`flex items-center justify-between p-2 rounded-xl cursor-pointer text-xs transition-colors ${
+                                        isChecked
+                                          ? 'bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50'
+                                          : 'hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-transparent'
+                                      }`}
                                     >
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center transition-all ${
-                                          isChecked 
-                                            ? 'bg-blue-650 border-blue-650 text-white' 
-                                            : 'border-zinc-300 dark:border-zinc-700'
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className={`w-4 h-4 border rounded-md flex items-center justify-center transition-all ${
+                                          isChecked
+                                            ? 'bg-blue-600 border-blue-600 text-white'
+                                            : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
                                         }`}>
-                                          {isChecked && <Check size={10} strokeWidth={3} />}
+                                          {isChecked && <Check size={11} strokeWidth={3} />}
                                         </div>
                                         <div className="flex flex-col text-left min-w-0">
-                                          <span className="font-bold text-zinc-800 dark:text-zinc-200 capitalize truncate leading-none">{u.username}</span>
-                                          <span className="text-[9px] text-zinc-400 mt-0.5 truncate">{u.email}</span>
+                                          <span className="font-bold text-zinc-800 dark:text-zinc-200 capitalize truncate">{u.username}</span>
+                                          <span className="text-[10px] text-zinc-400 truncate">{u.email}</span>
                                         </div>
                                       </div>
-                                      <span className="text-[8px] uppercase font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded tracking-wider font-mono shrink-0">
+                                      <span className="text-[9px] uppercase font-bold text-zinc-500 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 px-2 py-0.5 rounded-md tracking-wider font-mono shrink-0">
                                         {u.role}
                                       </span>
                                     </div>
@@ -1157,36 +1224,48 @@ export default function SurveyManagement() {
                               )}
                             </div>
                           </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
+                        )}
+                      </div>
 
-                  {/* Linked Parties Option */}
-                  <div className="space-y-2 flex flex-col relative">
-                    <div>
-                      <label className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Linked Political Parties</label>
-                      <p className="text-[10px] text-zinc-400">Select which political parties are active in/linked to this campaign survey</p>
-                    </div>
+                      {/* Linked Parties Selection */}
+                      <div className="bg-zinc-50 dark:bg-zinc-950/60 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-4 space-y-3.5 transition-all">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="text-xs font-bold text-zinc-800 dark:text-zinc-200 block">
+                              Linked Political Parties
+                            </label>
+                            <p className="text-[10px] text-zinc-400 mt-0.5">
+                              {linkedPartyIds.length === 0 ? 'All parties active in survey' : `${linkedPartyIds.length} parties linked`}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setPartyDropdownOpen(prev => !prev)}
+                            className={`px-3 py-1.5 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                              partyDropdownOpen
+                                ? 'bg-blue-600 text-white shadow-xs'
+                                : 'bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                            }`}
+                          >
+                            <span>{partyDropdownOpen ? 'Done' : 'Manage'}</span>
+                            {partyDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                          </button>
+                        </div>
 
-                    <div className="relative">
-                      {/* Trigger Button */}
-                      <button
-                        type="button"
-                        onClick={() => setPartyDropdownOpen(prev => !prev)}
-                        className="w-full flex items-center justify-between text-left p-3 border border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 rounded-xl cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-900 transition-all text-xs"
-                      >
-                        <div className="flex flex-wrap gap-1 items-center min-w-0 pr-2">
+                        {/* Selected chips display */}
+                        <div className="flex flex-wrap gap-1.5 min-h-[36px] p-2 bg-white dark:bg-zinc-900 border border-zinc-200/80 dark:border-zinc-800/80 rounded-xl items-center">
                           {linkedPartyIds.length === 0 ? (
-                            <span className="text-zinc-400 dark:text-zinc-500">None linked — all parties visible</span>
+                            <span className="text-[11px] text-zinc-400 px-1 italic">
+                              None linked — all parties active in this survey campaign
+                            </span>
                           ) : (
                             parties.filter(p => linkedPartyIds.includes(p.id)).map(p => (
                               <span 
                                 key={p.id}
-                                className="text-[9px] font-extrabold pl-2 pr-1.5 py-0.5 rounded border inline-flex items-center gap-1 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 group/badge"
-                                style={{ borderColor: `${p.color}40` }}
+                                className="text-[10px] font-bold pl-2.5 pr-1.5 py-1 rounded-lg border bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-zinc-200 inline-flex items-center gap-1.5 shadow-2xs"
+                                style={{ borderColor: `${p.color || '#3b82f6'}40` }}
                               >
-                                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+                                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: p.color || '#3b82f6' }} />
                                 <span>{p.abbreviation}</span>
                                 <span
                                   role="button"
@@ -1194,7 +1273,7 @@ export default function SurveyManagement() {
                                     e.stopPropagation();
                                     setLinkedPartyIds(prev => prev.filter(id => id !== p.id));
                                   }}
-                                  className="w-3.5 h-3.5 rounded-md inline-flex items-center justify-center hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 transition-all cursor-pointer font-sans"
+                                  className="w-4 h-4 rounded hover:bg-zinc-200 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 transition-colors inline-flex items-center justify-center cursor-pointer"
                                   title={`Remove ${p.abbreviation}`}
                                 >
                                   <X size={10} strokeWidth={2.5} />
@@ -1203,111 +1282,149 @@ export default function SurveyManagement() {
                             ))
                           )}
                         </div>
-                        <div className="shrink-0 text-zinc-450">
-                          {partyDropdownOpen ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        </div>
-                      </button>
 
-                      {/* Dropdown Menu */}
-                      {partyDropdownOpen && (
-                        <>
-                          {/* Invisible backdrop to capture outside clicks and close the dropdown */}
-                          <div 
-                            className="fixed inset-0 z-40" 
-                            onClick={() => setPartyDropdownOpen(false)}
-                          />
-                          
-                          <div className="absolute z-50 left-0 right-0 mt-1 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-xl p-2 max-h-56 overflow-y-auto">
-                            <div className="flex items-center justify-between px-2 py-1 mb-1 border-b border-zinc-100 dark:border-zinc-800">
-                              <span className="text-[9px] font-black uppercase text-zinc-450 tracking-wider">Select Active Parties</span>
-                              {linkedPartyIds.length > 0 && (
+                        {/* Expanded Selection Panel */}
+                        {partyDropdownOpen && (
+                          <div className="border-t border-zinc-200 dark:border-zinc-800 pt-3 space-y-2.5 animate-in fade-in duration-150">
+                            {/* Search box */}
+                            <div className="relative">
+                              <input
+                                type="text"
+                                placeholder="Search by party name or abbreviation..."
+                                value={partySearchTerm}
+                                onChange={e => setPartySearchTerm(e.target.value)}
+                                className="w-full pl-8 pr-7 py-2 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 text-xs text-zinc-800 dark:text-white"
+                              />
+                              <Search className="absolute left-2.5 top-2.5 w-3.5 h-3.5 text-zinc-400" />
+                              {partySearchTerm && (
                                 <button
                                   type="button"
-                                  onClick={() => setLinkedPartyIds([])}
-                                  className="text-[9px] font-black uppercase text-red-500 hover:text-red-650 transition-all"
+                                  onClick={() => setPartySearchTerm('')}
+                                  className="absolute right-2 top-2 p-0.5 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
                                 >
-                                  Clear All
+                                  <X size={12} />
                                 </button>
                               )}
                             </div>
 
-                            {parties.length === 0 ? (
-                              <p className="text-[10px] text-zinc-400 text-center py-4">No registered political parties found</p>
-                            ) : (
-                              <div className="space-y-0.5">
-                                {parties.map(p => {
+                            {/* Batch controls */}
+                            {parties.length > 0 && (
+                              <div className="flex justify-between items-center px-1 text-[10px] font-bold text-zinc-400">
+                                <span>{filteredPartiesForAssignment.length} of {parties.length} parties</span>
+                                <div className="flex items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const newIds = [...linkedPartyIds];
+                                      filteredPartiesForAssignment.forEach(p => {
+                                        if (!newIds.includes(p.id)) newIds.push(p.id);
+                                      });
+                                      setLinkedPartyIds(newIds);
+                                    }}
+                                    className="text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                                  >
+                                    Select All
+                                  </button>
+                                  <span>•</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const filteredPartyIds = filteredPartiesForAssignment.map(p => p.id);
+                                      setLinkedPartyIds(prev => prev.filter(id => !filteredPartyIds.includes(id)));
+                                    }}
+                                    className="text-red-500 hover:underline cursor-pointer"
+                                  >
+                                    Clear
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Scrollable list */}
+                            <div className="space-y-1 max-h-48 overflow-y-auto custom-scrollbar pr-1">
+                              {parties.length === 0 ? (
+                                <p className="text-xs text-zinc-400 text-center py-4">No registered political parties found</p>
+                              ) : filteredPartiesForAssignment.length === 0 ? (
+                                <p className="text-xs text-zinc-400 text-center py-4">No parties match filter</p>
+                              ) : (
+                                filteredPartiesForAssignment.map(p => {
                                   const isChecked = linkedPartyIds.includes(p.id);
                                   return (
-                                    <div 
+                                    <div
                                       key={p.id}
                                       onClick={() => {
-                                        setLinkedPartyIds(prev => 
-                                          prev.includes(p.id) 
-                                            ? prev.filter(id => id !== p.id) 
+                                        setLinkedPartyIds(prev =>
+                                          prev.includes(p.id)
+                                            ? prev.filter(id => id !== p.id)
                                             : [...prev, p.id]
                                         );
                                       }}
-                                      className="flex items-center justify-between p-2 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer text-xs"
+                                      className={`flex items-center justify-between p-2 rounded-xl cursor-pointer text-xs transition-colors ${
+                                        isChecked
+                                          ? 'bg-blue-50/70 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-900/50'
+                                          : 'hover:bg-zinc-100 dark:hover:bg-zinc-900 border border-transparent'
+                                      }`}
                                     >
-                                      <div className="flex items-center gap-2 min-w-0">
-                                        <div className={`w-3.5 h-3.5 border rounded flex items-center justify-center transition-all ${
-                                          isChecked 
-                                            ? 'bg-blue-650 border-blue-650 text-white' 
-                                            : 'border-zinc-300 dark:border-zinc-700'
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className={`w-4 h-4 border rounded-md flex items-center justify-center transition-all ${
+                                          isChecked
+                                            ? 'bg-blue-600 border-blue-600 text-white'
+                                            : 'border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900'
                                         }`}>
-                                          {isChecked && <Check size={10} strokeWidth={3} />}
+                                          {isChecked && <Check size={11} strokeWidth={3} />}
                                         </div>
-                                        <span className="w-2 rounded-full h-2 shrink-0 animate-pulse" style={{ backgroundColor: p.color }} />
+                                        <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: p.color || '#3b82f6' }} />
                                         <div className="flex flex-col text-left min-w-0">
-                                          <span className="font-bold text-zinc-800 dark:text-zinc-200 truncate leading-none">{p.name}</span>
+                                          <span className="font-bold text-zinc-800 dark:text-zinc-200 truncate">{p.name}</span>
                                         </div>
                                       </div>
                                       
                                       <span 
-                                        className="text-[8px] font-extrabold px-1.5 py-0.5 rounded uppercase font-mono"
-                                        style={{ backgroundColor: `${p.color}15`, color: p.color }}
+                                        className="text-[9px] font-bold px-2 py-0.5 rounded-md uppercase font-mono"
+                                        style={{ backgroundColor: `${p.color || '#3b82f6'}15`, color: p.color || '#3b82f6' }}
                                       >
                                         {p.abbreviation}
                                       </span>
                                     </div>
                                   );
-                                })}
-                              </div>
-                            )}
+                                })
+                              )}
+                            </div>
                           </div>
-                        </>
-                      )}
+                        )}
+                      </div>
                     </div>
                   </div>
-
-                  {/* Actions */}
-                  <div className="flex justify-end gap-2 border-t border-zinc-150 dark:border-zinc-800 pt-4">
-                    <button
-                      type="button"
-                      onClick={() => setIsModalOpen(false)}
-                      className="px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold transition-all"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={actionLoading}
-                      className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm"
-                    >
-                      {actionLoading ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          Processing...
-                        </>
-                      ) : (
-                        <>
-                          <Save className="w-3.5 h-3.5" />
-                          Save
-                        </>
-                      )}
-                    </button>
-                  </div>
                 </form>
+
+                {/* Sticky Footer Actions */}
+                <div className="px-6 sm:px-8 py-4 bg-zinc-50 dark:bg-zinc-950/80 border-t border-zinc-150 dark:border-zinc-800 flex items-center justify-end gap-3 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setIsModalOpen(false)}
+                    className="px-5 py-2.5 bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 rounded-xl text-xs font-bold transition-all shadow-xs cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="survey-form"
+                    disabled={actionLoading}
+                    className="px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-sm hover:shadow-md cursor-pointer disabled:opacity-50"
+                  >
+                    {actionLoading ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Saving Campaign...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Save className="w-4 h-4" />
+                        <span>{editingSurvey ? 'Update Campaign' : 'Create Campaign'}</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </motion.div>
             </div>
           </div>

@@ -3,7 +3,6 @@ import {
   createUserWithEmailAndPassword, 
   signInWithPopup,
   updateProfile,
-  sendEmailVerification,
   setPersistence,
   browserLocalPersistence
 } from 'firebase/auth';
@@ -11,14 +10,25 @@ import { auth, googleProvider } from '../lib/firebase';
 import { api } from '../lib/api';
 import { useAuth } from '../AuthProvider';
 import { Link, useNavigate } from 'react-router-dom';
-import { motion } from 'motion/react';
-import { UserPlus, Chrome, Loader2, AlertCircle } from 'lucide-react';
+import { motion, AnimatePresence } from 'motion/react';
+import Logo from './Logo';
+import { 
+  UserPlus, 
+  Chrome, 
+  Loader2, 
+  AlertCircle, 
+  Eye, 
+  EyeOff, 
+  X 
+} from 'lucide-react';
 
 export default function SignUp() {
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
@@ -92,18 +102,19 @@ export default function SignUp() {
       <motion.div 
         initial={{ opacity: 0, y: 10 }}
         animate={{ opacity: 1, y: 0 }}
-        className="w-full max-w-[380px] space-y-6"
+        className="w-full max-w-[400px] space-y-6"
       >
         <div className="text-center space-y-2 mb-2">
+          <Logo size={36} className="mx-auto mb-2" />
           <h1 className="text-2xl font-bold text-zinc-900 dark:text-white tracking-tight">Create account</h1>
-          <p className="text-sm text-zinc-500">Join our community to get started</p>
+          <p className="text-sm text-zinc-500 dark:text-zinc-400">Join NextGen CMS to get started</p>
         </div>
 
-        <div className="webapp-card p-6 space-y-6">
+        <div className="webapp-card p-6 sm:p-7 space-y-5">
           <button
             onClick={handleGoogleSignUp}
             disabled={loading}
-            className="webapp-button-secondary w-full flex items-center justify-center gap-2 py-2.5"
+            className="webapp-button-secondary w-full flex items-center justify-center gap-2.5 py-2.5"
           >
             <Chrome size={18} />
             Continue with Google
@@ -118,16 +129,33 @@ export default function SignUp() {
             </div>
           </div>
 
-          {error && (
-            <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-600 dark:text-red-400 text-xs font-medium flex items-center gap-2">
-              <AlertCircle size={14} />
-              {error}
-            </div>
-          )}
+          <AnimatePresence>
+            {error && (
+              <motion.div 
+                initial={{ opacity: 0, y: -8, height: 0 }}
+                animate={{ opacity: 1, y: 0, height: 'auto' }}
+                exit={{ opacity: 0, y: -8, height: 0 }}
+                className="p-3.5 bg-red-500/10 border border-red-500/20 rounded-xl text-red-600 dark:text-red-400 text-xs font-medium flex items-start justify-between gap-2.5"
+              >
+                <div className="flex items-start gap-2">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <span>{error}</span>
+                </div>
+                <button 
+                  type="button" 
+                  onClick={() => setError('')} 
+                  className="text-red-500 hover:text-red-700 dark:hover:text-red-300 opacity-60 hover:opacity-100 transition-opacity"
+                  title="Dismiss error"
+                >
+                  <X size={14} />
+                </button>
+              </motion.div>
+            )}
+          </AnimatePresence>
 
           <form onSubmit={handleSignUp} className="space-y-4">
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider ml-1">Name</label>
+              <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider ml-1">Name</label>
               <input
                 type="text"
                 required
@@ -135,11 +163,12 @@ export default function SignUp() {
                 onChange={(e) => setUsername(e.target.value)}
                 className="webapp-input w-full"
                 placeholder="Your name"
+                autoComplete="name"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider ml-1">Email</label>
+              <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider ml-1">Email</label>
               <input
                 type="email"
                 required
@@ -147,31 +176,58 @@ export default function SignUp() {
                 onChange={(e) => setEmail(e.target.value)}
                 className="webapp-input w-full"
                 placeholder="name@example.com"
+                autoComplete="email"
               />
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider ml-1">Password</label>
-              <input
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="webapp-input w-full"
-                placeholder="••••••••"
-              />
+              <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider ml-1">Password</label>
+              <div className="relative flex items-center">
+                <input
+                  type={showPassword ? "text" : "password"}
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="webapp-input w-full pr-10"
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute right-2.5 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors rounded"
+                  title={showPassword ? "Hide password" : "Show password"}
+                  aria-label={showPassword ? "Hide password" : "Show password"}
+                  tabIndex={-1}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             <div className="space-y-1.5">
-              <label className="text-[11px] font-bold text-zinc-500 uppercase tracking-wider ml-1">Confirm Password</label>
-              <input
-                type="password"
-                required
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="webapp-input w-full"
-                placeholder="••••••••"
-              />
+              <label className="text-[11px] font-bold text-zinc-500 dark:text-zinc-400 uppercase tracking-wider ml-1">Confirm Password</label>
+              <div className="relative flex items-center">
+                <input
+                  type={showConfirmPassword ? "text" : "password"}
+                  required
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="webapp-input w-full pr-10"
+                  placeholder="••••••••"
+                  autoComplete="new-password"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                  className="absolute right-2.5 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors rounded"
+                  title={showConfirmPassword ? "Hide password" : "Show password"}
+                  aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+                  tabIndex={-1}
+                >
+                  {showConfirmPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
             </div>
 
             <button
@@ -185,7 +241,7 @@ export default function SignUp() {
           </form>
         </div>
 
-        <p className="text-center text-xs text-zinc-500 font-medium">
+        <p className="text-center text-xs text-zinc-500 dark:text-zinc-400 font-medium">
           Already have an account?{' '}
           <Link to="/login" className="text-zinc-900 dark:text-white font-bold hover:underline">
             Sign in
@@ -195,3 +251,4 @@ export default function SignUp() {
     </div>
   );
 }
+

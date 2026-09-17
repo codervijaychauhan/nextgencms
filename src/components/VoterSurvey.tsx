@@ -107,7 +107,7 @@ interface CampaignSurvey {
 interface SurveyField {
   id: string;
   label: string;
-  type: 'select' | 'multiselect' | 'scale' | 'text' | 'checkbox' | 'number';
+  type: 'select' | 'multiselect' | 'scale' | 'text' | 'textarea' | 'checkbox' | 'number';
   options?: string[];
   required?: boolean;
 }
@@ -141,6 +141,15 @@ const COMMON_CONCERNS = [
   'Law & Order'
 ];
 
+const formatSurveyDate = (val: any): string => {
+  if (!val) return '—';
+  if (typeof val?.toDate === 'function') {
+    return val.toDate().toLocaleDateString();
+  }
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? '—' : d.toLocaleDateString();
+};
+
 export default function VoterSurvey() {
   const { user, isAdmin, profile } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -157,7 +166,7 @@ export default function VoterSurvey() {
   const [customAnswers, setCustomAnswers] = useState<Record<string, unknown>>({});
 
   // Dynamic template checks
-  const isCustomTemplate = activeSurvey && activeSurvey.templateId && activeSurvey.templateId !== 'political_sentiment';
+  const isCustomTemplate = Boolean(activeSurvey && activeSurvey.templateId && String(activeSurvey.templateId).trim() !== 'political_sentiment');
 
   // Permission helper
   const hasRight = (moduleId: string, right: string) => {
@@ -200,9 +209,9 @@ export default function VoterSurvey() {
   const [votersMap, setVotersMap] = useState<Record<string, Voter>>({});
 
   // Computed Report Template variables
-  const selectedReportSurvey = assignedSurveys.find(s => s.id === surveyFilter);
-  const isReportCustomTemplate = selectedReportSurvey && selectedReportSurvey.templateId && selectedReportSurvey.templateId !== 'political_sentiment';
-  const reportTemplate = selectedReportSurvey ? templates.find(t => t.id === selectedReportSurvey.templateId) : null;
+  const selectedReportSurvey = assignedSurveys.find(s => String(s.id).trim() === String(surveyFilter).trim()) || allSurveys.find(s => String(s.id).trim() === String(surveyFilter).trim());
+  const isReportCustomTemplate = Boolean(selectedReportSurvey && selectedReportSurvey.templateId && String(selectedReportSurvey.templateId).trim() !== 'political_sentiment');
+  const reportTemplate = selectedReportSurvey ? templates.find(t => String(t.id).trim() === String(selectedReportSurvey.templateId).trim()) : null;
 
   // Dropdown states for Survey Form & Reports Selection
   const [formDropdownOpen, setFormDropdownOpen] = useState(false);
@@ -228,7 +237,7 @@ export default function VoterSurvey() {
   const [voterAlreadyResponded, setVoterAlreadyResponded] = useState(false);
 
   useEffect(() => {
-    if (!selectedVoter || !activeSurvey) {
+    if (!selectedVoter) {
       setVoterAlreadyResponded(false);
       return;
     }
@@ -238,12 +247,39 @@ export default function VoterSurvey() {
       setCheckingVoterResponse(true);
       setError('');
       try {
-        const sentiments = await apiFetch<Sentiment[]>(`/api/voter-sentiments?voterDocId=${selectedVoter.id}`).catch(() => []);
+        const voterKey = selectedVoter.id || selectedVoter.voterId;
+        const sentiments = await apiFetch<Sentiment[]>(`/api/voter-sentiments?voterDocId=${encodeURIComponent(voterKey)}`).catch(() => []);
         if (!isMounted) return;
-        const hasResponded = (sentiments || []).some(doc => doc.surveyId === activeSurvey.id);
+
+        const hasRespondedApi = (sentiments || []).some(doc => {
+          if (activeSurvey) {
+            return String(doc.surveyId || '').trim() === String(activeSurvey.id).trim() ||
+              (doc.surveyTitle && activeSurvey.title && doc.surveyTitle.trim() === activeSurvey.title.trim());
+          } else {
+            return !doc.surveyId && String(doc.electionId) === String(selectedElection);
+          }
+        });
+
+        // Also cross-reference locally loaded sentiments
+        const hasRespondedLocal = allSentiments.some(doc => {
+          const isSameVoter = String(doc.voterDocId) === String(selectedVoter.id) ||
+            String(doc.voterDocId) === String(selectedVoter.voterId) ||
+            (doc.voterName && doc.voterName.trim().toLowerCase() === selectedVoter.name.trim().toLowerCase() &&
+             (doc.mobile && selectedVoter.mobile && doc.mobile === selectedVoter.mobile));
+          if (!isSameVoter) return false;
+
+          if (activeSurvey) {
+            return String(doc.surveyId || '').trim() === String(activeSurvey.id).trim() ||
+              (doc.surveyTitle && activeSurvey.title && doc.surveyTitle.trim() === activeSurvey.title.trim());
+          } else {
+            return !doc.surveyId && String(doc.electionId) === String(selectedElection);
+          }
+        });
+
+        const hasResponded = hasRespondedApi || hasRespondedLocal;
         setVoterAlreadyResponded(hasResponded);
         if (hasResponded) {
-          setError(`This voter has already responded to the "${activeSurvey.title}" survey campaign. A voter can only respond to a given campaign once.`);
+          setError(`This voter has already responded to the "${activeSurvey?.title || 'current'}" survey campaign. A voter cannot participate in the same survey multiple times.`);
         }
       } catch (err) {
         console.error('Error checking voter survey response:', err);
@@ -258,11 +294,47 @@ export default function VoterSurvey() {
     return () => {
       isMounted = false;
     };
-  }, [selectedVoter, activeSurvey]);
+  }, [selectedVoter, activeSurvey, selectedElection, allSentiments]);
+
+  const isUserAssignedToSurvey = (
+    survey: CampaignSurvey,
+    u: { uid?: string; email?: string | null } | null | undefined,
+    p: { uid?: string; id?: string; email?: string | null; role?: string } | null | undefined,
+    adminStatus: boolean
+  ): boolean => {
+    if (adminStatus || p?.role === 'superadmin' || p?.role === 'super_admin' || p?.role === 'admin') {
+      return true;
+    }
+    if (!survey || !Array.isArray(survey.assignedTo) || survey.assignedTo.length === 0) {
+      return false;
+    }
+
+    const userIdentifiers = [
+      u?.uid,
+      p?.uid,
+      p?.id,
+      (p as any)?.username,
+      (p as any)?.name,
+      u?.email?.toLowerCase(),
+      p?.email?.toLowerCase(),
+    ].filter(Boolean).map(id => String(id).toLowerCase().trim());
+
+    return survey.assignedTo.some(assignedId => {
+      if (!assignedId) return false;
+      const clean = String(assignedId).toLowerCase().trim();
+      return userIdentifiers.includes(clean);
+    });
+  };
 
   useEffect(() => {
     fetchInitialData();
-  }, []);
+  }, [user?.uid, user?.email, profile?.uid, profile?.id, profile?.role, isAdmin]);
+
+  useEffect(() => {
+    if (activeView === 'report') {
+      fetchAllSentiments();
+    }
+  }, [activeView]);
 
   useEffect(() => {
     const trimmed = voterSearch.trim();
@@ -286,7 +358,7 @@ export default function VoterSurvey() {
       setAllSurveys(surveyList || []);
       
       const activeUserSurveys = (surveyList || []).filter(s => 
-        s.status === 'Active' && (isAdmin || !s.assignedTo?.length || s.assignedTo?.includes(user?.uid || ''))
+        s.status === 'Active' && isUserAssignedToSurvey(s, user, profile, isAdmin)
       );
       
       setAssignedSurveys(activeUserSurveys);
@@ -295,7 +367,8 @@ export default function VoterSurvey() {
       if (activeUserSurveys.length > 0) {
         const chosen = activeUserSurveys[0];
         setActiveSurvey(chosen);
-        setSurveyFilter(chosen.id);
+        // Default to all reports so all submitted records are visible immediately
+        setSurveyFilter('');
         if (chosen.electionId) {
           defaultElectionId = chosen.electionId;
         }
@@ -320,22 +393,30 @@ export default function VoterSurvey() {
 
       // Fetch survey templates
       const templateList = await apiFetch<SurveyTemplate[]>('/api/surveys/templates').catch(() => []);
-      const customTemplates = (templateList || []).filter(t => t.id !== 'political_sentiment');
+      const customTemplates = (templateList || []).map(t => ({
+        ...t,
+        id: String(t.id),
+        fields: Array.isArray(t.fields) ? t.fields : []
+      })).filter(t => t.id !== 'political_sentiment');
       setTemplates([POLITICAL_SENTIMENT_TEMPLATE, ...customTemplates]);
 
       // Fetch voters
-      const votersRes = await apiFetch<{ data: Voter[] }>('/api/voters?limit=500').catch(() => ({ data: [] }));
-      const votersList = votersRes?.data || [];
+      const votersRes = await apiFetch<any>('/api/voters?limit=500').catch(() => ({ data: [] }));
+      const votersList = Array.isArray(votersRes) ? votersRes : (votersRes?.data || []);
       setTotalAssignedVotersCount(votersList.length);
 
       const vMap: Record<string, Voter> = {};
-      votersList.forEach(v => {
-        vMap[v.id] = v;
+      votersList.forEach((v: any) => {
+        if (v.id) vMap[v.id] = v;
+        if (v.id) vMap[String(v.id)] = v;
+        if (v.voter_id) vMap[v.voter_id] = v;
+        if (v.voterId) vMap[v.voterId] = v;
       });
       setVotersMap(vMap);
 
       // Fetch recent sentiments with the immediate active user surveys list
       fetchRecentSentiments(activeUserSurveys);
+      fetchAllSentiments();
     } catch (err) {
       console.error(err);
       setError('Failed to load initial data');
@@ -371,33 +452,33 @@ export default function VoterSurvey() {
       setAllSurveys(surveyList || []);
       
       const activeUserSurveys = (surveyList || []).filter(s => 
-        isAdmin || !s.assignedTo?.length || s.assignedTo?.includes(user?.uid || '')
+        isUserAssignedToSurvey(s, user, profile, isAdmin)
       );
       const assignedSurveyIds = activeUserSurveys.map(s => s.id);
 
       const list = await apiFetch<Sentiment[]>('/api/voter-sentiments').catch(() => []);
       const filteredList = (list || []).filter(s => {
         if (!isAdmin && assignedSurveyIds.length > 0) {
-          if (s.surveyId && !assignedSurveyIds.includes(s.surveyId)) return false;
+          if (s.surveyId && !assignedSurveyIds.includes(String(s.surveyId)) && s.recordedBy !== user?.uid) return false;
         }
         return true;
       });
 
-      const votersRes = await apiFetch<{ data: Voter[] }>('/api/voters?limit=500').catch(() => ({ data: [] }));
-      const votersList = votersRes?.data || [];
+      const votersRes = await apiFetch<any>('/api/voters?limit=500').catch(() => ({ data: [] }));
+      const votersList = Array.isArray(votersRes) ? votersRes : (votersRes?.data || []);
       setTotalAssignedVotersCount(votersList.length);
 
       const vMap: Record<string, Voter> = {};
-      votersList.forEach(v => {
-        vMap[v.id] = v;
+      votersList.forEach((v: any) => {
+        if (v.id) vMap[v.id] = v;
+        if (v.id) vMap[String(v.id)] = v;
+        if (v.voter_id) vMap[v.voter_id] = v;
+        if (v.voterId) vMap[v.voterId] = v;
       });
       setVotersMap(vMap);
 
       setAllSentiments(filteredList);
       setAssignedSurveys(activeUserSurveys);
-      if (!surveyFilter && activeUserSurveys.length > 0) {
-        setSurveyFilter(activeUserSurveys[0].id);
-      }
     } catch (err) {
       console.error('Error fetching sentiments', err);
       setError('Failed to load survey report responses. Verify permissions.');
@@ -450,8 +531,8 @@ export default function VoterSurvey() {
     setError('');
     
     try {
-      const editedDocSurvey = allSurveys.find(as => as.id === editingSentiment.surveyId) || assignedSurveys.find(as => as.id === editingSentiment.surveyId);
-      const isEditedDocCustomTemplate = editedDocSurvey && editedDocSurvey.templateId && editedDocSurvey.templateId !== 'political_sentiment';
+      const editedDocSurvey = allSurveys.find(as => String(as.id).trim() === String(editingSentiment.surveyId).trim()) || assignedSurveys.find(as => String(as.id).trim() === String(editingSentiment.surveyId).trim());
+      const isEditedDocCustomTemplate = Boolean(editedDocSurvey && editedDocSurvey.templateId && String(editedDocSurvey.templateId).trim() !== 'political_sentiment');
 
       const party = editSupportingParty === 'none' 
         ? { name: 'Undecided / No Favor' }
@@ -527,23 +608,25 @@ export default function VoterSurvey() {
     setError('');
 
     try {
-      const res = await apiFetch<{ data: Voter[] }>(`/api/voters?search=${encodeURIComponent(termToSearch)}&limit=10`);
-      const results = (res?.data || []).map((v: any) => ({
+      const res = await apiFetch<any>(`/api/voters?search=${encodeURIComponent(termToSearch)}&limit=15`);
+      const rawList = Array.isArray(res) ? res : (res?.data || []);
+      const results = rawList.map((v: any) => ({
         ...v,
-        voterId: v.voter_id || v.voterId,
-        relationName: v.relation_name || v.relationName,
-        boothId: v.booth_id || v.boothId,
-        constituencyId: v.constituency_id || v.constituencyId,
-        stateId: v.state_id || v.stateId,
-        districtId: v.district_id || v.districtId
+        voterId: v.voter_id || v.voterId || '',
+        relationName: v.relation_name || v.relationName || '',
+        boothId: v.booth_id || v.boothId || '',
+        constituencyId: v.constituency_id || v.constituencyId || '',
+        stateId: v.state_id || v.stateId || '',
+        districtId: v.district_id || v.districtId || ''
       }));
       setVoters(results);
       if (results.length === 0) {
-        setError('No voters found matching your search. Try EPIC ID or name.');
+        setError('No voters found matching your search. Try EPIC ID, name, or mobile number.');
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Search error:', err);
-      setError('Voter search failed. Please check your connection.');
+      const errMsg = err?.message || 'Voter search failed. Please check your connection.';
+      setError(errMsg);
     } finally {
       setSearchingVoters(false);
     }
@@ -603,6 +686,7 @@ export default function VoterSurvey() {
       setConcerns([]);
       setCustomAnswers({});
       fetchRecentSentiments();
+      fetchAllSentiments();
       setTimeout(() => setSuccess(''), 3000);
     } catch (err: any) {
       setError(err?.message || 'Failed to submit survey');
@@ -619,14 +703,24 @@ export default function VoterSurvey() {
 
   // Filtered sentiments list for report
   const filteredSentiments = allSentiments.filter(s => {
-    const matchSurvey = !surveyFilter 
+    const sSurveyId = String(s.surveyId || '').trim();
+    const curFilter = String(surveyFilter || '').trim();
+
+    if (!isAdmin && assignedSurveys.length > 0) {
+      const isAssigned = !sSurveyId || s.recordedBy === user?.uid || assignedSurveys.some(as => String(as.id).trim() === sSurveyId);
+      if (!isAssigned) return false;
+    }
+
+    const matchSurvey = !curFilter || curFilter === 'all'
       ? true 
-      : surveyFilter === 'general_manual_sentiments' 
-        ? !s.surveyId 
-        : s.surveyId === surveyFilter;
+      : curFilter === 'general_manual_sentiments' 
+        ? (!s.surveyId)
+        : (sSurveyId === curFilter || (selectedReportSurvey && s.surveyTitle && s.surveyTitle.trim().toLowerCase() === selectedReportSurvey.title.trim().toLowerCase()));
     
     // Core search by voter name
-    const matchSearch = !reportSearchText.trim() || s.voterName.toLowerCase().includes(reportSearchText.toLowerCase());
+    const matchSearch = !reportSearchText.trim() || 
+      s.voterName.toLowerCase().includes(reportSearchText.toLowerCase()) ||
+      (s.surveyTitle && s.surveyTitle.toLowerCase().includes(reportSearchText.toLowerCase()));
     
     if (!matchSurvey || !matchSearch) return false;
 
@@ -658,9 +752,9 @@ export default function VoterSurvey() {
       return true;
     } else {
       // Standard political sentiment filters
-      const matchYear = !yearFilter || s.electionYear === Number(yearFilter);
-      const matchParty = !partyFilter || s.favoredPartyId === partyFilter;
-      const matchSentiment = !sentimentFilter || s.sentimentScore === Number(sentimentFilter);
+      const matchYear = !yearFilter || Number(s.electionYear) === Number(yearFilter);
+      const matchParty = !partyFilter || String(s.favoredPartyId || '') === String(partyFilter);
+      const matchSentiment = !sentimentFilter || Number(s.sentimentScore) === Number(sentimentFilter);
       return matchYear && matchParty && matchSentiment;
     }
   });
@@ -700,7 +794,7 @@ export default function VoterSurvey() {
       const surveyTitle = s.surveyTitle || 'General Sentiment';
       const electionYear = s.electionYear || '';
       const recordedBy = s.recordedByName || s.recordedBy || 'Staff';
-      const createdAt = s.createdAt ? new Date(s.createdAt.toDate()).toLocaleDateString() : 'N/A';
+      const createdAt = formatSurveyDate(s.createdAt);
 
       const commonPrefix = [
         `"${s.voterName.replace(/"/g, '""')}"`,
@@ -768,7 +862,9 @@ export default function VoterSurvey() {
     );
   }
 
-  const currentSurveyTemplate = activeSurvey ? templates.find(t => t.id === activeSurvey.templateId) : null;
+  const currentSurveyTemplate = activeSurvey 
+    ? (templates.find(t => String(t.id).trim() === String(activeSurvey.templateId).trim()) || (String(activeSurvey.templateId).trim() === 'political_sentiment' ? POLITICAL_SENTIMENT_TEMPLATE : null))
+    : null;
 
   const updateCustomAnswer = (fieldId: string, value: unknown) => {
     setCustomAnswers(prev => ({
@@ -1046,20 +1142,45 @@ export default function VoterSurvey() {
 
                   {voters.length > 0 && (
                     <div className="border border-zinc-200 dark:border-zinc-700 rounded-xl overflow-hidden divide-y divide-zinc-100 dark:divide-zinc-800">
-                      {voters.map(v => (
-                        <button
-                          key={v.id}
-                          type="button"
-                          onClick={() => setSelectedVoter(v)}
-                          className="w-full px-4 py-3 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left"
-                        >
-                          <div>
-                            <p className="font-medium text-zinc-900 dark:text-white">{v.name}</p>
-                            <p className="text-xs text-zinc-500">{v.voterId} {v.relationName ? `• F/H: ${v.relationName}` : ''} • {v.village || 'No Village'}</p>
-                          </div>
-                          <UserPlus className="w-4 h-4 text-blue-500" />
-                        </button>
-                      ))}
+                      {voters.map(v => {
+                        const isAlreadyDone = allSentiments.some(doc => {
+                          const isSameVoter = String(doc.voterDocId) === String(v.id) ||
+                            String(doc.voterDocId) === String(v.voterId) ||
+                            (doc.voterName && doc.voterName.trim().toLowerCase() === v.name.trim().toLowerCase() &&
+                             (doc.mobile && v.mobile && doc.mobile === v.mobile));
+                          if (!isSameVoter) return false;
+                          if (activeSurvey) {
+                            return String(doc.surveyId || '').trim() === String(activeSurvey.id).trim() ||
+                              (doc.surveyTitle && activeSurvey.title && doc.surveyTitle.trim() === activeSurvey.title.trim());
+                          } else {
+                            return !doc.surveyId && String(doc.electionId) === String(selectedElection);
+                          }
+                        });
+
+                        return (
+                          <button
+                            key={v.id}
+                            type="button"
+                            onClick={() => setSelectedVoter(v)}
+                            className={`w-full px-4 py-3 flex items-center justify-between hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors text-left ${
+                              isAlreadyDone ? 'bg-red-50/20 dark:bg-red-950/10' : ''
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <p className="font-medium text-zinc-900 dark:text-white">{v.name}</p>
+                                {isAlreadyDone && (
+                                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-red-100 text-red-700 dark:bg-red-950/40 dark:text-red-400">
+                                    Already Responded
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-zinc-500">{v.voterId} {v.relationName ? `• F/H: ${v.relationName}` : ''} • {v.village || 'No Village'}</p>
+                            </div>
+                            <UserPlus className={`w-4 h-4 ${isAlreadyDone ? 'text-red-400' : 'text-blue-500'}`} />
+                          </button>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
@@ -1473,7 +1594,7 @@ export default function VoterSurvey() {
             </div>
           )}
 
-          {assignedSurveys.length === 0 ? (
+          {assignedSurveys.length === 0 && allSentiments.length === 0 && !isAdmin ? (
             <div className="flex flex-col items-center justify-center p-16 text-center border bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-sm max-w-xl mx-auto space-y-4 my-10">
               <div className="w-16 h-16 bg-zinc-50 dark:bg-zinc-800 rounded-full flex items-center justify-center text-zinc-450">
                 <BarChart3 className="w-8 h-8 text-zinc-450" />
@@ -1536,7 +1657,7 @@ export default function VoterSurvey() {
                               </div>
                             );
                           }
-                          const found = assignedSurveys.find(s => s.id === surveyFilter);
+                          const found = assignedSurveys.find(s => String(s.id).trim() === String(surveyFilter).trim());
                           return (
                             <div className="flex items-center gap-2">
                               <span className={`inline-block w-2.5 h-2.5 rounded-full shrink-0 ${found?.status === 'Active' ? 'bg-emerald-500' : 'bg-zinc-400'}`} />
@@ -1681,8 +1802,8 @@ export default function VoterSurvey() {
                               });
                             })()}
 
-                            {/* 3. General surveys option */}
-                            {allSentiments.some(sentiment => !sentiment.surveyId) && (
+                            {/* 3. General surveys option (admin only) */}
+                            {isAdmin && allSentiments.some(sentiment => !sentiment.surveyId) && (
                               <button
                                 type="button"
                                 onClick={() => {
@@ -1787,7 +1908,7 @@ export default function VoterSurvey() {
 
             // 1. Identify which campaign is currently selected (if any)
             const currentCampaign = surveyFilter && surveyFilter !== 'general_manual_sentiments'
-              ? assignedSurveys.find(s => s.id === surveyFilter)
+              ? assignedSurveys.find(s => String(s.id).trim() === String(surveyFilter).trim())
               : null;
 
             // 2. Determine which political parties are relevant
@@ -2253,12 +2374,12 @@ export default function VoterSurvey() {
                   <button
                     onClick={() => {
                       setReportSearchText('');
-                      setSurveyFilter(assignedSurveys[0]?.id || '');
+                      setSurveyFilter('');
                       setYearFilter('');
                       setPartyFilter('');
                       setSentimentFilter('');
                     }}
-                    className="px-4 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-bold rounded-lg mt-2"
+                    className="px-4 py-1.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-bold rounded-lg mt-2 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors"
                   >
                     Reset Filters
                   </button>
@@ -2409,7 +2530,7 @@ export default function VoterSurvey() {
 
                           {/* Date */}
                           <td className="px-6 py-4 text-zinc-500 dark:text-zinc-400 font-mono">
-                            {s.createdAt ? new Date(s.createdAt.toDate()).toLocaleDateString() : '—'}
+                            {formatSurveyDate(s.createdAt)}
                           </td>
 
                           {/* Actions */}
@@ -2450,9 +2571,9 @@ export default function VoterSurvey() {
           </div>
           {/* Edit Sentiment Modal */}
           {editingSentiment && (() => {
-            const editedDocSurvey = allSurveys.find(as => as.id === editingSentiment.surveyId) || assignedSurveys.find(as => as.id === editingSentiment.surveyId);
-            const isEditedDocCustomTemplate = editedDocSurvey && editedDocSurvey.templateId && editedDocSurvey.templateId !== 'political_sentiment';
-            const editingTemplate = editedDocSurvey ? templates.find(t => t.id === editedDocSurvey.templateId) : null;
+            const editedDocSurvey = allSurveys.find(as => String(as.id).trim() === String(editingSentiment.surveyId).trim()) || assignedSurveys.find(as => String(as.id).trim() === String(editingSentiment.surveyId).trim());
+            const isEditedDocCustomTemplate = Boolean(editedDocSurvey && editedDocSurvey.templateId && String(editedDocSurvey.templateId).trim() !== 'political_sentiment');
+            const editingTemplate = editedDocSurvey ? templates.find(t => String(t.id).trim() === String(editedDocSurvey.templateId).trim()) : null;
 
             return (
               <div className="fixed inset-0 z-50 overflow-y-auto bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">

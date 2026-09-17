@@ -13,19 +13,31 @@ import {
 
 interface UserData {
   uid: string;
+  id?: string;
   username: string;
+  name?: string;
   email: string;
   role: 'super_admin' | 'admin' | 'manager' | 'volunteer' | 'guest';
   createdAt?: any;
+  created_at?: any;
+  createdBy?: string;
+  created_by?: string;
   bio?: string;
   disabled?: boolean;
   permissions?: {
     [key: string]: string; // e.g., { voters: 'vcud', demographics: 'v' }
   };
+  rights?: {
+    [key: string]: string;
+  };
   stateId?: string;
   districtId?: string;
   constituencyId?: string;
   boothId?: string;
+  state_id?: string;
+  district_id?: string;
+  constituency_id?: string;
+  assigned_booths?: string[];
 }
 
 interface IndiaState {
@@ -53,19 +65,19 @@ interface IndiaBooth {
 }
 
 const MODULES = [
-  { id: 'voters', label: 'Voters Registry', description: 'Access to voter records and registration' },
-  { id: 'demographics', label: 'Demographics', description: 'State, District, and Booth settings' },
-  { id: 'elections', label: 'Election Setup', description: 'Manage election years and political parties' },
-  { id: 'surveys', label: 'Voter Surveys', description: 'Record and analyze voter sentiments' },
-  { id: 'survey_campaigns', label: 'Survey Campaigns', description: 'Manage survey campaigns and assignments' },
-  { id: 'users', label: 'User Management', description: 'Administer system users and roles' },
-  { id: 'benefits', label: 'Benefits Distribution', description: 'Track government and party aid benefits distributed to voters' },
-  { id: 'volunteers', label: 'Karyakartas Roster', description: 'Manage volunteers, tasks, and tracking' },
+  { id: 'voters', label: 'Voters', description: 'Access to voter records and registration' },
+  { id: 'volunteers', label: 'Karyakartas', description: 'Manage volunteers, tasks, and tracking' },
+  { id: 'mandals', label: 'Mandal Management', description: 'Manage administrative sub-districts (Mandals) and assign presidents' },
   { id: 'booths', label: 'Booth Management', description: 'Map volunteers to booth levels and manage Karyakartas' },
+  { id: 'benefits', label: 'Benefits', description: 'Track government and party aid benefits distributed to voters' },
+  { id: 'finance', label: 'Finance Tracker', description: 'Track campaign expenses, donations, and budget allocation per admin context' },
+  { id: 'whatsapp', label: 'WB Sender', description: 'Create, manage, and dispatch dynamic WhatsApp template broadcasts' },
+  { id: 'surveys', label: 'Survey', description: 'Record and analyze voter sentiments' },
   { id: 'predictions', label: 'Analytics', description: 'Interactive projection models and polling data analysis' },
-  { id: 'finance', label: 'Budget & Finance Tracker', description: 'Track campaign expenses, donations, and budget allocation per admin context' },
-  { id: 'whatsapp', label: 'WB Sender (WhatsApp)', description: 'Create, manage, and dispatch dynamic WhatsApp template broadcasts' },
-  { id: 'mandals', label: 'Mandal Management', description: 'Manage administrative sub-districts (Mandals) and assign presidents' }
+  { id: 'users', label: 'User Management', description: 'Administer system users and roles' },
+  { id: 'survey_campaigns', label: 'Survey Management', description: 'Manage survey campaigns and assignments' },
+  { id: 'demographics', label: 'Election Setting', description: 'State, District, and Booth settings' },
+  { id: 'elections', label: 'Election Setup', description: 'Manage election years and political parties' }
 ];
 
 const PERMISSION_TYPES = [
@@ -83,15 +95,29 @@ const ROLES = [
   { id: 'guest', label: 'Guest', color: 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 border-zinc-200 dark:border-zinc-700' },
 ] as const;
 
+const ADMIN_MODULE_IDS = ['users', 'survey_campaigns', 'demographics', 'elections'];
+
 const OWNER_EMAIL = 'vijaychauhanofficial01@gmail.com';
 
 export default function UserManagement() {
-  const { user, isAdmin, profile } = useAuth();
+  const { user, isAdmin, isSuperAdmin, profile, loading: authLoading } = useAuth();
   
   const hasRight = (moduleId: string, right: string) => {
-    if (isAdmin) return true; // super_admin has all rights
-    const perms = profile?.permissions?.[moduleId] || '';
+    if (isSuperAdmin || isAdmin) return true; // super_admin / admin has basic access
+    const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
     return perms.includes(right);
+  };
+
+  const hasUserView = isSuperAdmin || isAdmin || hasRight('users', 'v');
+
+  const canManageUser = (targetUser: UserData) => {
+    const currentEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+    if (currentEmail === OWNER_EMAIL || isSuperAdmin) return true;
+    if (targetUser.email?.toLowerCase().trim() === OWNER_EMAIL) return false;
+    const currentUid = user?.uid || profile?.uid || profile?.id;
+    if ((currentUid && targetUser.uid === currentUid) || (targetUser.email && targetUser.email.toLowerCase().trim() === currentEmail)) return true;
+    if (targetUser.role === 'super_admin' || targetUser.role === 'admin') return false;
+    return true;
   };
   
   const [users, setUsers] = useState<UserData[]>([]);
@@ -104,6 +130,7 @@ export default function UserManagement() {
   // Modals state
   const [editingUser, setEditingUser] = useState<UserData | null>(null);
   const [activeTab, setActiveTab] = useState<'details' | 'demographics' | 'permissions'>('details');
+  const [addActiveTab, setAddActiveTab] = useState<'details' | 'demographics' | 'permissions'>('details');
   const [userToDelete, setUserToDelete] = useState<UserData | null>(null);
   const [manualResetUser, setManualResetUser] = useState<UserData | null>(null);
   const [manualPassword, setManualPassword] = useState('');
@@ -127,75 +154,199 @@ export default function UserManagement() {
   const [constituencies, setConstituencies] = useState<IndiaConstituency[]>([]);
   const [booths, setBooths] = useState<IndiaBooth[]>([]);
 
-  // Multi-select state selectors and handlers for both editing user and new user
-  const selectedEditUserStates = editingUser?.stateId ? editingUser.stateId.split(',').filter(Boolean) : [];
-  const selectedEditUserDistricts = editingUser?.districtId ? editingUser.districtId.split(',').filter(Boolean) : [];
-  const selectedEditUserConstituencies = editingUser?.constituencyId ? editingUser.constituencyId.split(',').filter(Boolean) : [];
-  const selectedEditUserBooths = editingUser?.boothId ? editingUser.boothId.split(',').filter(Boolean) : [];
-
-  const handleEditUserStatesChange = async (stateIds: string[]) => {
-    if (!editingUser) return;
-    const stateIdStr = stateIds.join(',');
-    setEditingUser({
-      ...editingUser,
-      stateId: stateIdStr,
-      districtId: '',
-      constituencyId: '',
-      boothId: ''
-    });
-    setDistricts([]);
-    setConstituencies([]);
-    setBooths([]);
-    if (stateIds.length > 0) {
-      await fetchDistricts(stateIdStr);
+  // Open and normalize user profile edit modal
+  const openEditModal = (u: UserData, tab: 'details' | 'demographics' | 'permissions' = 'details') => {
+    setError('');
+    const rawStateId = u.stateId || u.state_id || '';
+    const rawDistrictId = u.districtId || u.district_id || '';
+    const rawConstituencyId = u.constituencyId || u.constituency_id || '';
+    let rawBoothId = u.boothId || '';
+    if (!rawBoothId && u.assigned_booths && u.assigned_booths.length > 0) {
+      rawBoothId = u.assigned_booths.join(',');
     }
+
+    setEditingUser({
+      ...u,
+      uid: String(u.uid || u.id || ''),
+      username: u.username || (u as any).name || '',
+      email: u.email || '',
+      role: u.role || 'volunteer',
+      bio: u.bio || '',
+      stateId: String(rawStateId),
+      districtId: String(rawDistrictId),
+      constituencyId: String(rawConstituencyId),
+      boothId: String(rawBoothId),
+      state_id: String(rawStateId),
+      district_id: String(rawDistrictId),
+      constituency_id: String(rawConstituencyId),
+      assigned_booths: rawBoothId ? String(rawBoothId).split(',').map(s => s.trim()).filter(Boolean) : (u.assigned_booths || []),
+      permissions: u.permissions || (u as any).rights || {},
+      disabled: Boolean(u.disabled)
+    });
+    setActiveTab(tab);
   };
 
-  const handleEditUserDistrictsChange = async (districtIds: string[]) => {
+  // Multi-select state selectors and handlers for editing user
+  const selectedEditUserStates = (editingUser?.stateId || editingUser?.state_id) 
+    ? String(editingUser.stateId || editingUser.state_id).split(',').map(s => s.trim()).filter(Boolean) 
+    : [];
+  const selectedEditUserDistricts = (editingUser?.districtId || editingUser?.district_id) 
+    ? String(editingUser.districtId || editingUser.district_id).split(',').map(s => s.trim()).filter(Boolean) 
+    : [];
+  const selectedEditUserConstituencies = (editingUser?.constituencyId || editingUser?.constituency_id) 
+    ? String(editingUser.constituencyId || editingUser.constituency_id).split(',').map(s => s.trim()).filter(Boolean) 
+    : [];
+  const selectedEditUserBooths = (editingUser?.boothId || (editingUser?.assigned_booths && editingUser.assigned_booths.length > 0)) 
+    ? (editingUser.boothId ? String(editingUser.boothId).split(',').map(s => s.trim()).filter(Boolean) : (editingUser.assigned_booths || []).map(String)) 
+    : [];
+
+  // Cascading filtered options for Election Setting dropdowns (Edit Modal)
+  const availableStates = states.map(s => ({
+    id: String(s.id),
+    name: s.name
+  }));
+
+  const availableDistricts = districts.filter(d => 
+    selectedEditUserStates.length === 0 || selectedEditUserStates.includes(String(d.stateId))
+  ).map(d => {
+    const parentState = states.find(s => String(s.id) === String(d.stateId));
+    return {
+      id: String(d.id),
+      name: d.name,
+      detail: parentState ? parentState.name : undefined
+    };
+  });
+
+  const availableConstituencies = constituencies.filter(c => {
+    const parentDistrict = districts.find(d => String(d.id) === String(c.districtId));
+    const constStateId = c.stateId || (parentDistrict ? parentDistrict.stateId : '');
+    const matchState = selectedEditUserStates.length === 0 || selectedEditUserStates.includes(String(constStateId));
+    const matchDistrict = selectedEditUserDistricts.length === 0 || selectedEditUserDistricts.includes(String(c.districtId));
+    return matchState && matchDistrict;
+  }).map(c => {
+    const parentDistrict = districts.find(d => String(d.id) === String(c.districtId));
+    return {
+      id: String(c.id),
+      name: c.name,
+      detail: parentDistrict ? parentDistrict.name : undefined
+    };
+  });
+
+  const availableBooths = booths.filter(b => {
+    const parentConst = constituencies.find(c => String(c.id) === String(b.constituencyId));
+    const parentDistrict = parentConst ? districts.find(d => String(d.id) === String(parentConst.districtId)) : undefined;
+    const boothStateId = (parentConst ? parentConst.stateId : '') || (parentDistrict ? parentDistrict.stateId : '');
+    
+    const matchState = selectedEditUserStates.length === 0 || selectedEditUserStates.includes(String(boothStateId));
+    const matchDistrict = selectedEditUserDistricts.length === 0 || (parentConst && selectedEditUserDistricts.includes(String(parentConst.districtId)));
+    const matchConst = selectedEditUserConstituencies.length === 0 || selectedEditUserConstituencies.includes(String(b.constituencyId));
+    return matchState && matchDistrict && matchConst;
+  }).map(b => {
+    const parentConst = constituencies.find(c => String(c.id) === String(b.constituencyId));
+    return {
+      id: String(b.id),
+      name: `${b.boothNumber ? `${b.boothNumber} - ` : ''}${b.name}`,
+      detail: parentConst ? parentConst.name : undefined
+    };
+  });
+
+  // Multi-select state selectors and handlers for new user (Invite Modal)
+  const selectedNewUserStates = newUser.stateId ? newUser.stateId.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const selectedNewUserDistricts = newUser.districtId ? newUser.districtId.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const selectedNewUserConstituencies = newUser.constituencyId ? newUser.constituencyId.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const selectedNewUserBooths = newUser.boothId ? newUser.boothId.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  const availableNewDistricts = districts.filter(d => 
+    selectedNewUserStates.length === 0 || selectedNewUserStates.includes(String(d.stateId))
+  ).map(d => {
+    const parentState = states.find(s => String(s.id) === String(d.stateId));
+    return { id: String(d.id), name: d.name, detail: parentState ? parentState.name : undefined };
+  });
+
+  const availableNewConstituencies = constituencies.filter(c => {
+    const parentDistrict = districts.find(d => String(d.id) === String(c.districtId));
+    const constStateId = c.stateId || (parentDistrict ? parentDistrict.stateId : '');
+    const matchState = selectedNewUserStates.length === 0 || selectedNewUserStates.includes(String(constStateId));
+    const matchDistrict = selectedNewUserDistricts.length === 0 || selectedNewUserDistricts.includes(String(c.districtId));
+    return matchState && matchDistrict;
+  }).map(c => {
+    const parentDistrict = districts.find(d => String(d.id) === String(c.districtId));
+    return { id: String(c.id), name: c.name, detail: parentDistrict ? parentDistrict.name : undefined };
+  });
+
+  const availableNewBooths = booths.filter(b => {
+    const parentConst = constituencies.find(c => String(c.id) === String(b.constituencyId));
+    const parentDistrict = parentConst ? districts.find(d => String(d.id) === String(parentConst.districtId)) : undefined;
+    const boothStateId = (parentConst ? parentConst.stateId : '') || (parentDistrict ? parentDistrict.stateId : '');
+    
+    const matchState = selectedNewUserStates.length === 0 || selectedNewUserStates.includes(String(boothStateId));
+    const matchDistrict = selectedNewUserDistricts.length === 0 || (parentConst && selectedNewUserDistricts.includes(String(parentConst.districtId)));
+    const matchConst = selectedNewUserConstituencies.length === 0 || selectedNewUserConstituencies.includes(String(b.constituencyId));
+    return matchState && matchDistrict && matchConst;
+  }).map(b => {
+    const parentConst = constituencies.find(c => String(c.id) === String(b.constituencyId));
+    return {
+      id: String(b.id),
+      name: `${b.boothNumber ? `${b.boothNumber} - ` : ''}${b.name}`,
+      detail: parentConst ? parentConst.name : undefined
+    };
+  });
+
+  const handleEditUserStatesChange = (stateIds: string[]) => {
     if (!editingUser) return;
-    const districtIdStr = districtIds.join(',');
     setEditingUser({
       ...editingUser,
-      districtId: districtIdStr,
-      constituencyId: '',
-      boothId: ''
+      stateId: stateIds.join(','),
+      state_id: stateIds.join(',')
     });
-    setConstituencies([]);
-    setBooths([]);
-    if (districtIds.length > 0 && editingUser.stateId) {
-      await fetchConstituencies(editingUser.stateId, districtIdStr);
-    }
   };
 
-  const handleEditUserConstituenciesChange = async (constituencyIds: string[]) => {
+  const handleEditUserDistrictsChange = (districtIds: string[]) => {
     if (!editingUser) return;
-    const constituencyIdStr = constituencyIds.join(',');
     setEditingUser({
       ...editingUser,
-      constituencyId: constituencyIdStr,
-      boothId: ''
+      districtId: districtIds.join(','),
+      district_id: districtIds.join(',')
     });
-    setBooths([]);
-    if (constituencyIds.length > 0 && editingUser.stateId && editingUser.districtId) {
-      await fetchBooths(editingUser.stateId, editingUser.districtId, constituencyIdStr);
-    }
+  };
+
+  const handleEditUserConstituenciesChange = (constituencyIds: string[]) => {
+    if (!editingUser) return;
+    setEditingUser({
+      ...editingUser,
+      constituencyId: constituencyIds.join(','),
+      constituency_id: constituencyIds.join(',')
+    });
   };
 
   const handleEditUserBoothsChange = (boothIds: string[]) => {
     if (!editingUser) return;
     setEditingUser({
       ...editingUser,
-      boothId: boothIds.join(',')
+      boothId: boothIds.join(','),
+      assigned_booths: boothIds
     });
   };
 
-
+  const handleClearAllDemographics = () => {
+    if (!editingUser) return;
+    setEditingUser({
+      ...editingUser,
+      stateId: '',
+      districtId: '',
+      constituencyId: '',
+      boothId: '',
+      state_id: '',
+      district_id: '',
+      constituency_id: '',
+      assigned_booths: []
+    });
+  };
 
   const handleResetPassword = async (email: string) => {
     setActionLoading(email);
     try {
       try {
-        // Build dynamic action code settings linking back to custom /reset-password route
         const actionCodeSettings = {
           url: `${window.location.protocol}//${window.location.host}/reset-password`,
           handleCodeInApp: true,
@@ -203,7 +354,6 @@ export default function UserManagement() {
         await sendPasswordResetEmail(firebaseAuth, email, actionCodeSettings);
       } catch (innerErr: unknown) {
         console.warn('ActionCodeSettings failed, falling back to standard reset link:', innerErr);
-        // Fall back to standard template reset link if custom redirect URL is not whitelisted in Firebase
         await sendPasswordResetEmail(firebaseAuth, email);
       }
       setSuccessMessage(`A secure password reset link has been sent to ${email}.`);
@@ -242,8 +392,8 @@ export default function UserManagement() {
         })
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'Failed to reset password');
+      const data = (await response.json()) as any;
+      if (!response.ok) throw new Error(data?.error || 'Failed to reset password');
 
       setSuccessMessage(`Password for "${manualResetUser.email}" has been manually updated.`);
       setManualResetUser(null);
@@ -262,7 +412,7 @@ export default function UserManagement() {
     setLoading(true);
     try {
       const fetchedUsers = await api.get<UserData[]>('/api/users');
-      setUsers(fetchedUsers);
+      setUsers(Array.isArray(fetchedUsers) ? fetchedUsers : []);
     } catch (err: unknown) {
       console.error('Error fetching users:', err);
       setError('Insufficient permissions to view users.');
@@ -271,82 +421,47 @@ export default function UserManagement() {
     }
   };
 
-  // Fetch demographics
-  const fetchStates = async () => {
+  // Fetch all demographic hierarchy entities upfront
+  const fetchAllDemographics = async () => {
     try {
-      const snap = await api.get<IndiaState[]>('/api/states');
-      setStates(snap);
+      const [sts, dsts, csts, bths] = await Promise.all([
+        api.get<any[]>('/api/states').catch(() => []),
+        api.get<any[]>('/api/districts').catch(() => []),
+        api.get<any[]>('/api/constituencies').catch(() => []),
+        api.get<any[]>('/api/booths').catch(() => [])
+      ]);
+      setStates((sts || []).map((s: any) => ({ id: String(s.id), name: s.name })));
+      setDistricts((dsts || []).map((d: any) => ({ 
+        id: String(d.id), 
+        name: d.name, 
+        stateId: String(d.state_id || d.stateId || '') 
+      })));
+      setConstituencies((csts || []).map((c: any) => {
+        const parentDistrict = (dsts || []).find((d: any) => String(d.id) === String(c.district_id || c.districtId));
+        return { 
+          id: String(c.id), 
+          name: c.name, 
+          districtId: String(c.district_id || c.districtId || ''), 
+          stateId: String(c.state_id || c.stateId || parentDistrict?.state_id || parentDistrict?.stateId || '') 
+        };
+      }));
+      setBooths((bths || []).map((b: any) => ({ 
+        id: String(b.id), 
+        name: b.name, 
+        boothNumber: String(b.booth_number || b.boothNumber || ''), 
+        constituencyId: String(b.constituency_id || b.constituencyId || '') 
+      })));
     } catch (err) {
-      console.error('Error fetching states:', err);
-    }
-  };
-
-  const fetchDistricts = async (stateId: string) => {
-    if (!stateId) {
-      setDistricts([]);
-      return;
-    }
-    try {
-      const dists = await api.get<IndiaDistrict[]>('/api/districts');
-      setDistricts(dists.map((d: any) => ({ ...d, stateId: d.state_id || d.stateId })));
-      return dists;
-    } catch (err) {
-      console.error('Error fetching districts:', err);
-    }
-  };
-
-  const fetchConstituencies = async (stateId: string, districtId: string) => {
-    if (!stateId || !districtId) {
-      setConstituencies([]);
-      return;
-    }
-    try {
-      const consts = await api.get<IndiaConstituency[]>('/api/constituencies');
-      setConstituencies(consts.map((c: any) => ({ ...c, stateId: c.state_id || c.stateId, districtId: c.district_id || c.districtId })));
-      return consts;
-    } catch (err) {
-      console.error('Error fetching constituencies:', err);
-    }
-  };
-
-  const fetchBooths = async (stateId: string, districtId: string, constituencyId: string) => {
-    if (!stateId || !districtId || !constituencyId) {
-      setBooths([]);
-      return;
-    }
-    try {
-      const bths = await api.get<IndiaBooth[]>('/api/booths');
-      setBooths(bths.map((b: any) => ({ ...b, boothNumber: b.booth_number || b.boothNumber, constituencyId: b.constituency_id || b.constituencyId })));
-      return bths;
-    } catch (err) {
-      console.error('Error fetching booths:', err);
+      console.error('Error fetching demographics:', err);
     }
   };
 
   useEffect(() => {
-    if (isAdmin) {
+    if (hasUserView) {
       fetchUsers();
-      fetchStates();
+      fetchAllDemographics();
     }
-  }, [isAdmin]);
-
-  // Preload hierarchical metadata when edit modal opens
-  useEffect(() => {
-    const handlePreload = async () => {
-      if (editingUser) {
-        if (editingUser.stateId) {
-          const loadedDists = await fetchDistricts(editingUser.stateId);
-          if (editingUser.districtId) {
-            const loadedConsts = await fetchConstituencies(editingUser.stateId, editingUser.districtId);
-            if (editingUser.constituencyId) {
-              await fetchBooths(editingUser.stateId, editingUser.districtId, editingUser.constituencyId);
-            }
-          }
-        }
-      }
-    };
-    handlePreload();
-  }, [editingUser?.uid]);
+  }, [hasUserView, isAdmin, isSuperAdmin, profile]);
 
   const handleUpdateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -354,24 +469,45 @@ export default function UserManagement() {
     
     setActionLoading('updating');
     try {
-      await api.put(`/api/users/${editingUser.uid}`, {
-        name: editingUser.username,
+      const targetUid = editingUser.uid || (editingUser as any).id;
+      const stateVal = editingUser.stateId || editingUser.state_id || '';
+      const districtVal = editingUser.districtId || editingUser.district_id || '';
+      const constVal = editingUser.constituencyId || editingUser.constituency_id || '';
+      let boothVal = editingUser.boothId || '';
+      if (!boothVal && editingUser.assigned_booths && editingUser.assigned_booths.length > 0) {
+        boothVal = editingUser.assigned_booths.join(',');
+      }
+      const boothArr = boothVal ? String(boothVal).split(',').map(s => s.trim()).filter(Boolean) : [];
+
+      const payload = {
+        name: editingUser.username || (editingUser as any).name || '',
         role: editingUser.role,
+        bio: editingUser.bio || '',
         permissions: editingUser.permissions || {},
+        rights: editingUser.permissions || {},
+        state_id: stateVal ? stateVal : null,
+        district_id: districtVal ? districtVal : null,
+        constituency_id: constVal ? constVal : null,
+        booth_id: boothVal ? boothVal : null,
+        assigned_booths: boothArr,
         disabled: Boolean(editingUser.disabled)
-      });
+      };
+
+      await api.put(`/api/users/${encodeURIComponent(targetUid)}`, payload);
       
-      setUsers(users.map(u => u.uid === editingUser.uid ? editingUser : u));
-      setSuccessMessage(`User "${editingUser.username}" updated successfully.`);
+      setSuccessMessage(`User "${editingUser.username || 'profile'}" updated successfully.`);
       setEditingUser(null);
+      await fetchUsers();
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err: unknown) {
       console.error('Update error:', err);
-      setError('Failed to update user profile.');
+      const msg = err instanceof Error ? err.message : 'Failed to update user profile.';
+      setError(msg);
     } finally {
       setActionLoading(null);
     }
   };
+
 
   const handleCreateUser = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -382,17 +518,35 @@ export default function UserManagement() {
         name: newUser.username,
         email: newUser.email,
         role: newUser.role,
-        permissions: newUser.permissions,
-        rights: newUser.permissions,
+        permissions: newUser.permissions || {},
+        rights: newUser.permissions || {},
         state_id: newUser.stateId || null,
         district_id: newUser.districtId || null,
         constituency_id: newUser.constituencyId || null,
         booth_id: newUser.boothId || null,
-        assigned_booths: newUser.boothId ? [newUser.boothId] : []
+        assigned_booths: newUser.boothId ? newUser.boothId.split(',').map(s => s.trim()).filter(Boolean) : []
       };
       
       const res = await api.post<{ success: boolean; inviteLink: string; email: string; name: string; role: string }>('/api/users/invite', payload);
       
+      // Automatically send setup / password reset email to the invited user
+      let emailSent = false;
+      try {
+        const actionCodeSettings = {
+          url: `${window.location.protocol}//${window.location.host}/reset-password`,
+          handleCodeInApp: true,
+        };
+        await sendPasswordResetEmail(firebaseAuth, newUser.email, actionCodeSettings);
+        emailSent = true;
+      } catch (innerErr) {
+        try {
+          await sendPasswordResetEmail(firebaseAuth, newUser.email);
+          emailSent = true;
+        } catch (emailErr) {
+          console.warn('Direct email dispatch note (user can use invite link directly):', emailErr);
+        }
+      }
+
       setIsAddModalOpen(false);
       setCreatedInviteInfo({
         email: newUser.email,
@@ -407,7 +561,11 @@ export default function UserManagement() {
         setUsers(updatedUsers);
       }
 
-      setSuccessMessage(`Invitation link generated successfully for ${newUser.email}.`);
+      setSuccessMessage(
+        emailSent 
+          ? `Invitation registered and password setup email sent to ${newUser.email}.`
+          : `Invitation registered successfully for ${newUser.email}.`
+      );
       setNewUser({ 
         username: '', 
         email: '', 
@@ -482,7 +640,16 @@ export default function UserManagement() {
     u.email?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  if (!isAdmin) {
+  if (authLoading) {
+    return (
+      <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8">
+        <Loader2 className="animate-spin text-zinc-400 mb-4" size={36} />
+        <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">Loading user management workspace...</p>
+      </div>
+    );
+  }
+
+  if (!hasUserView) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center text-center p-8">
         <div className="w-16 h-16 bg-red-500/10 rounded-full flex items-center justify-center text-red-500 mb-4 ring-8 ring-red-500/5">
@@ -551,9 +718,10 @@ export default function UserManagement() {
         )}
       </AnimatePresence>
 
-      {/* Users Table */}
+      {/* Users Table & Mobile List */}
       <div className="webapp-card overflow-hidden">
-        <div className="overflow-x-auto">
+        {/* Table View (Desktop & Tablet) */}
+        <div className="overflow-x-auto custom-scrollbar hidden md:block">
           <table className="w-full text-left border-collapse min-w-[800px]">
             <thead>
               <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800">
@@ -580,15 +748,20 @@ export default function UserManagement() {
                   </td>
                 </tr>
               ) : (
-                filteredUsers.map((u) => (
+                filteredUsers.map((u) => {
+                  const isManageable = canManageUser(u);
+                  return (
                   <tr 
                     key={u.uid} 
                     onClick={() => {
-                      if (u.email === OWNER_EMAIL && user?.email !== OWNER_EMAIL) return;
-                      setEditingUser(u); 
-                      setActiveTab('details');
+                      if (!isManageable) return;
+                      openEditModal(u, 'details');
                     }}
-                    className={`group hover:bg-zinc-50 dark:hover:bg-zinc-900/40 transition-colors cursor-pointer ${u.disabled ? 'opacity-60 bg-zinc-50/50 dark:bg-zinc-900/20' : ''}`}
+                    className={`group transition-colors ${
+                      isManageable 
+                        ? 'hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer' 
+                        : 'opacity-70 cursor-not-allowed bg-zinc-50/20 dark:bg-zinc-900/10'
+                    } ${u.disabled ? 'opacity-60 bg-zinc-50/50 dark:bg-zinc-900/20' : ''}`}
                   >
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-3">
@@ -602,6 +775,7 @@ export default function UserManagement() {
                           <div className="flex flex-wrap gap-1 mt-1.5">
                             {u.uid === user?.uid && <span className="text-[9px] bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded border border-blue-500/20 font-bold">CURRENT</span>}
                             {u.email === OWNER_EMAIL && <span className="text-[9px] bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 px-1.5 py-0.5 rounded font-black tracking-tighter">OWNER</span>}
+                            {!isManageable && <span className="text-[9px] bg-amber-500/10 text-amber-600 dark:text-amber-400 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">SUPER ADMIN GOVERNED</span>}
                           </div>
                         </div>
                       </div>
@@ -631,32 +805,29 @@ export default function UserManagement() {
                     <td className="px-6 py-4">
                       <div className="flex items-center gap-2 text-xs text-zinc-500">
                         <Calendar size={14} className="opacity-70" />
-                        {u.createdAt?.toDate ? u.createdAt.toDate().toLocaleDateString() : 'N/A'}
+                        {u.createdAt?.toDate ? u.createdAt.toDate().toLocaleDateString() : (u.createdAt ? new Date(u.createdAt).toLocaleDateString() : 'N/A')}
                       </div>
                     </td>
                     <td className="px-6 py-4" onClick={(e) => e.stopPropagation()}>
                       <div className="flex items-center justify-end gap-2">
-                        {hasRight('users', 'u') && (
+                        {hasRight('users', 'u') && isManageable && (
                           <div className="flex items-center justify-end gap-1">
                             <button 
-                              onClick={() => { setEditingUser(u); setActiveTab('details'); }}
-                              className={`p-2 rounded-lg transition-all ${u.email === OWNER_EMAIL && user?.email !== OWNER_EMAIL
-                                ? 'text-zinc-200 dark:text-zinc-800 cursor-not-allowed'
-                                : 'text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+                              onClick={() => openEditModal(u, 'details')}
+                              className="p-2 text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-all"
                               title="Edit Profile"
-                              disabled={u.email === OWNER_EMAIL && user?.email !== OWNER_EMAIL}
                             >
                               <Edit2 size={16} />
                             </button>
                             <button 
-                              onClick={() => { setEditingUser(u); setActiveTab('demographics'); }}
+                              onClick={() => openEditModal(u, 'demographics')}
                               className="p-2 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all"
                               title="Edit Election Setting"
                             >
                               <Shield size={16} />
                             </button>
                             <button 
-                              onClick={() => { setEditingUser(u); setActiveTab('permissions'); }}
+                              onClick={() => openEditModal(u, 'permissions')}
                               className="p-2 text-zinc-400 hover:text-purple-500 hover:bg-purple-50 dark:hover:bg-purple-500/10 rounded-lg transition-all"
                               title="Edit Permissions"
                             >
@@ -680,16 +851,16 @@ export default function UserManagement() {
                             <Share2 size={16} />
                           </button>
                         )}
-                        {hasRight('users', 'u') && (
+                        {hasRight('users', 'u') && isManageable && (
                           <button 
                             onClick={() => { setError(''); setManualResetUser(u); }}
-                            className={`p-2 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all`}
+                            className="p-2 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all"
                             title="Reset User Password"
                           >
                             <Key size={16} />
                           </button>
                         )}
-                        {hasRight('users', 'u') && (
+                        {hasRight('users', 'u') && isManageable && (
                           <button 
                             onClick={() => toggleUserStatus(u.uid, u.disabled || false)}
                             className={`p-2 rounded-lg transition-all ${u.disabled 
@@ -703,7 +874,7 @@ export default function UserManagement() {
                             {u.disabled ? <UserCheck size={16} /> : <UserX size={16} />}
                           </button>
                         )}
-                        {hasRight('users', 'd') && (
+                        {hasRight('users', 'd') && isManageable && (
                           <button 
                             onClick={() => setUserToDelete(u)}
                             className={`p-2 rounded-lg transition-all ${
@@ -717,13 +888,116 @@ export default function UserManagement() {
                             <Trash2 size={16} />
                           </button>
                         )}
+                        {!isManageable && (
+                          <span className="p-2 text-zinc-300 dark:text-zinc-700" title="Protected account - Managed by Super Admin">
+                            <Shield size={16} />
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
-                ))
+                  );
+                })
               )}
             </tbody>
           </table>
+        </div>
+
+        {/* Mobile View (Smartphones) */}
+        <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800">
+          {loading ? (
+            <div className="p-12 text-center">
+              <Loader2 className="animate-spin mx-auto text-zinc-400 mb-2" size={24} />
+              <p className="text-xs text-zinc-500">Retrieving system users...</p>
+            </div>
+          ) : filteredUsers.length === 0 ? (
+            <div className="p-8 text-center text-xs text-zinc-400">
+              No users found matching your criteria.
+            </div>
+          ) : (
+            filteredUsers.map((u) => {
+              const role = ROLES.find(r => r.id === u.role) || ROLES[4];
+              const isManageable = canManageUser(u);
+              return (
+                <div key={u.uid} className={`p-4 space-y-3 ${u.disabled ? 'opacity-60 bg-zinc-50/50 dark:bg-zinc-900/20' : ''}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-10 h-10 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-zinc-900 dark:text-zinc-100 text-sm border border-zinc-200 dark:border-zinc-700 shadow-sm shrink-0">
+                        {u.username?.[0]?.toUpperCase() || '?'}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-sm font-bold text-zinc-900 dark:text-white truncate">
+                          {u.username || 'Unspecified Name'}
+                        </p>
+                        <p className="text-xs text-zinc-500 truncate flex items-center gap-1 mt-0.5">
+                          <Mail size={11} className="shrink-0 text-zinc-400" />
+                          {u.email}
+                        </p>
+                      </div>
+                    </div>
+                    <span className={`shrink-0 px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-widest border ${u.disabled ? 'bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'}`}>
+                      {u.disabled ? 'Suspended' : 'Active'}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
+                    <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-widest border ${role.color}`}>
+                      {u.role === 'super_admin' && <ShieldCheck size={11} />}
+                      {role.label}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      {hasRight('users', 'u') && isManageable && (
+                        <>
+                          <button 
+                            onClick={() => openEditModal(u, 'details')}
+                            className="p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-500 dark:text-zinc-300 rounded-lg text-xs"
+                            title="Edit"
+                          >
+                            <Edit2 size={13} />
+                          </button>
+                          <button 
+                            onClick={() => openEditModal(u, 'demographics')}
+                            className="p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-blue-500 rounded-lg text-xs"
+                            title="Election Setting"
+                          >
+                            <Shield size={13} />
+                          </button>
+                          <button 
+                            onClick={() => openEditModal(u, 'permissions')}
+                            className="p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-purple-500 rounded-lg text-xs"
+                            title="Permissions"
+                          >
+                            <ShieldCheck size={13} />
+                          </button>
+                          <button 
+                            onClick={() => { setError(''); setManualResetUser(u); }}
+                            className="p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-blue-600 rounded-lg text-xs"
+                            title="Reset Password"
+                          >
+                            <Key size={13} />
+                          </button>
+                        </>
+                      )}
+                      {hasRight('users', 'd') && isManageable && u.uid !== user?.uid && u.email !== OWNER_EMAIL && (
+                        <button 
+                          onClick={() => setUserToDelete(u)}
+                          className="p-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-red-500 rounded-lg text-xs"
+                          title="Delete"
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      )}
+                      {!isManageable && (
+                        <span className="text-[10px] text-zinc-400 font-bold px-2 py-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg">
+                          Super Admin Governed
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })
+          )}
         </div>
       </div>
 
@@ -905,7 +1179,7 @@ export default function UserManagement() {
               </div>
 
               {/* Functional Tabs */}
-              <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 px-4 shrink-0 overflow-x-auto no-scrollbar">
+              <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-950/60 px-4 shrink-0 overflow-x-auto no-scrollbar">
                 {[
                   { id: 'details', label: 'Identity', icon: Users },
                   { id: 'demographics', label: 'Election Setting', icon: Shield },
@@ -917,8 +1191,8 @@ export default function UserManagement() {
                     onClick={() => setActiveTab(tab.id)}
                     className={`px-4 py-3 text-xs font-bold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
                       activeTab === tab.id 
-                        ? 'border-blue-600 text-blue-600 bg-white dark:bg-zinc-900/40' 
-                        : 'border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
+                        ? 'border-blue-600 dark:border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900 shadow-xs' 
+                        : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-900/40'
                     }`}
                   >
                     <tab.icon size={14} />
@@ -931,46 +1205,85 @@ export default function UserManagement() {
                 <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
                   {activeTab === 'details' && (
                     <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
-                      <div className="space-y-2">
-                        <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Profile Name</label>
-                        <input 
-                          type="text" 
-                          value={editingUser.username}
-                          onChange={(e) => setEditingUser({...editingUser, username: e.target.value})}
-                          className="webapp-input w-full"
-                          placeholder="Full Name"
-                        />
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Profile Name</label>
+                          <input 
+                            type="text" 
+                            value={editingUser.username}
+                            onChange={(e) => setEditingUser({...editingUser, username: e.target.value})}
+                            className="webapp-input w-full"
+                            placeholder="Full Name"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Email Address</label>
+                          <input 
+                            type="email" 
+                            value={editingUser.email}
+                            readOnly
+                            className="webapp-input w-full bg-zinc-100/70 dark:bg-zinc-850 cursor-not-allowed text-zinc-500 dark:text-zinc-400 border-zinc-200 dark:border-zinc-800"
+                          />
+                        </div>
                       </div>
-                      <div className="space-y-2">
-                        <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Email Address</label>
-                        <input 
-                          type="email" 
-                          value={editingUser.email}
-                          readOnly
-                          className="webapp-input w-full bg-zinc-50 dark:bg-zinc-800/50 cursor-not-allowed text-zinc-500"
-                        />
-                        <p className="text-[10px] text-zinc-400 font-medium">Email address is linked to the user account security and is read-only.</p>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Assigned Role</label>
+                          <select 
+                            value={editingUser.role}
+                            disabled={editingUser.email === OWNER_EMAIL || (!isSuperAdmin && (editingUser.role === 'super_admin' || editingUser.role === 'admin'))}
+                            onChange={(e) => setEditingUser({...editingUser, role: e.target.value as UserData['role']})}
+                            className={`webapp-input w-full appearance-none ${editingUser.email === OWNER_EMAIL || (!isSuperAdmin && (editingUser.role === 'super_admin' || editingUser.role === 'admin')) ? 'opacity-60 cursor-not-allowed grayscale' : ''}`}
+                          >
+                            {(isSuperAdmin ? ROLES : ROLES.filter(r => r.id !== 'super_admin' && r.id !== 'admin')).map(r => (
+                              <option key={r.id} value={r.id}>{r.label}</option>
+                            ))}
+                          </select>
+                          {editingUser.email === OWNER_EMAIL && <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium italic border-l-2 border-blue-500 pl-2 mt-1">Owner account roles cannot be modified for security reasons.</p>}
+                          {!isSuperAdmin && (editingUser.role === 'super_admin' || editingUser.role === 'admin') && <p className="text-[10px] text-amber-500 dark:text-amber-400 font-medium italic border-l-2 border-amber-500 pl-2 mt-1">Admin roles can only be altered by Super Admin.</p>}
+                        </div>
+
+                        <div className="space-y-2">
+                          <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Account Access Status</label>
+                          <div className="flex items-center gap-3 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditingUser({ ...editingUser, disabled: false })}
+                              className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                                !editingUser.disabled 
+                                  ? 'bg-emerald-500/15 border-emerald-500/50 text-emerald-600 dark:text-emerald-400 shadow-xs ring-1 ring-emerald-500/30' 
+                                  : 'bg-zinc-100 dark:bg-zinc-800/80 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                              }`}
+                            >
+                              <UserCheck size={14} />
+                              Active Access
+                            </button>
+                            <button
+                              type="button"
+                              disabled={editingUser.email === OWNER_EMAIL}
+                              onClick={() => setEditingUser({ ...editingUser, disabled: true })}
+                              className={`flex-1 py-2 px-3 rounded-xl border text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                                editingUser.disabled 
+                                  ? 'bg-red-500/15 border-red-500/50 text-red-600 dark:text-red-400 shadow-xs ring-1 ring-red-500/30' 
+                                  : 'bg-zinc-100 dark:bg-zinc-800/80 border-zinc-200 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200/60 dark:hover:bg-zinc-800'
+                              }`}
+                            >
+                              <UserX size={14} />
+                              Suspended
+                            </button>
+                          </div>
+                        </div>
                       </div>
+
                       <div className="space-y-2">
-                        <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Assigned Role</label>
-                        <select 
-                          value={editingUser.role}
-                          disabled={editingUser.email === OWNER_EMAIL}
-                          onChange={(e) => setEditingUser({...editingUser, role: e.target.value as UserData['role']})}
-                          className={`webapp-input w-full appearance-none ${editingUser.email === OWNER_EMAIL ? 'opacity-60 cursor-not-allowed grayscale' : ''}`}
-                        >
-                          {ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-                        </select>
-                        {editingUser.email === OWNER_EMAIL && <p className="text-[10px] text-zinc-500 font-medium italic border-l-2 border-blue-500 pl-2 mt-2">Owner account roles cannot be modified for security reasons.</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Public Bio</label>
+                        <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Public Bio & Administrative Notes</label>
                         <textarea 
                           rows={3}
                           value={editingUser.bio || ''}
                           onChange={(e) => setEditingUser({...editingUser, bio: e.target.value})}
-                          className="webapp-input w-full resize-none p-4"
-                          placeholder="Notes about this user..."
+                          className="webapp-input w-full resize-none p-4 text-xs"
+                          placeholder="Operational notes, duties, or identity remarks..."
                         />
                       </div>
                     </motion.div>
@@ -978,105 +1291,235 @@ export default function UserManagement() {
 
                   {activeTab === 'demographics' && (
                     <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-                      <div className="bg-blue-50 dark:bg-blue-900-10 p-4 rounded-xl border border-blue-100 dark:border-blue-900-20">
-                        <p className="text-[11px] text-blue-700 dark:text-blue-300 font-medium font-medium leading-relaxed flex items-center gap-2">
-                          <CheckCircle size={14} className="text-blue-500" />
-                          Election Setting defines what data this user can manage. Choose one or multiple regions.
-                        </p>
+                      <div className="bg-blue-500/10 dark:bg-blue-950/40 p-4 rounded-xl border border-blue-500/20 dark:border-blue-800/60 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <CheckCircle size={16} className="text-blue-500 shrink-0" />
+                          <div>
+                            <p className="text-xs text-blue-900 dark:text-blue-200 font-bold">
+                              Election Setting & Regional Scope Configuration
+                            </p>
+                            <p className="text-[10px] text-blue-700 dark:text-blue-300/90 font-medium">
+                              Choose assigned geographical levels. Leave blank for unrestricted Global Admin access.
+                            </p>
+                          </div>
+                        </div>
+                        {(selectedEditUserStates.length > 0 || selectedEditUserDistricts.length > 0 || selectedEditUserConstituencies.length > 0 || selectedEditUserBooths.length > 0) && (
+                          <button
+                            type="button"
+                            onClick={handleClearAllDemographics}
+                            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap self-start md:self-auto"
+                          >
+                            Reset to Global Scope
+                          </button>
+                        )}
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">Assigned State(s)</label>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned State(s)</label>
+                            {selectedEditUserStates.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserStates.length} chosen</span>
+                            )}
+                          </div>
                           <MultiSelectDropdown
                             label="State"
-                            options={states.map(s => ({ id: s.id, name: s.name }))}
+                            options={availableStates}
                             selectedIds={selectedEditUserStates}
                             onChange={handleEditUserStatesChange}
                             placeholder="Global Control (All States)"
                           />
                         </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">Assigned District(s)</label>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned District(s)</label>
+                            {selectedEditUserDistricts.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserDistricts.length} chosen</span>
+                            )}
+                          </div>
                           <MultiSelectDropdown
                             label="District"
-                            options={districts.map(d => ({ id: d.id, name: d.name }))}
+                            options={availableDistricts}
                             selectedIds={selectedEditUserDistricts}
                             onChange={handleEditUserDistrictsChange}
                             placeholder="State-wide Control (All Districts)"
-                            disabled={selectedEditUserStates.length === 0}
                           />
                         </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">Assigned Constituency(s)</label>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Constituency(s)</label>
+                            {selectedEditUserConstituencies.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserConstituencies.length} chosen</span>
+                            )}
+                          </div>
                           <MultiSelectDropdown
                             label="Constituency"
-                            options={constituencies.map(c => ({ id: c.id, name: c.name }))}
+                            options={availableConstituencies}
                             selectedIds={selectedEditUserConstituencies}
                             onChange={handleEditUserConstituenciesChange}
-                            placeholder="District-wide Control (All Constituencies)"
-                            disabled={selectedEditUserDistricts.length === 0}
+                            placeholder="District-wide Control (All)"
                           />
                         </div>
-                        <div className="space-y-1.5">
-                          <label className="text-[10px] font-bold text-zinc-500 uppercase ml-1">Assigned Booth(s)</label>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Booth(s)</label>
+                            {selectedEditUserBooths.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserBooths.length} chosen</span>
+                            )}
+                          </div>
                           <MultiSelectDropdown
                             label="Booth"
-                            options={booths.map(b => ({ id: b.id, name: `${b.boothNumber} - ${b.name}` }))}
+                            options={availableBooths}
                             selectedIds={selectedEditUserBooths}
                             onChange={handleEditUserBoothsChange}
-                            placeholder="Constituency-wide Control (All Booths)"
-                            disabled={selectedEditUserConstituencies.length === 0}
+                            placeholder="Constituency-wide Control (All)"
                           />
                         </div>
+                      </div>
+
+                      {/* Scope Summary Badge Bar */}
+                      <div className="p-4 bg-zinc-100/70 dark:bg-zinc-900/80 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-3 text-xs">
+                        <span className="font-bold text-zinc-500 dark:text-zinc-400 uppercase text-[10px]">Active Scope Summary:</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedEditUserStates.length === 0 ? 'All States (Global)' : `${selectedEditUserStates.length} State(s)`}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedEditUserDistricts.length === 0 ? 'All Districts' : `${selectedEditUserDistricts.length} District(s)`}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedEditUserConstituencies.length === 0 ? 'All Constituencies' : `${selectedEditUserConstituencies.length} Constituency(s)`}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedEditUserBooths.length === 0 ? 'All Booths' : `${selectedEditUserBooths.length} Booth(s)`}
+                        </span>
                       </div>
                     </motion.div>
                   )}
 
                   {activeTab === 'permissions' && (
                     <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
-                      <div className="bg-zinc-50 dark:bg-zinc-900 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800">
-                        <p className="text-[11px] text-zinc-500 font-medium leading-relaxed">
-                          Define granular access for each system module. Roles like Super Admin inherit all permissions by default.
-                        </p>
+                      <div className="bg-zinc-100/70 dark:bg-zinc-900/80 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs text-zinc-900 dark:text-zinc-100 font-bold flex items-center gap-2">
+                            Module Permissions Matrix
+                            {!isSuperAdmin && (
+                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 uppercase tracking-wider">
+                                Scoped Admin View
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed">
+                            {isSuperAdmin 
+                              ? 'Define granular access across all modules. Super Admin holds unrestricted privileges across the entire platform.' 
+                              : 'Assign permissions for operational modules (Voters, Karyakartas, Mandals, Booths, Benefits, Finance, WB Sender, Surveys, Analytics). Admin-level modules are locked.'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const fullRights: Record<string, string> = { ...(editingUser.permissions || {}) };
+                              const allPermsString = PERMISSION_TYPES.map(t => t.id).join('');
+                              MODULES.forEach(m => {
+                                if (isSuperAdmin || !ADMIN_MODULE_IDS.includes(m.id)) {
+                                  fullRights[m.id] = allPermsString;
+                                }
+                              });
+                              setEditingUser({ ...editingUser, permissions: fullRights });
+                            }}
+                            className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline whitespace-nowrap"
+                          >
+                            {isSuperAdmin ? 'Grant All Rights' : 'Grant All Operational Rights'}
+                          </button>
+                          <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const clearedRights: Record<string, string> = { ...(editingUser.permissions || {}) };
+                              MODULES.forEach(m => {
+                                if (isSuperAdmin || !ADMIN_MODULE_IDS.includes(m.id)) {
+                                  delete clearedRights[m.id];
+                                }
+                              });
+                              setEditingUser({ ...editingUser, permissions: clearedRights });
+                            }}
+                            className="text-xs font-bold text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:underline whitespace-nowrap"
+                          >
+                            {isSuperAdmin ? 'Revoke All' : 'Revoke Operational Rights'}
+                          </button>
+                        </div>
                       </div>
-                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 pr-2">
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pr-2">
                         {MODULES.map((module) => {
+                          const isAdminModule = ADMIN_MODULE_IDS.includes(module.id);
+                          const isLockedForAdmin = !isSuperAdmin && isAdminModule;
                           const currentPerms = editingUser.permissions?.[module.id] || '';
                           const allPermsString = PERMISSION_TYPES.map(t => t.id).join('');
                           const isModuleActive = currentPerms.length === allPermsString.length;
+                          
                           return (
-                            <div key={module.id} className={`p-4 rounded-xl border transition-all ${isModuleActive ? 'bg-emerald-500/5 border-emerald-500/20' : 'bg-transparent border-zinc-100 dark:border-zinc-800'}`}>
-                              <div className="flex items-center justify-between mb-4">
-                                <div className="min-w-0">
-                                  <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider truncate">{module.label}</h4>
-                                  <p className="text-[9px] text-zinc-500 mt-1 truncate">{module.description}</p>
+                            <div 
+                              key={module.id} 
+                              className={`p-4 rounded-2xl border transition-all ${
+                                isLockedForAdmin 
+                                  ? 'bg-zinc-100/50 dark:bg-zinc-950/40 border-zinc-200/60 dark:border-zinc-800/60'
+                                  : isModuleActive 
+                                    ? 'bg-emerald-500/10 dark:bg-emerald-950/25 border-emerald-500/40 dark:border-emerald-500/30' 
+                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-3.5">
+                                <div className="min-w-0 pr-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider truncate">{module.label}</h4>
+                                    {isAdminModule && (
+                                      <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                                        ADMIN
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">{module.description}</p>
                                 </div>
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    const perms = editingUser.permissions || {};
-                                    setEditingUser({
-                                      ...editingUser,
-                                      permissions: { ...perms, [module.id]: isModuleActive ? '' : allPermsString }
-                                    });
-                                  }}
-                                  className={`text-[9px] font-black uppercase px-2 py-1 rounded transition-colors whitespace-nowrap ${
-                                    isModuleActive 
-                                      ? 'bg-emerald-500 text-white' 
-                                      : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-400 hover:text-zinc-600'
-                                  }`}
-                                >
-                                  {isModuleActive ? 'Admin Mode' : 'Custom'}
-                                </button>
+                                
+                                {isLockedForAdmin ? (
+                                  <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-zinc-200/80 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 flex items-center gap-1 shrink-0">
+                                    <ShieldCheck size={11} className="text-amber-500" />
+                                    Super Admin Only
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const perms = editingUser.permissions || {};
+                                      setEditingUser({
+                                        ...editingUser,
+                                        permissions: { ...perms, [module.id]: isModuleActive ? '' : allPermsString }
+                                      });
+                                    }}
+                                    className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap ${
+                                      isModuleActive 
+                                        ? 'bg-emerald-600 dark:bg-emerald-500 text-white shadow-xs' 
+                                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                                    }`}
+                                  >
+                                    {isModuleActive ? 'Admin Mode' : 'Custom'}
+                                  </button>
+                                )}
                               </div>
-                              <div className="flex gap-1.5 overflow-x-auto pb-1 no-scrollbar">
+                              <div className="grid grid-cols-4 gap-1.5 pt-1 border-t border-zinc-100 dark:border-zinc-800/80">
                                 {PERMISSION_TYPES.map((type) => {
                                   const isActive = currentPerms.includes(type.id);
                                   return (
                                     <button
                                       key={type.id}
                                       type="button"
+                                      disabled={isLockedForAdmin}
                                       onClick={() => {
+                                        if (isLockedForAdmin) return;
                                         const perms = editingUser.permissions || {};
                                         const oldVal = perms[module.id] || '';
                                         const newVal = oldVal.includes(type.id) 
@@ -1088,10 +1531,12 @@ export default function UserManagement() {
                                           permissions: { ...perms, [module.id]: sortedNewVal }
                                         });
                                       }}
-                                      className={`webapp-button-secondary py-2 text-[10px] font-black border transition-all flex items-center justify-center min-w-[3.5rem] ${
-                                        isActive 
-                                          ? 'bg-zinc-900 border-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 shadow-lg' 
-                                          : 'opacity-30 hover:opacity-100'
+                                      className={`py-1.5 rounded-lg text-[10px] font-black border transition-all flex items-center justify-center ${
+                                        isLockedForAdmin
+                                          ? 'opacity-40 cursor-not-allowed bg-zinc-100 dark:bg-zinc-800/40 border-zinc-200/50 dark:border-zinc-800 text-zinc-400 dark:text-zinc-600'
+                                          : isActive 
+                                            ? 'bg-blue-600 border-blue-600 text-white dark:bg-blue-600 dark:border-blue-500 dark:text-white shadow-xs' 
+                                            : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200/80 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600 hover:text-zinc-800 dark:hover:text-zinc-200'
                                       }`}
                                     >
                                       {type.label.toUpperCase()}
@@ -1118,7 +1563,7 @@ export default function UserManagement() {
                   <button 
                     type="submit" 
                     disabled={actionLoading === 'updating'}
-                    className="webapp-button-primary bg-zinc-900 hover:bg-zinc-800 border-zinc-900 flex items-center gap-2 px-8 min-w-[140px] justify-center"
+                    className="webapp-button-primary flex items-center gap-2 px-8 min-w-[140px] justify-center shadow-lg"
                   >
                     {actionLoading === 'updating' ? <Loader2 className="animate-spin" size={16} /> : <Save size={16} />}
                     Apply Settings
@@ -1143,80 +1588,379 @@ export default function UserManagement() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="relative webapp-card w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh]"
+              className="relative webapp-card w-full max-w-6xl shadow-2xl overflow-hidden flex flex-col h-[90vh] md:h-[85vh]"
               onClick={(e) => e.stopPropagation()}
             >
               <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-white dark:bg-zinc-900 sticky top-0 z-10 shrink-0">
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-white tracking-tight">Generate Invitation</h3>
+                <div className="min-w-0">
+                  <h3 className="text-lg font-bold text-zinc-900 dark:text-white tracking-tight truncate">Invite New User</h3>
+                  <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-wider truncate">Configure Identity, Election Scope & Access Rights</p>
+                </div>
                 <button onClick={() => setIsAddModalOpen(false)} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-1 shrink-0">
                   <X size={20} />
                 </button>
               </div>
-              <form onSubmit={handleCreateUser} className="flex flex-col flex-1 min-h-0 overflow-hidden">
-                <div className="p-8 space-y-6 overflow-y-auto flex-1 custom-scrollbar">
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <label className="data-label text-zinc-700 dark:text-zinc-300 font-bold">Full Name</label>
-                      <input 
-                        type="text" 
-                        required
-                        value={newUser.username}
-                        onChange={(e) => setNewUser({...newUser, username: e.target.value})}
-                        className="webapp-input w-full"
-                        placeholder="e.g. John Smith"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="data-label text-zinc-700 dark:text-zinc-300 font-bold">Email Address</label>
-                      <input 
-                        type="email" 
-                        required
-                        value={newUser.email}
-                        onChange={(e) => setNewUser({...newUser, email: e.target.value})}
-                        className="webapp-input w-full"
-                        placeholder="john@organization.com"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <label className="data-label text-zinc-700 dark:text-zinc-300 font-bold">System Role</label>
-                      <select 
-                        value={newUser.role}
-                        onChange={(e) => setNewUser({...newUser, role: e.target.value as UserData['role']})}
-                        className="webapp-input w-full appearance-none"
-                      >
-                        {ROLES.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-                      </select>
-                    </div>
 
-                    {/* Note: Demographics, Election setting and modular permissions are omitted from registration - can be added later via Edit Settings capability */}
-                  </div>
+              {/* Functional Tabs */}
+              <div className="flex border-b border-zinc-200 dark:border-zinc-800 bg-zinc-100/60 dark:bg-zinc-950/60 px-4 shrink-0 overflow-x-auto no-scrollbar">
+                {[
+                  { id: 'details', label: 'Identity', icon: Users },
+                  { id: 'demographics', label: 'Election Setting', icon: Shield },
+                  { id: 'permissions', label: 'Rights', icon: ShieldCheck },
+                ].map((tab: { id: 'details' | 'demographics' | 'permissions'; label: string; icon: React.ElementType }) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setAddActiveTab(tab.id)}
+                    className={`px-4 py-3 text-xs font-bold flex items-center gap-2 border-b-2 transition-all whitespace-nowrap ${
+                      addActiveTab === tab.id 
+                        ? 'border-blue-600 dark:border-blue-500 text-blue-600 dark:text-blue-400 bg-white dark:bg-zinc-900 shadow-xs' 
+                        : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-900/40'
+                    }`}
+                  >
+                    <tab.icon size={14} />
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <form onSubmit={handleCreateUser} className="flex flex-col flex-1 min-h-0 overflow-hidden">
+                <div className="p-8 space-y-6 overflow-y-auto custom-scrollbar flex-1">
+                  {addActiveTab === 'details' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-4">
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="space-y-2">
+                          <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Full Name *</label>
+                          <input 
+                            type="text" 
+                            required
+                            value={newUser.username}
+                            onChange={(e) => setNewUser({...newUser, username: e.target.value})}
+                            className="webapp-input w-full"
+                            placeholder="e.g. Amit Kumar"
+                          />
+                        </div>
+                        <div className="space-y-2">
+                          <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">Email Address *</label>
+                          <input 
+                            type="email" 
+                            required
+                            value={newUser.email}
+                            onChange={(e) => setNewUser({...newUser, email: e.target.value})}
+                            className="webapp-input w-full"
+                            placeholder="user@example.com"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        <label className="data-label font-bold text-zinc-700 dark:text-zinc-300">System Role</label>
+                        <select 
+                          value={newUser.role}
+                          onChange={(e) => setNewUser({...newUser, role: e.target.value as UserData['role']})}
+                          className="webapp-input w-full appearance-none"
+                        >
+                          {(isSuperAdmin ? ROLES : ROLES.filter(r => r.id !== 'super_admin' && r.id !== 'admin')).map(r => (
+                            <option key={r.id} value={r.id}>{r.label}</option>
+                          ))}
+                        </select>
+                        {!isSuperAdmin && (
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium italic border-l-2 border-blue-500 pl-2 mt-1">
+                            Admins can recruit Karyakartas, Managers, and Guests.
+                          </p>
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {addActiveTab === 'demographics' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <div className="bg-blue-500/10 dark:bg-blue-950/40 p-4 rounded-xl border border-blue-500/20 dark:border-blue-800/60 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <CheckCircle size={16} className="text-blue-500 shrink-0" />
+                          <div>
+                            <p className="text-xs text-blue-900 dark:text-blue-200 font-bold">
+                              Election Setting & Regional Scope Configuration
+                            </p>
+                            <p className="text-[10px] text-blue-700 dark:text-blue-300/90 font-medium">
+                              Choose assigned geographical levels. Leave blank for unrestricted scope.
+                            </p>
+                          </div>
+                        </div>
+                        {(selectedNewUserStates.length > 0 || selectedNewUserDistricts.length > 0 || selectedNewUserConstituencies.length > 0 || selectedNewUserBooths.length > 0) && (
+                          <button
+                            type="button"
+                            onClick={() => setNewUser({ ...newUser, stateId: '', districtId: '', constituencyId: '', boothId: '' })}
+                            className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap self-start md:self-auto"
+                          >
+                            Reset to Global Scope
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned State(s)</label>
+                            {selectedNewUserStates.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserStates.length} chosen</span>
+                            )}
+                          </div>
+                          <MultiSelectDropdown
+                            label="State"
+                            options={availableStates}
+                            selectedIds={selectedNewUserStates}
+                            onChange={(ids) => setNewUser({ ...newUser, stateId: ids.join(',') })}
+                            placeholder="Global Control (All States)"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned District(s)</label>
+                            {selectedNewUserDistricts.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserDistricts.length} chosen</span>
+                            )}
+                          </div>
+                          <MultiSelectDropdown
+                            label="District"
+                            options={availableNewDistricts}
+                            selectedIds={selectedNewUserDistricts}
+                            onChange={(ids) => setNewUser({ ...newUser, districtId: ids.join(',') })}
+                            placeholder="State-wide Control (All Districts)"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Constituency(s)</label>
+                            {selectedNewUserConstituencies.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserConstituencies.length} chosen</span>
+                            )}
+                          </div>
+                          <MultiSelectDropdown
+                            label="Constituency"
+                            options={availableNewConstituencies}
+                            selectedIds={selectedNewUserConstituencies}
+                            onChange={(ids) => setNewUser({ ...newUser, constituencyId: ids.join(',') })}
+                            placeholder="District-wide Control (All)"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Booth(s)</label>
+                            {selectedNewUserBooths.length > 0 && (
+                              <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserBooths.length} chosen</span>
+                            )}
+                          </div>
+                          <MultiSelectDropdown
+                            label="Booth"
+                            options={availableNewBooths}
+                            selectedIds={selectedNewUserBooths}
+                            onChange={(ids) => setNewUser({ ...newUser, boothId: ids.join(',') })}
+                            placeholder="Constituency-wide Control (All)"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Scope Summary Badge Bar */}
+                      <div className="p-4 bg-zinc-100/70 dark:bg-zinc-900/80 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-3 text-xs">
+                        <span className="font-bold text-zinc-500 dark:text-zinc-400 uppercase text-[10px]">Active Scope Summary:</span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedNewUserStates.length === 0 ? 'All States (Global)' : `${selectedNewUserStates.length} State(s)`}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedNewUserDistricts.length === 0 ? 'All Districts' : `${selectedNewUserDistricts.length} District(s)`}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedNewUserConstituencies.length === 0 ? 'All Constituencies' : `${selectedNewUserConstituencies.length} Constituency(s)`}
+                        </span>
+                        <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                          {selectedNewUserBooths.length === 0 ? 'All Booths' : `${selectedNewUserBooths.length} Booth(s)`}
+                        </span>
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {addActiveTab === 'permissions' && (
+                    <motion.div initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} className="space-y-6">
+                      <div className="bg-zinc-100/70 dark:bg-zinc-900/80 p-4 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-col md:flex-row md:items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs text-zinc-900 dark:text-zinc-100 font-bold flex items-center gap-2">
+                            Module Permissions Matrix
+                            {!isSuperAdmin && (
+                              <span className="text-[9px] font-bold px-2 py-0.5 rounded bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 uppercase tracking-wider">
+                                Scoped Admin View
+                              </span>
+                            )}
+                          </p>
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400 font-medium leading-relaxed">
+                            {isSuperAdmin 
+                              ? 'Define granular access across all modules. Super Admin holds unrestricted privileges across the entire platform.' 
+                              : 'Assign permissions for operational modules (Voters, Karyakartas, Mandals, Booths, Benefits, Finance, WB Sender, Surveys, Analytics). Admin-level modules are locked.'}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const fullRights: Record<string, string> = { ...(newUser.permissions || {}) };
+                              const allPermsString = PERMISSION_TYPES.map(t => t.id).join('');
+                              MODULES.forEach(m => {
+                                if (isSuperAdmin || !ADMIN_MODULE_IDS.includes(m.id)) {
+                                  fullRights[m.id] = allPermsString;
+                                }
+                              });
+                              setNewUser({ ...newUser, permissions: fullRights });
+                            }}
+                            className="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline whitespace-nowrap"
+                          >
+                            {isSuperAdmin ? 'Grant All Rights' : 'Grant All Operational Rights'}
+                          </button>
+                          <span className="text-zinc-300 dark:text-zinc-700">•</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const clearedRights: Record<string, string> = { ...(newUser.permissions || {}) };
+                              MODULES.forEach(m => {
+                                if (isSuperAdmin || !ADMIN_MODULE_IDS.includes(m.id)) {
+                                  delete clearedRights[m.id];
+                                }
+                              });
+                              setNewUser({ ...newUser, permissions: clearedRights });
+                            }}
+                            className="text-xs font-bold text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:underline whitespace-nowrap"
+                          >
+                            {isSuperAdmin ? 'Revoke All' : 'Revoke Operational Rights'}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5 pr-2">
+                        {MODULES.map((module) => {
+                          const isAdminModule = ADMIN_MODULE_IDS.includes(module.id);
+                          const isLockedForAdmin = !isSuperAdmin && isAdminModule;
+                          const currentPerms = newUser.permissions?.[module.id] || '';
+                          const allPermsString = PERMISSION_TYPES.map(t => t.id).join('');
+                          const isModuleActive = currentPerms.length === allPermsString.length;
+                          
+                          return (
+                            <div 
+                              key={module.id} 
+                              className={`p-4 rounded-2xl border transition-all ${
+                                isLockedForAdmin 
+                                  ? 'bg-zinc-100/50 dark:bg-zinc-950/40 border-zinc-200/60 dark:border-zinc-800/60' 
+                                  : isModuleActive 
+                                    ? 'bg-emerald-500/10 dark:bg-emerald-950/25 border-emerald-500/40 dark:border-emerald-500/30' 
+                                    : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between mb-3.5">
+                                <div className="min-w-0 pr-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <h4 className="text-xs font-bold text-zinc-900 dark:text-zinc-100 uppercase tracking-wider truncate">{module.label}</h4>
+                                    {isAdminModule && (
+                                      <span className="text-[8px] font-black px-1.5 py-0.2 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20 shrink-0">
+                                        ADMIN
+                                      </span>
+                                    )}
+                                  </div>
+                                  <p className="text-[9px] text-zinc-500 dark:text-zinc-400 mt-0.5 truncate">{module.description}</p>
+                                </div>
+                                
+                                {isLockedForAdmin ? (
+                                  <span className="text-[9px] font-black uppercase px-2 py-1 rounded-lg bg-zinc-200/80 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 flex items-center gap-1 shrink-0">
+                                    <ShieldCheck size={11} className="text-amber-500" />
+                                    Super Admin Only
+                                  </span>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const perms = newUser.permissions || {};
+                                      setNewUser({
+                                        ...newUser,
+                                        permissions: { ...perms, [module.id]: isModuleActive ? '' : allPermsString }
+                                      });
+                                    }}
+                                    className={`text-[9px] font-black uppercase px-2.5 py-1 rounded-lg transition-colors whitespace-nowrap ${
+                                      isModuleActive 
+                                        ? 'bg-emerald-600 dark:bg-emerald-500 text-white shadow-xs' 
+                                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                                    }`}
+                                  >
+                                    {isModuleActive ? 'Admin Mode' : 'Custom'}
+                                  </button>
+                                )}
+                              </div>
+                              <div className="grid grid-cols-4 gap-1.5 pt-1 border-t border-zinc-100 dark:border-zinc-800/80">
+                                {PERMISSION_TYPES.map((type) => {
+                                  const isActive = currentPerms.includes(type.id);
+                                  return (
+                                    <button
+                                      key={type.id}
+                                      type="button"
+                                      disabled={isLockedForAdmin}
+                                      onClick={() => {
+                                        if (isLockedForAdmin) return;
+                                        const perms = newUser.permissions || {};
+                                        const oldVal = perms[module.id] || '';
+                                        const newVal = oldVal.includes(type.id) 
+                                          ? oldVal.replace(type.id, '') 
+                                          : (oldVal + type.id);
+                                        const sortedNewVal = PERMISSION_TYPES.map(t => t.id).filter(tid => newVal.includes(tid)).join('');
+                                        setNewUser({
+                                          ...newUser,
+                                          permissions: { ...perms, [module.id]: sortedNewVal }
+                                        });
+                                      }}
+                                      className={`py-1.5 rounded-lg text-[10px] font-black border transition-all flex items-center justify-center ${
+                                        isLockedForAdmin
+                                          ? 'opacity-40 cursor-not-allowed bg-zinc-100 dark:bg-zinc-800/40 border-zinc-200/50 dark:border-zinc-800 text-zinc-400 dark:text-zinc-600'
+                                          : isActive 
+                                            ? 'bg-blue-600 border-blue-600 text-white dark:bg-blue-600 dark:border-blue-500 dark:text-white shadow-xs' 
+                                            : 'bg-zinc-50 dark:bg-zinc-800/60 border-zinc-200/80 dark:border-zinc-700 text-zinc-500 dark:text-zinc-400 hover:border-zinc-300 dark:hover:border-zinc-600 hover:text-zinc-800 dark:hover:text-zinc-200'
+                                      }`}
+                                    >
+                                      {type.label.toUpperCase()}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </motion.div>
+                  )}
                 </div>
-                <div className="p-6 bg-zinc-50 dark:bg-zinc-900/50 border-t border-zinc-200 dark:border-zinc-800 shrink-0 sticky bottom-0 z-10 flex flex-col gap-3">
-                  <div className="flex gap-3">
-                    <button 
-                      type="button" 
-                      onClick={() => setIsAddModalOpen(false)}
-                      className="webapp-button-secondary flex-1 py-3 text-xs"
-                    >
-                      Discard
-                    </button>
-                    <button 
-                      type="submit" 
-                      disabled={actionLoading === 'creating'}
-                      className="webapp-button-primary flex-1 flex items-center justify-center gap-2 py-3 shadow-lg"
-                    >
-                      {actionLoading === 'creating' ? <Loader2 className="animate-spin" size={18} /> : <Plus size={18} />}
-                      Invite User
-                    </button>
-                  </div>
-                  <p className="text-[9px] text-zinc-500 text-center italic leading-tight">New users must sign up with this exact email to claim their pre-configured settings.</p>
+
+                <div className="p-6 bg-zinc-50 dark:bg-zinc-900/50 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-3 shrink-0 sticky bottom-0 z-10">
+                  <button 
+                    type="button" 
+                    onClick={() => setIsAddModalOpen(false)}
+                    className="webapp-button-secondary text-xs"
+                  >
+                    Discard
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={actionLoading === 'creating'}
+                    className="webapp-button-primary flex items-center gap-2 px-8 min-w-[140px] justify-center shadow-lg"
+                  >
+                    {actionLoading === 'creating' ? <Loader2 className="animate-spin" size={16} /> : <Plus size={16} />}
+                    Generate Invitation
+                  </button>
                 </div>
               </form>
             </motion.div>
           </div>
         )}
+      </AnimatePresence>
 
-        {/* Generated Invite Link Modal */}
+      {/* Generated Invite Link Modal */}
+      <AnimatePresence>
         {createdInviteInfo && (
           <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-xs flex items-center justify-center p-4">
             <motion.div 
@@ -1232,7 +1976,7 @@ export default function UserManagement() {
                   </div>
                   <div>
                     <h3 className="text-base font-bold text-zinc-900 dark:text-white">Invitation Ready</h3>
-                    <p className="text-xs text-zinc-500">Share this link with {createdInviteInfo.name}</p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">Share this link with {createdInviteInfo.name}</p>
                   </div>
                 </div>
                 <button 
@@ -1247,7 +1991,7 @@ export default function UserManagement() {
                 <div className="bg-zinc-50 dark:bg-zinc-900/60 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
                   <div>
                     <p className="text-xs font-bold text-zinc-900 dark:text-white">{createdInviteInfo.name}</p>
-                    <p className="text-[11px] text-zinc-500">{createdInviteInfo.email}</p>
+                    <p className="text-[11px] text-zinc-500 dark:text-zinc-400">{createdInviteInfo.email}</p>
                   </div>
                   <span className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                     {createdInviteInfo.role}
@@ -1261,7 +2005,7 @@ export default function UserManagement() {
                       type="text" 
                       readOnly 
                       value={createdInviteInfo.inviteLink}
-                      className="webapp-input w-full text-xs font-mono select-all bg-zinc-100 dark:bg-zinc-900"
+                      className="webapp-input w-full text-xs font-mono select-all bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
                     />
                     <button 
                       onClick={() => {
@@ -1355,29 +2099,33 @@ function MultiSelectDropdown({
     };
   }, []);
 
+  const stringSelectedIds = selectedIds.map(String);
+
   const filteredOptions = options.filter(opt =>
     opt.name.toLowerCase().includes(search.toLowerCase()) ||
     (opt.detail && opt.detail.toLowerCase().includes(search.toLowerCase()))
   );
 
   const toggleOption = (id: string) => {
-    if (selectedIds.includes(id)) {
-      onChange(selectedIds.filter(x => x !== id));
+    const targetId = String(id);
+    if (stringSelectedIds.includes(targetId)) {
+      onChange(stringSelectedIds.filter(x => x !== targetId));
     } else {
-      onChange([...selectedIds, id]);
+      onChange([...stringSelectedIds, targetId]);
     }
   };
 
-  const selectedNames = options
-    .filter(opt => selectedIds.includes(opt.id))
-    .map(opt => opt.name);
+  const selectedOptions = options.filter(opt => stringSelectedIds.includes(String(opt.id)));
+  const selectedNames = selectedOptions.map(opt => opt.name);
 
   let buttonText = placeholder;
-  if (selectedIds.length > 0) {
-    if (selectedIds.length === options.length && options.length > 0) {
-      buttonText = `All ${label}s Selected (${selectedIds.length})`;
+  if (stringSelectedIds.length > 0) {
+    if (stringSelectedIds.length === options.length && options.length > 0) {
+      buttonText = `All ${options.length} ${label}s Selected`;
+    } else if (selectedNames.length > 0) {
+      buttonText = `(${stringSelectedIds.length}) ${selectedNames.slice(0, 2).join(', ')}${selectedNames.length > 2 ? ` +${selectedNames.length - 2} more` : ''}`;
     } else {
-      buttonText = `(${selectedIds.length}) ${selectedNames.join(', ')}`;
+      buttonText = `${stringSelectedIds.length} ${label}(s) Selected`;
     }
   }
 
@@ -1387,79 +2135,84 @@ function MultiSelectDropdown({
         type="button"
         disabled={disabled}
         onClick={() => setIsOpen(!isOpen)}
-        className="webapp-input w-full flex items-center justify-between text-left py-2 px-3.5 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 disabled:opacity-50 disabled:cursor-not-allowed select-none min-h-[38px]"
+        className="webapp-input w-full flex items-center justify-between text-left py-2 px-3 text-xs rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 disabled:opacity-50 disabled:cursor-not-allowed select-none min-h-[40px] shadow-2xs hover:border-zinc-300 dark:hover:border-zinc-700 transition-colors"
       >
-        <span className="truncate pr-4 font-semibold text-zinc-700 dark:text-zinc-200">
-          {buttonText}
-        </span>
-        <span className="text-[9px] text-zinc-400 font-bold shrink-0">
+        <div className="flex items-center gap-2 truncate pr-2">
+          {stringSelectedIds.length > 0 && (
+            <span className="w-5 h-5 rounded-full bg-blue-600 text-white text-[10px] font-black flex items-center justify-center shrink-0">
+              {stringSelectedIds.length}
+            </span>
+          )}
+          <span className={`truncate font-semibold ${stringSelectedIds.length > 0 ? 'text-zinc-900 dark:text-zinc-100' : 'text-zinc-400 dark:text-zinc-500'}`}>
+            {buttonText}
+          </span>
+        </div>
+        <span className="text-[9px] text-zinc-400 dark:text-zinc-500 font-bold shrink-0">
           {isOpen ? '▲' : '▼'}
         </span>
       </button>
 
       {isOpen && (
-        <div className="absolute left-0 right-0 z-30 mt-1 max-h-64 overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl flex flex-col">
+        <div className="absolute left-0 right-0 z-50 mt-1 max-h-72 overflow-hidden rounded-2xl border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 shadow-2xl flex flex-col">
           {/* Search bar */}
-          <div className="p-2 border-b border-zinc-100 dark:border-zinc-800/60 flex gap-2 shrink-0 bg-zinc-50/50 dark:bg-zinc-950/30">
+          <div className="p-2.5 border-b border-zinc-100 dark:border-zinc-800 flex gap-2 shrink-0 bg-zinc-50 dark:bg-zinc-950">
             <input
               type="text"
-              placeholder={`Search ${label}...`}
+              placeholder={`Search ${label}... (${options.length} total)`}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="webapp-input w-full py-1 px-2.5 text-xs rounded-lg"
+              className="webapp-input w-full py-1.5 px-3 text-xs rounded-lg"
+              autoFocus
               onClick={(e) => e.stopPropagation()}
             />
           </div>
 
           {/* Action buttons */}
-          <div className="px-3 py-1.5 border-b border-zinc-100 dark:border-zinc-800/60 flex items-center justify-between bg-zinc-50/25 dark:bg-zinc-950/15 shrink-0 text-[10px]">
+          <div className="px-3 py-2 border-b border-zinc-100 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/50 dark:bg-zinc-950/50 shrink-0 text-xs font-bold">
             <button
               type="button"
-              onClick={() => {
-                const allIds = options.map(o => o.id);
-                onChange(allIds);
-              }}
-              className="text-blue-600 dark:text-blue-400 font-bold hover:underline"
+              onClick={() => onChange(options.map(o => String(o.id)))}
+              className="text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1"
             >
-              Select All
+              Select All ({options.length})
             </button>
             <button
               type="button"
-              onClick={() => {
-                onChange([]);
-              }}
-              className="text-zinc-500 dark:text-zinc-400 font-bold hover:underline"
+              onClick={() => onChange([])}
+              className="text-zinc-500 dark:text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 hover:underline"
             >
-              Clear All
+              Clear
             </button>
           </div>
 
           {/* List of checkboxes */}
-          <div className="overflow-y-auto flex-1 max-h-44 custom-scrollbar">
+          <div className="overflow-y-auto flex-1 max-h-48 custom-scrollbar divide-y divide-zinc-100 dark:divide-zinc-800/50">
             {filteredOptions.length === 0 ? (
-              <div className="p-4 text-center text-xs text-zinc-400 italic">
+              <div className="p-4 text-center text-xs text-zinc-400 dark:text-zinc-500 italic">
                 No matching {label.toLowerCase()}s found
               </div>
             ) : (
               filteredOptions.map((opt) => {
-                const isChecked = selectedIds.includes(opt.id);
+                const isChecked = stringSelectedIds.includes(String(opt.id));
                 return (
                   <label
                     key={opt.id}
-                    className="flex items-center gap-2.5 py-2 px-4 hover:bg-zinc-50 dark:hover:bg-zinc-800/50 cursor-pointer text-xs font-semibold select-none text-zinc-700 dark:text-zinc-300 transition-colors"
+                    className={`flex items-center gap-3 py-2.5 px-4 hover:bg-blue-50/80 dark:hover:bg-blue-900/20 cursor-pointer text-xs select-none transition-colors ${
+                      isChecked ? 'bg-blue-50/60 dark:bg-blue-900/25 text-blue-900 dark:text-blue-200' : 'text-zinc-700 dark:text-zinc-300'
+                    }`}
                   >
                     <input
                       type="checkbox"
                       checked={isChecked}
-                      onChange={() => toggleOption(opt.id)}
-                      className="rounded text-blue-600 focus:ring-blue-500 w-3.5 h-3.5 border-zinc-300 dark:border-zinc-700 dark:bg-zinc-850"
+                      onChange={() => toggleOption(String(opt.id))}
+                      className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800"
                     />
                     <div className="flex-1 min-w-0">
-                      <p className="truncate text-zinc-900 dark:text-zinc-100">
+                      <p className="truncate font-semibold text-zinc-900 dark:text-zinc-100">
                         {opt.name}
                       </p>
                       {opt.detail && (
-                        <p className="text-[10px] text-zinc-400 truncate dark:text-zinc-500">
+                        <p className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate">
                           {opt.detail}
                         </p>
                       )}
