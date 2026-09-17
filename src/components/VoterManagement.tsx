@@ -389,7 +389,7 @@ const VoterManagement: React.FC = () => {
   const rawState = profile?.stateId || profile?.state_id || electSettings.state_id || electSettings.stateId || '';
   const rawDistrict = profile?.districtId || profile?.district_id || electSettings.district_id || electSettings.districtId || '';
   const rawConstituency = profile?.constituencyId || profile?.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '';
-  const rawBooth = profile?.boothId || electSettings.booth_id || electSettings.boothId || '';
+  const rawBooth = profile?.boothId || profile?.booth_id || electSettings.booth_id || electSettings.boothId || '';
   const rawAssignedBooths = profile?.assigned_booths || electSettings.assigned_booths || [];
 
   const allowedStateIds = !isSuperAdmin && rawState
@@ -402,58 +402,15 @@ const VoterManagement: React.FC = () => {
     ? String(rawConstituency).split(',').map(s => s.trim()).filter(Boolean) 
     : [];
   const allowedBoothIds = !isSuperAdmin && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
-    ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(Boolean) : rawAssignedBooths) 
+    ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(Boolean) : (rawAssignedBooths || []).map(String)) 
     : [];
 
-  // Automatically select all assigned items if restricted
-  const initialStatesRef = useRef(false);
-  const initialDistrictsRef = useRef(false);
-  const initialConstituenciesRef = useRef(false);
-  const initialBoothsRef = useRef(false);
-
-  useEffect(() => {
-    if (isSuperAdmin) return;
-    if (states.length > 0 && allowedStateIds.length > 0 && !initialStatesRef.current) {
-      initialStatesRef.current = true;
-      const allowed = states.filter(s => allowedStateIds.includes(String(s.id))).map(s => String(s.id));
-      if (allowed.length > 0) {
-        setSelectedStateIds(allowed);
-      }
-    }
-  }, [states, allowedStateIds, isSuperAdmin]);
-
-  useEffect(() => {
-    if (isSuperAdmin) return;
-    if (districts.length > 0 && allowedDistrictIds.length > 0 && !initialDistrictsRef.current) {
-      initialDistrictsRef.current = true;
-      const allowed = districts.filter(d => allowedDistrictIds.includes(String(d.id))).map(d => String(d.id));
-      if (allowed.length > 0) {
-        setSelectedDistrictIds(allowed);
-      }
-    }
-  }, [districts, allowedDistrictIds, isSuperAdmin]);
-
-  useEffect(() => {
-    if (isSuperAdmin) return;
-    if (constituencies.length > 0 && allowedConstituencyIds.length > 0 && !initialConstituenciesRef.current) {
-      initialConstituenciesRef.current = true;
-      const allowed = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id))).map(c => String(c.id));
-      if (allowed.length > 0) {
-        setSelectedConstituencyIds(allowed);
-      }
-    }
-  }, [constituencies, allowedConstituencyIds, isSuperAdmin]);
-
-  useEffect(() => {
-    if (isSuperAdmin) return;
-    if (booths.length > 0 && allowedBoothIds.length > 0 && !initialBoothsRef.current) {
-      initialBoothsRef.current = true;
-      const allowed = booths.filter(b => allowedBoothIds.includes(String(b.id))).map(b => String(b.id));
-      if (allowed.length > 0) {
-        setSelectedBoothIds(allowed);
-      }
-    }
-  }, [booths, allowedBoothIds, isSuperAdmin]);
+  const isRestrictedUser = !isSuperAdmin && (
+    allowedBoothIds.length > 0 ||
+    allowedConstituencyIds.length > 0 ||
+    allowedDistrictIds.length > 0 ||
+    allowedStateIds.length > 0
+  );
 
   const fetchStates = async () => {
     try {
@@ -484,25 +441,19 @@ const VoterManagement: React.FC = () => {
         url += `boothIds=${encodeURIComponent(selectedBoothIds.join(','))}&`;
       } else if (!isSuperAdmin && allowedBoothIds.length > 0) {
         url += `boothIds=${encodeURIComponent(allowedBoothIds.join(','))}&`;
-      }
-
-      if (selectedConstituencyId !== 'all') {
+      } else if (selectedConstituencyId !== 'all') {
         url += `constituencyId=${encodeURIComponent(selectedConstituencyId)}&`;
       } else if (selectedConstituencyIds.length > 0) {
         url += `constituencyIds=${encodeURIComponent(selectedConstituencyIds.join(','))}&`;
       } else if (!isSuperAdmin && allowedConstituencyIds.length > 0) {
         url += `constituencyIds=${encodeURIComponent(allowedConstituencyIds.join(','))}&`;
-      }
-
-      if (selectedDistrictId !== 'all') {
+      } else if (selectedDistrictId !== 'all') {
         url += `districtId=${encodeURIComponent(selectedDistrictId)}&`;
       } else if (selectedDistrictIds.length > 0) {
         url += `districtIds=${encodeURIComponent(selectedDistrictIds.join(','))}&`;
       } else if (!isSuperAdmin && allowedDistrictIds.length > 0) {
         url += `districtIds=${encodeURIComponent(allowedDistrictIds.join(','))}&`;
-      }
-
-      if (selectedStateId !== 'all') {
+      } else if (selectedStateId !== 'all') {
         url += `stateId=${encodeURIComponent(selectedStateId)}&`;
       } else if (selectedStateIds.length > 0) {
         url += `stateIds=${encodeURIComponent(selectedStateIds.join(','))}&`;
@@ -565,8 +516,6 @@ const VoterManagement: React.FC = () => {
     };
   }, []);
 
-
-
   useEffect(() => {
     if (selectedStateIds.length === 1) {
       setSelectedStateId(selectedStateIds[0]);
@@ -598,44 +547,6 @@ const VoterManagement: React.FC = () => {
       setSelectedBoothId('all');
     }
   }, [selectedBoothIds]);
-
-  useEffect(() => {
-    // If selected state IDs are specified, prune selected district IDs that are no longer filterable
-    if (selectedStateIds.length > 0) {
-      const allowedIds = districts.filter(d => selectedStateIds.includes(d.stateId)).map(d => d.id);
-      setSelectedDistrictIds(prev => prev.filter(id => allowedIds.includes(id)));
-    }
-  }, [selectedStateIds, districts]);
-
-  useEffect(() => {
-    // Prune selected constituency IDs that are no longer filterable
-    if (selectedDistrictIds.length > 0 || selectedStateIds.length > 0) {
-      const allowedIds = constituencies.filter(c => {
-        const dist = districts.find(d => d.id === c.districtId);
-        if (!dist) return false;
-        const matchesState = selectedStateIds.length === 0 || selectedStateIds.includes(dist.stateId);
-        const matchesDistrict = selectedDistrictIds.length === 0 || selectedDistrictIds.includes(c.districtId);
-        return matchesState && matchesDistrict;
-      }).map(c => c.id);
-      setSelectedConstituencyIds(prev => prev.filter(id => allowedIds.includes(id)));
-    }
-  }, [selectedStateIds, selectedDistrictIds, constituencies, districts]);
-
-  useEffect(() => {
-    // Prune selected booth IDs that are no longer filterable
-    if (selectedConstituencyIds.length > 0 || selectedDistrictIds.length > 0 || selectedStateIds.length > 0) {
-      const allowedIds = booths.filter(b => {
-        const conn = constituencies.find(c => c.id === b.constituencyId);
-        const dist = districts.find(d => d.id === conn?.districtId);
-        if (!conn) return false;
-        const matchesState = selectedStateIds.length === 0 || (dist && selectedStateIds.includes(dist.stateId));
-        const matchesDistrict = selectedDistrictIds.length === 0 || (conn && selectedDistrictIds.includes(conn.districtId));
-        const matchesConstituency = selectedConstituencyIds.length === 0 || selectedConstituencyIds.includes(b.constituencyId);
-        return matchesState && matchesDistrict && matchesConstituency;
-      }).map(b => b.id);
-      setSelectedBoothIds(prev => prev.filter(id => allowedIds.includes(id)));
-    }
-  }, [selectedStateIds, selectedDistrictIds, selectedConstituencyIds, booths, constituencies, districts]);
 
   useEffect(() => {
     // Reset page to 1 whenever any filtering parameters change
@@ -846,15 +757,116 @@ const VoterManagement: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  // Determine scoped items according to narrowest election setting
-  const isRestrictedUser = !isSuperAdmin && (
-    allowedBoothIds.length > 0 ||
-    allowedConstituencyIds.length > 0 ||
-    allowedDistrictIds.length > 0 ||
-    allowedStateIds.length > 0
-  );
+  // Helper to extract full resolved location for a voter record
+  const getVoterLocation = (v: Voter) => {
+    const bId = String(v.boothId || (v as any).booth_id || '').trim();
+    const boothObj = booths.find(b => String(b.id) === bId);
+    
+    const cId = String(v.constituencyId || (v as any).constituency_id || (boothObj ? (boothObj.constituencyId || (boothObj as any).constituency_id) : '') || '').trim();
+    const constObj = constituencies.find(c => String(c.id) === cId);
+    
+    const dId = String(v.districtId || (v as any).district_id || (constObj ? (constObj.districtId || (constObj as any).district_id) : '') || '').trim();
+    const distObj = districts.find(d => String(d.id) === dId);
+    
+    const sId = String(v.stateId || (v as any).state_id || (distObj ? (distObj.stateId || (distObj as any).state_id) : '') || (constObj ? (constObj.stateId || (constObj as any).state_id) : '') || '').trim();
+    
+    return { boothId: bId, constituencyId: cId, districtId: dId, stateId: sId };
+  };
 
-  // Scoped Booth IDs
+  // Determine if a voter is within the user's assigned scope
+  const matchesUserScope = (v: Voter) => {
+    if (isSuperAdmin) return true;
+    if (!isRestrictedUser) return true;
+
+    const loc = getVoterLocation(v);
+
+    // 1. Check booth level restriction
+    if (allowedBoothIds.length > 0) {
+      return Boolean(loc.boothId && allowedBoothIds.includes(loc.boothId));
+    }
+
+    // 2. Check constituency level restriction
+    if (allowedConstituencyIds.length > 0) {
+      return Boolean(loc.constituencyId && allowedConstituencyIds.includes(loc.constituencyId));
+    }
+
+    // 3. Check district level restriction
+    if (allowedDistrictIds.length > 0) {
+      return Boolean(loc.districtId && allowedDistrictIds.includes(loc.districtId));
+    }
+
+    // 4. Check state level restriction
+    if (allowedStateIds.length > 0) {
+      return Boolean(loc.stateId && allowedStateIds.includes(loc.stateId));
+    }
+
+    return true;
+  };
+
+  // Scoped State IDs for dropdown filters
+  const validScopedStateIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedStateIds.length > 0) return allowedStateIds;
+    if (allowedDistrictIds.length > 0) {
+      const matched = districts.filter(d => allowedDistrictIds.includes(String(d.id))).map(d => String(d.stateId));
+      return Array.from(new Set(matched));
+    }
+    if (allowedConstituencyIds.length > 0) {
+      const consts = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id)));
+      const distIds = consts.map(c => String(c.districtId));
+      const matched = districts.filter(d => distIds.includes(String(d.id))).map(d => String(d.stateId));
+      return Array.from(new Set(matched));
+    }
+    if (allowedBoothIds.length > 0) {
+      const bths = booths.filter(b => allowedBoothIds.includes(String(b.id)));
+      const constIds = bths.map(b => String(b.constituencyId));
+      const consts = constituencies.filter(c => constIds.includes(String(c.id)));
+      const distIds = consts.map(c => String(c.districtId));
+      const matched = districts.filter(d => distIds.includes(String(d.id))).map(d => String(d.stateId));
+      return Array.from(new Set(matched));
+    }
+    return null;
+  }, [isRestrictedUser, allowedStateIds, allowedDistrictIds, allowedConstituencyIds, allowedBoothIds, districts, constituencies, booths]);
+
+  // Scoped District IDs for dropdown filters
+  const validScopedDistrictIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedDistrictIds.length > 0) return allowedDistrictIds;
+    if (allowedConstituencyIds.length > 0) {
+      const consts = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id)));
+      return Array.from(new Set(consts.map(c => String(c.districtId))));
+    }
+    if (allowedBoothIds.length > 0) {
+      const bths = booths.filter(b => allowedBoothIds.includes(String(b.id)));
+      const constIds = bths.map(b => String(b.constituencyId));
+      const consts = constituencies.filter(c => constIds.includes(String(c.id)));
+      return Array.from(new Set(consts.map(c => String(c.districtId))));
+    }
+    if (allowedStateIds.length > 0) {
+      return districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedDistrictIds, allowedConstituencyIds, allowedBoothIds, allowedStateIds, districts, constituencies, booths]);
+
+  // Scoped Constituency IDs for dropdown filters
+  const validScopedConstituencyIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedConstituencyIds.length > 0) return allowedConstituencyIds;
+    if (allowedBoothIds.length > 0) {
+      const bths = booths.filter(b => allowedBoothIds.includes(String(b.id)));
+      return Array.from(new Set(bths.map(b => String(b.constituencyId))));
+    }
+    if (allowedDistrictIds.length > 0) {
+      return constituencies.filter(c => allowedDistrictIds.includes(String(c.districtId))).map(c => String(c.id));
+    }
+    if (allowedStateIds.length > 0) {
+      const distIds = districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
+      return constituencies.filter(c => distIds.includes(String(c.districtId))).map(c => String(c.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedConstituencyIds, allowedBoothIds, allowedDistrictIds, allowedStateIds, constituencies, districts, booths]);
+
+  // Scoped Booth IDs for dropdown filters
   const validScopedBoothIds = useMemo(() => {
     if (!isRestrictedUser) return null;
     if (allowedBoothIds.length > 0) return allowedBoothIds;
@@ -873,61 +885,6 @@ const VoterManagement: React.FC = () => {
     return null;
   }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
 
-  // Scoped Constituency IDs
-  const validScopedConstituencyIds = useMemo(() => {
-    if (!isRestrictedUser) return null;
-    if (allowedBoothIds.length > 0) {
-      const matched = booths.filter(b => allowedBoothIds.includes(String(b.id))).map(b => String(b.constituencyId));
-      return Array.from(new Set(matched));
-    }
-    if (allowedConstituencyIds.length > 0) return allowedConstituencyIds;
-    if (allowedDistrictIds.length > 0) {
-      return constituencies.filter(c => allowedDistrictIds.includes(String(c.districtId))).map(c => String(c.id));
-    }
-    if (allowedStateIds.length > 0) {
-      const dsts = districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
-      return constituencies.filter(c => dsts.includes(String(c.districtId))).map(c => String(c.id));
-    }
-    return null;
-  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
-
-  // Scoped District IDs
-  const validScopedDistrictIds = useMemo(() => {
-    if (!isRestrictedUser) return null;
-    if (allowedBoothIds.length > 0) {
-      const cIds = booths.filter(b => allowedBoothIds.includes(String(b.id))).map(b => String(b.constituencyId));
-      const matched = constituencies.filter(c => cIds.includes(String(c.id))).map(c => String(c.districtId));
-      return Array.from(new Set(matched));
-    }
-    if (allowedConstituencyIds.length > 0) {
-      const matched = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id))).map(c => String(c.districtId));
-      return Array.from(new Set(matched));
-    }
-    if (allowedDistrictIds.length > 0) return allowedDistrictIds;
-    if (allowedStateIds.length > 0) {
-      return districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
-    }
-    return null;
-  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
-
-  // Scoped State IDs
-  const validScopedStateIds = useMemo(() => {
-    if (!isRestrictedUser) return null;
-    if (allowedBoothIds.length > 0 || allowedConstituencyIds.length > 0) {
-      const dstIds = validScopedDistrictIds || [];
-      const matched = districts.filter(d => dstIds.includes(String(d.id))).map(d => String(d.stateId));
-      return Array.from(new Set(matched));
-    }
-    if (allowedDistrictIds.length > 0) {
-      const matched = districts.filter(d => allowedDistrictIds.includes(String(d.id))).map(d => String(d.stateId));
-      return Array.from(new Set(matched));
-    }
-    if (allowedStateIds.length > 0) return allowedStateIds;
-    return null;
-  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, validScopedDistrictIds, districts]);
-
-
-
   const filteredVoters = voters.filter(v => {
     // 1. Full text search matching
     const term = searchTerm.trim().toLowerCase();
@@ -944,50 +901,38 @@ const VoterManagement: React.FC = () => {
       if (!matchesSearch) return false;
     }
 
-    // Resolve hierarchical IDs dynamically
-    const resolvedBoothId = String(v.boothId || '');
-    const boothObj = booths.find(b => String(b.id) === resolvedBoothId);
-    const resolvedConstituencyId = String(v.constituencyId || '') || (boothObj ? String(boothObj.constituencyId || '') : '');
-    const constObj = constituencies.find(c => String(c.id) === resolvedConstituencyId);
-    const resolvedDistrictId = String(v.districtId || '') || (constObj ? String(constObj.districtId || '') : '');
-    const distObj = districts.find(d => String(d.id) === resolvedDistrictId);
-    const resolvedStateId = String(v.stateId || '') || (distObj ? String(distObj.stateId || '') : '') || (constObj ? String(constObj.stateId || '') : '');
-
     // 2. Secure demographic scope enforcement for non-Super Admins
-    if (isRestrictedUser) {
-      if (validScopedBoothIds && (!resolvedBoothId || !validScopedBoothIds.includes(resolvedBoothId))) return false;
-      if (validScopedConstituencyIds && (!resolvedConstituencyId || !validScopedConstituencyIds.includes(resolvedConstituencyId))) return false;
-      if (validScopedDistrictIds && (!resolvedDistrictId || !validScopedDistrictIds.includes(resolvedDistrictId))) return false;
-      if (validScopedStateIds && (!resolvedStateId || !validScopedStateIds.includes(resolvedStateId))) return false;
-    }
+    if (!matchesUserScope(v)) return false;
 
     // 3. Instant On-Screen Demographic Dropdown Filters
+    const loc = getVoterLocation(v);
+
     // State filter
     if (selectedStateIds.length > 0) {
-      if (!resolvedStateId || !selectedStateIds.includes(resolvedStateId)) return false;
+      if (!loc.stateId || !selectedStateIds.includes(loc.stateId)) return false;
     } else if (selectedStateId && selectedStateId !== 'all') {
-      if (resolvedStateId !== selectedStateId) return false;
+      if (loc.stateId !== selectedStateId) return false;
     }
 
     // District filter
     if (selectedDistrictIds.length > 0) {
-      if (!resolvedDistrictId || !selectedDistrictIds.includes(resolvedDistrictId)) return false;
+      if (!loc.districtId || !selectedDistrictIds.includes(loc.districtId)) return false;
     } else if (selectedDistrictId && selectedDistrictId !== 'all') {
-      if (resolvedDistrictId !== selectedDistrictId) return false;
+      if (loc.districtId !== selectedDistrictId) return false;
     }
 
     // Constituency filter
     if (selectedConstituencyIds.length > 0) {
-      if (!resolvedConstituencyId || !selectedConstituencyIds.includes(resolvedConstituencyId)) return false;
+      if (!loc.constituencyId || !selectedConstituencyIds.includes(loc.constituencyId)) return false;
     } else if (selectedConstituencyId && selectedConstituencyId !== 'all') {
-      if (resolvedConstituencyId !== selectedConstituencyId) return false;
+      if (loc.constituencyId !== selectedConstituencyId) return false;
     }
 
     // Booth filter
     if (selectedBoothIds.length > 0) {
-      if (!resolvedBoothId || !selectedBoothIds.includes(resolvedBoothId)) return false;
+      if (!loc.boothId || !selectedBoothIds.includes(loc.boothId)) return false;
     } else if (selectedBoothId && selectedBoothId !== 'all') {
-      if (resolvedBoothId !== selectedBoothId) return false;
+      if (loc.boothId !== selectedBoothId) return false;
     }
 
     // Filter by vital status
