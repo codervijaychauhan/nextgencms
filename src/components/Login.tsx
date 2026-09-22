@@ -327,9 +327,8 @@ export default function Login() {
       <footer className="w-full max-w-[420px] text-center text-[11px] text-zinc-400 dark:text-zinc-500 space-y-1 z-10 pt-4 pb-2">
         <div className="flex items-center justify-center gap-1.5 text-zinc-500 dark:text-zinc-400 font-medium text-[10px]">
           <ShieldCheck size={12} className="text-emerald-500" />
-          <span>256-bit SSL Encrypted • NextGen CMS v2.4</span>
+          <span>Secure Sign In</span>
         </div>
-        <div>© 2026 NextGen CMS Platform. All rights reserved.</div>
       </footer>
 
     </div>

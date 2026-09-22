@@ -547,14 +547,20 @@ export default function SurveyManagement() {
 
   return (
     <div className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-            <ClipboardList className="w-6 h-6 text-blue-500" />
-            Survey & Campaigns Builder
-          </h1>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm">Design structured custom questionnaire templates and track field campaigns</p>
+      {/* Minimalistic Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Surveys
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+              Surveys
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Create and manage field survey questionnaires.
+          </p>
         </div>
         
         {hasRight('survey_campaigns', 'c') && (
@@ -562,7 +568,7 @@ export default function SurveyManagement() {
             {activeTab === 'campaigns' ? (
               <button
                 onClick={handleOpenCreateModal}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 Create Campaign
@@ -570,7 +576,7 @@ export default function SurveyManagement() {
             ) : (
               <button
                 onClick={handleOpenCreateTemplateModal}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-sm cursor-pointer"
+                className="px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 rounded-md text-xs font-semibold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
                 Create Template
@@ -584,23 +590,23 @@ export default function SurveyManagement() {
       <div className="flex border-b border-zinc-200 dark:border-zinc-800 gap-2">
         <button
           onClick={() => setActiveTab('campaigns')}
-          className={`px-5 py-3 text-[10px] sm:text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+          className={`px-5 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
             activeTab === 'campaigns'
               ? 'border-blue-600 text-blue-600 dark:text-blue-500'
-              : 'border-transparent text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-300'
+              : 'border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
           }`}
         >
-          Active Campaigns
+          Campaigns
         </button>
         <button
           onClick={() => setActiveTab('templates')}
-          className={`px-5 py-3 text-[10px] sm:text-xs font-black uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
+          className={`px-5 py-3 text-[10px] sm:text-xs font-bold uppercase tracking-wider border-b-2 transition-all cursor-pointer ${
             activeTab === 'templates'
-              ? 'border-purple-605 text-purple-600 dark:text-purple-400'
-              : 'border-transparent text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-300'
+              ? 'border-purple-600 text-purple-600 dark:text-purple-400'
+              : 'border-transparent text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300'
           }`}
         >
-          Survey Templates List
+          Templates
         </button>
       </div>
 

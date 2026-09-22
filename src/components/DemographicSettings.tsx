@@ -158,6 +158,20 @@ const DemographicSettings: React.FC = () => {
     }
   };
 
+  const normalizeId = (id: any) => String(id ?? '').trim().replace(/\.0$/, '');
+
+  const getConstituencyName = (constituencyId?: string | number, constituencyName?: string) => {
+    if (constituencyName && !constituencyName.startsWith('Constituency #') && !constituencyName.includes('.')) {
+      return constituencyName;
+    }
+    const normTarget = normalizeId(constituencyId);
+    if (!normTarget) return '';
+    const found = constituencies.find(c => normalizeId(c.id) === normTarget);
+    if (found && found.name) return found.name;
+    if (constituencyName && !constituencyName.startsWith('Constituency #')) return constituencyName;
+    return `Constituency ${normTarget}`;
+  };
+
   const fetchBooths = async () => {
     setLoading(true);
     try {
@@ -166,22 +180,28 @@ const DemographicSettings: React.FC = () => {
       if (selectedDistrictId !== 'all') url += `districtId=${selectedDistrictId}&`;
       if (selectedConstituencyId !== 'all') url += `constituencyId=${selectedConstituencyId}&`;
       const fetchedBooths = await api.get<IndiaBooth[]>(url);
-      setBooths(fetchedBooths.map((b: any) => ({
-        ...b,
-        id: String(b.id),
-        name: b.name || '',
-        boothNumber: String(b.booth_number !== undefined ? b.booth_number : (b.boothNumber || '')),
-        boothLabel: b.booth_label || b.boothLabel || '',
-        address: b.address || '',
-        totalVoters: b.total_voters !== undefined ? Number(b.total_voters) : (Number(b.totalVoters) || Number(b.population) || 0),
-        population: b.total_voters !== undefined ? Number(b.total_voters) : (Number(b.totalVoters) || Number(b.population) || 0),
-        stateId: String(b.state_id || b.stateId || ''),
-        districtId: String(b.district_id || b.districtId || ''),
-        constituencyId: String(b.constituency_id || b.constituencyId || ''),
-        constituencyName: b.constituency_name || b.constituencyName || '',
-        mandalId: b.mandal_id !== undefined && b.mandal_id !== null ? String(b.mandal_id) : (b.mandalId ? String(b.mandalId) : ''),
-        mandalName: b.mandal_name || b.mandalName || ''
-      })));
+      setBooths(fetchedBooths.map((b: any) => {
+        const rawConstId = String(b.constituency_id || b.constituencyId || '');
+        const matchedConst = constituencies.find(c => normalizeId(c.id) === normalizeId(rawConstId));
+        return {
+          ...b,
+          id: String(b.id),
+          name: b.name || '',
+          boothNumber: String(b.booth_number !== undefined ? b.booth_number : (b.boothNumber || '')),
+          boothLabel: b.booth_label || b.boothLabel || '',
+          address: b.address || '',
+          totalVoters: b.total_voters !== undefined ? Number(b.total_voters) : (Number(b.totalVoters) || Number(b.population) || 0),
+          population: b.total_voters !== undefined ? Number(b.total_voters) : (Number(b.totalVoters) || Number(b.population) || 0),
+          stateId: String(b.state_id || b.stateId || matchedConst?.stateId || ''),
+          stateName: b.state_name || b.stateName || '',
+          districtId: String(b.district_id || b.districtId || matchedConst?.districtId || ''),
+          districtName: b.district_name || b.districtName || '',
+          constituencyId: rawConstId,
+          constituencyName: b.constituency_name || matchedConst?.name || '',
+          mandalId: b.mandal_id !== undefined && b.mandal_id !== null ? String(b.mandal_id) : (b.mandalId ? String(b.mandalId) : ''),
+          mandalName: b.mandal_name || b.mandalName || ''
+        };
+      }));
     } catch (err: any) {
       setError(err?.response?.data?.error || 'Failed to fetch booths.');
     } finally {
@@ -257,6 +277,51 @@ const DemographicSettings: React.FC = () => {
 
 
 
+  const openEditModal = (item: any) => {
+    setEditingItem(item);
+    const matchedConst = constituencies.find(c => normalizeId(c.id) === normalizeId(item.constituencyId));
+    const matchedDist = districts.find(d => normalizeId(d.id) === normalizeId(item.districtId || matchedConst?.districtId));
+    const targetStateId = String(item.stateId || matchedConst?.stateId || matchedDist?.stateId || (selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '')));
+    const targetDistrictId = String(item.districtId || matchedConst?.districtId || (selectedDistrictId !== 'all' ? selectedDistrictId : ''));
+    const targetConstituencyId = String(item.constituencyId || (selectedConstituencyId !== 'all' ? selectedConstituencyId : ''));
+
+    setFormData({ 
+      name: item.name || '', 
+      code: item.code || '', 
+      category: item.category || 'General',
+      boothNumber: item.boothNumber || '',
+      boothLabel: item.boothLabel || '',
+      address: item.address || '',
+      population: item.totalVoters !== undefined ? item.totalVoters : (item.population || 0),
+      stateId: targetStateId,
+      districtId: targetDistrictId,
+      constituencyId: targetConstituencyId,
+      mandalId: item.mandalId ? String(item.mandalId) : '',
+    }); 
+    setIsModalOpen(true); 
+  };
+
+  const openCreateModal = () => {
+    setEditingItem(null); 
+    const defaultStateId = selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '');
+    const defaultDistrictId = selectedDistrictId !== 'all' ? selectedDistrictId : '';
+    const defaultConstituencyId = selectedConstituencyId !== 'all' ? selectedConstituencyId : '';
+    setFormData({ 
+      name: '', 
+      code: '', 
+      category: 'General',
+      population: 0, 
+      stateId: defaultStateId,
+      districtId: defaultDistrictId,
+      constituencyId: defaultConstituencyId,
+      mandalId: '',
+      boothNumber: '',
+      boothLabel: '',
+      address: '',
+    }); 
+    setIsModalOpen(true); 
+  };
+
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
     setActionLoading(true);
@@ -265,12 +330,15 @@ const DemographicSettings: React.FC = () => {
     try {
       if (activeTab === 'states') {
         const stateData = {
-          id: editingItem?.id ? Number(editingItem.id) : undefined,
           name: formData.name.trim(),
           code: formData.code.trim().toUpperCase(),
           population: Number(formData.population) || 0,
         };
-        await api.post('/api/states', stateData);
+        if (editingItem?.id) {
+          await api.put(`/api/states/${editingItem.id}`, stateData);
+        } else {
+          await api.post('/api/states', stateData);
+        }
         setSuccessMessage(`${formData.name} saved to registry.`);
         fetchStates();
       } else if (activeTab === 'districts') {
@@ -280,12 +348,15 @@ const DemographicSettings: React.FC = () => {
           return;
         }
         const districtData = {
-          id: editingItem?.id ? Number(editingItem.id) : undefined,
           name: formData.name.trim(),
-          state_id: Number(formData.stateId),
+          state_id: !isNaN(Number(formData.stateId)) ? Number(formData.stateId) : formData.stateId,
           population: Number(formData.population) || 0,
         };
-        await api.post('/api/districts', districtData);
+        if (editingItem?.id) {
+          await api.put(`/api/districts/${editingItem.id}`, districtData);
+        } else {
+          await api.post('/api/districts', districtData);
+        }
         setSuccessMessage(`District ${formData.name} saved.`);
         fetchDistricts();
       } else if (activeTab === 'constituencies') {
@@ -295,14 +366,17 @@ const DemographicSettings: React.FC = () => {
           return;
         }
         const constituencyData = {
-          id: editingItem?.id ? (!isNaN(Number(editingItem.id)) ? Number(editingItem.id) : editingItem.id) : undefined,
           name: formData.name.trim(),
           state_id: formData.stateId ? (!isNaN(Number(formData.stateId)) ? Number(formData.stateId) : formData.stateId) : null,
           district_id: !isNaN(Number(formData.districtId)) ? Number(formData.districtId) : formData.districtId,
           category: formData.category || 'General',
           population: Number(formData.population) || 0,
         };
-        await api.post('/api/constituencies', constituencyData);
+        if (editingItem?.id) {
+          await api.put(`/api/constituencies/${editingItem.id}`, constituencyData);
+        } else {
+          await api.post('/api/constituencies', constituencyData);
+        }
         setSuccessMessage(`Constituency ${formData.name} saved.`);
         fetchConstituencies();
       } else {
@@ -312,7 +386,6 @@ const DemographicSettings: React.FC = () => {
           return;
         }
         const boothData = {
-          id: editingItem?.id ? (!isNaN(Number(editingItem.id)) ? Number(editingItem.id) : editingItem.id) : undefined,
           name: formData.name.trim() || `Booth #${formData.boothNumber.trim()}`,
           booth_number: formData.boothNumber.trim(),
           booth_label: formData.boothLabel.trim(),
@@ -323,7 +396,11 @@ const DemographicSettings: React.FC = () => {
           mandal_id: formData.mandalId ? (!isNaN(Number(formData.mandalId)) ? Number(formData.mandalId) : formData.mandalId) : null,
           total_voters: Number(formData.population) || 0,
         };
-        await api.post('/api/booths', boothData);
+        if (editingItem?.id) {
+          await api.put(`/api/booths/${editingItem.id}`, boothData);
+        } else {
+          await api.post('/api/booths', boothData);
+        }
         setSuccessMessage(`Booth ${formData.name || formData.boothNumber} saved.`);
         fetchBooths();
       }
@@ -371,16 +448,71 @@ const DemographicSettings: React.FC = () => {
     }
   };
 
-  const filteredData = activeTab === 'states' 
-    ? states.filter(s => s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.code.toLowerCase().includes(searchTerm.toLowerCase()))
-    : activeTab === 'districts'
-      ? districts.filter(d => d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.stateName.toLowerCase().includes(searchTerm.toLowerCase()))
-      : activeTab === 'constituencies'
-        ? constituencies.filter(c => c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.districtName.toLowerCase().includes(searchTerm.toLowerCase()) || (c.category && c.category.toLowerCase().includes(searchTerm.toLowerCase())))
-        : booths.filter(b => b.name.toLowerCase().includes(searchTerm.toLowerCase()) || b.boothNumber.toLowerCase().includes(searchTerm.toLowerCase()) || (b.constituencyName && b.constituencyName.toLowerCase().includes(searchTerm.toLowerCase())) || (b.mandalName && b.mandalName.toLowerCase().includes(searchTerm.toLowerCase())) || (b.address && b.address.toLowerCase().includes(searchTerm.toLowerCase())));
+  const electSettings = profile?.election_settings || profile?.electionSettings || {};
+  const rawState = profile?.stateId || profile?.state_id || electSettings.state_id || electSettings.stateId || '';
+  const rawDistrict = profile?.districtId || profile?.district_id || electSettings.district_id || electSettings.districtId || '';
+  const rawConstituency = profile?.constituencyId || profile?.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '';
+  const rawBooth = profile?.boothId || profile?.booth_id || electSettings.booth_id || electSettings.boothId || '';
+  const rawAssignedBooths = profile?.assigned_booths || electSettings.assigned_booths || [];
+
+  const allowedStateIds = !isSuperAdmin && rawState
+    ? String(rawState).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedDistrictIds = !isSuperAdmin && rawDistrict
+    ? String(rawDistrict).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedConstituencyIds = !isSuperAdmin && rawConstituency
+    ? String(rawConstituency).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedBoothIds = !isSuperAdmin && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
+    ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') : (rawAssignedBooths || []).map(String).map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')) 
+    : [];
+
+  const hasAssignedScope = isSuperAdmin || (
+    allowedBoothIds.length > 0 ||
+    allowedConstituencyIds.length > 0 ||
+    allowedDistrictIds.length > 0 ||
+    allowedStateIds.length > 0
+  );
+
+  const filteredData = (!isSuperAdmin && !hasAssignedScope)
+    ? []
+    : activeTab === 'states' 
+      ? states.filter(s => {
+          const matchesSearch = s.name.toLowerCase().includes(searchTerm.toLowerCase()) || s.code.toLowerCase().includes(searchTerm.toLowerCase());
+          if (isSuperAdmin) return matchesSearch;
+          const matchesScope = allowedStateIds.length === 0 || allowedStateIds.includes(String(s.id)) || allowedStateIds.includes(s.name) || allowedStateIds.includes(s.code);
+          return matchesSearch && matchesScope;
+        })
+      : activeTab === 'districts'
+        ? districts.filter(d => {
+            const matchesSearch = d.name.toLowerCase().includes(searchTerm.toLowerCase()) || d.stateName.toLowerCase().includes(searchTerm.toLowerCase());
+            if (isSuperAdmin) return matchesSearch;
+            if (allowedDistrictIds.length > 0) return matchesSearch && (allowedDistrictIds.includes(String(d.id)) || allowedDistrictIds.includes(d.name));
+            if (allowedStateIds.length > 0) return matchesSearch && (allowedStateIds.includes(String(d.stateId)) || allowedStateIds.includes(d.stateName));
+            return matchesSearch;
+          })
+        : activeTab === 'constituencies'
+          ? constituencies.filter(c => {
+              const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) || c.districtName.toLowerCase().includes(searchTerm.toLowerCase()) || (c.category && c.category.toLowerCase().includes(searchTerm.toLowerCase()));
+              if (isSuperAdmin) return matchesSearch;
+              if (allowedConstituencyIds.length > 0) return matchesSearch && (allowedConstituencyIds.includes(String(c.id)) || allowedConstituencyIds.includes(c.name));
+              if (allowedDistrictIds.length > 0) return matchesSearch && (allowedDistrictIds.includes(String(c.districtId)) || allowedDistrictIds.includes(c.districtName));
+              if (allowedStateIds.length > 0) return matchesSearch && (allowedStateIds.includes(String(c.stateId)));
+              return matchesSearch;
+            })
+          : booths.filter(b => {
+              const matchesSearch = b.name.toLowerCase().includes(searchTerm.toLowerCase()) || b.boothNumber.toLowerCase().includes(searchTerm.toLowerCase()) || (b.constituencyName && b.constituencyName.toLowerCase().includes(searchTerm.toLowerCase())) || (b.mandalName && b.mandalName.toLowerCase().includes(searchTerm.toLowerCase())) || (b.address && b.address.toLowerCase().includes(searchTerm.toLowerCase()));
+              if (isSuperAdmin) return matchesSearch;
+              if (allowedBoothIds.length > 0) return matchesSearch && (allowedBoothIds.includes(String(b.id)) || allowedBoothIds.includes(String(b.boothNumber)) || allowedBoothIds.includes(b.name));
+              if (allowedConstituencyIds.length > 0) return matchesSearch && (allowedConstituencyIds.includes(String(b.constituencyId)) || allowedConstituencyIds.includes(b.constituencyName));
+              if (allowedDistrictIds.length > 0) return matchesSearch && (allowedDistrictIds.includes(String(b.districtId)));
+              if (allowedStateIds.length > 0) return matchesSearch && (allowedStateIds.includes(String(b.stateId)));
+              return matchesSearch;
+            });
 
   return (
-    <div className="p-4 sm:p-8 space-y-8 animate-in fade-in duration-500 max-w-full mx-auto">
+    <div className="space-y-6 w-full animate-in fade-in duration-500">
       {/* Delete Confirmation Overlay */}
       <AnimatePresence>
         {deletingId && (
@@ -421,18 +553,20 @@ const DemographicSettings: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-6 bg-white dark:bg-zinc-950 p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-sm shadow-zinc-100 dark:shadow-none">
-        <div className="space-y-2 w-full md:w-auto">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center text-white shadow-lg shadow-blue-600/20 shrink-0">
-              <Globe size={24} />
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight flex items-center gap-2">
-                Election Setting
-              </h1>
-            </div>
+      {/* Minimalistic Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Demographics
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+              Settings
+            </span>
           </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Manage states, districts, constituencies, and polling booths.
+          </p>
         </div>
         
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
@@ -468,37 +602,18 @@ const DemographicSettings: React.FC = () => {
             {hasRight('demographics', 'c') && (
               <button 
                 onClick={() => setIsImportModalOpen(true)}
-                className="h-11 px-6 rounded-[14px] bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-black text-[10px] uppercase tracking-wider hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all flex items-center justify-center gap-2 flex-1 sm:flex-none whitespace-nowrap"
+                className="h-10 px-4 rounded-xl bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-semibold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all flex items-center justify-center gap-2 flex-1 sm:flex-none whitespace-nowrap"
               >
-                <Upload size={14} /> Bulk Import Voters
+                <Upload size={14} /> Bulk Import
               </button>
             )}
 
             {hasRight('demographics', 'c') && (
               <button 
-                onClick={() => { 
-                  setEditingItem(null); 
-                  const defaultStateId = selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '');
-                  const defaultDistrictId = selectedDistrictId !== 'all' ? selectedDistrictId : '';
-                  const defaultConstituencyId = selectedConstituencyId !== 'all' ? selectedConstituencyId : '';
-                  setFormData({ 
-                    name: '', 
-                    code: '', 
-                    category: 'General',
-                    population: 0, 
-                    stateId: defaultStateId,
-                    districtId: defaultDistrictId,
-                    constituencyId: defaultConstituencyId,
-                    mandalId: '',
-                    boothNumber: '',
-                    boothLabel: '',
-                    address: '',
-                  }); 
-                  setIsModalOpen(true); 
-                }}
-                className="webapp-button-primary h-11 px-6 flex items-center justify-center gap-2 shadow-lg shadow-blue-600/10 flex-1 sm:flex-none text-[10px] uppercase tracking-wider font-black whitespace-nowrap"
+                onClick={() => openCreateModal()}
+                className="webapp-button-primary h-10 px-4 flex items-center justify-center gap-2 shadow-sm flex-1 sm:flex-none text-xs font-semibold whitespace-nowrap"
               >
-                <Plus size={18} /> Add {activeTab === 'states' ? 'State' : activeTab === 'districts' ? 'District' : activeTab === 'constituencies' ? 'Constituency' : 'Booth'}
+                <Plus size={16} /> Add {activeTab === 'states' ? 'State' : activeTab === 'districts' ? 'District' : activeTab === 'constituencies' ? 'Constituency' : 'Booth'}
               </button>
             )}
           </div>
@@ -699,9 +814,16 @@ const DemographicSettings: React.FC = () => {
                     )}
                     {activeTab === 'booths' && (
                       <td className="px-6 py-5">
-                        <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-700 dark:text-zinc-300">
-                          <Globe size={13} className="text-blue-500 shrink-0" />
-                          <span>{item.constituencyName || 'N/A'}</span>
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-1.5 text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                            <Globe size={13} className="text-blue-500 shrink-0" />
+                            <span>{getConstituencyName(item.constituencyId, item.constituencyName) || '-'}</span>
+                          </div>
+                          {(item.districtName || item.stateName) && (
+                            <span className="text-[10px] text-zinc-400 font-medium pl-5">
+                              {[item.districtName, item.stateName].filter(Boolean).join(', ')}
+                            </span>
+                          )}
                         </div>
                       </td>
                     )}
@@ -712,7 +834,7 @@ const DemographicSettings: React.FC = () => {
                             {item.mandalName}
                           </span>
                         ) : (
-                          <span className="text-xs text-zinc-400 italic">Unassigned</span>
+                          <span className="text-xs text-zinc-300 dark:text-zinc-600">-</span>
                         )}
                       </td>
                     )}
@@ -745,23 +867,7 @@ const DemographicSettings: React.FC = () => {
                       <div className="flex justify-end gap-2">
                         {hasRight('demographics', 'u') && (
                           <button 
-                            onClick={() => { 
-                              setEditingItem(item); 
-                              setFormData({ 
-                                name: item.name, 
-                                code: item.code || '', 
-                                category: (item as any).category || 'General',
-                                boothNumber: item.boothNumber || '',
-                                boothLabel: item.boothLabel || '',
-                                address: item.address || '',
-                                population: item.totalVoters !== undefined ? item.totalVoters : (item.population || 0),
-                                stateId: item.stateId || '',
-                                districtId: item.districtId || '',
-                                constituencyId: item.constituencyId || '',
-                                mandalId: item.mandalId || '',
-                              }); 
-                              setIsModalOpen(true); 
-                            }}
+                            onClick={() => openEditModal(item)}
                             className="p-2 text-zinc-400 hover:text-blue-600 hover:bg-blue-500/10 rounded-lg transition-all"
                             title="Edit"
                           >
@@ -839,23 +945,7 @@ const DemographicSettings: React.FC = () => {
                   <div className="flex gap-1">
                     {hasRight('demographics', 'u') && (
                       <button 
-                        onClick={() => { 
-                          setEditingItem(item); 
-                          setFormData({ 
-                            name: item.name, 
-                            code: item.code || '', 
-                            category: (item as any).category || 'General',
-                            boothNumber: item.boothNumber || '',
-                            boothLabel: item.boothLabel || '',
-                            address: item.address || '',
-                            population: item.totalVoters !== undefined ? item.totalVoters : (item.population || 0),
-                            stateId: item.stateId || '',
-                            districtId: item.districtId || '',
-                            constituencyId: item.constituencyId || '',
-                            mandalId: item.mandalId || '',
-                          }); 
-                          setIsModalOpen(true); 
-                        }}
+                        onClick={() => openEditModal(item)}
                         className="p-2 text-zinc-400 hover:text-blue-600 rounded-lg transition-all"
                       >
                         <Edit2 size={16} />
@@ -909,8 +999,18 @@ const DemographicSettings: React.FC = () => {
                           <><MapPin size={12} className="text-zinc-300" /> {item.districtName}</>
                         ) : (
                           <div className="flex flex-col gap-1 w-full">
-                            <div className="flex items-center gap-1.5"><Globe size={12} className="text-zinc-300" /> {item.constituencyName || 'Constituency N/A'}</div>
-                            {item.mandalName && <div className="text-[10px] text-indigo-600 font-semibold">Mandal: {item.mandalName}</div>}
+                            <div className="flex items-center gap-1.5">
+                              <Globe size={12} className="text-blue-500" /> 
+                              <span className="font-bold text-zinc-800 dark:text-zinc-200">
+                                {getConstituencyName(item.constituencyId, item.constituencyName) || 'Constituency Unassigned'}
+                              </span>
+                            </div>
+                            {(item.districtName || item.stateName) && (
+                              <div className="text-[10px] text-zinc-400 pl-4.5 font-medium">
+                                {[item.districtName, item.stateName].filter(Boolean).join(' • ')}
+                              </div>
+                            )}
+                            {item.mandalName && <div className="text-[10px] text-indigo-600 dark:text-indigo-400 font-semibold pl-4.5">Mandal: {item.mandalName}</div>}
                           </div>
                         )}
                       </div>

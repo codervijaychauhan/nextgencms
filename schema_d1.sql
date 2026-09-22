@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS states (
     code TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_states_name ON states(name);
 
 CREATE TABLE IF NOT EXISTS districts (
     id TEXT NOT NULL PRIMARY KEY,
@@ -17,6 +18,8 @@ CREATE TABLE IF NOT EXISTS districts (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (state_id) REFERENCES states(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_districts_state ON districts(state_id);
+CREATE INDEX IF NOT EXISTS idx_districts_name ON districts(name);
 
 CREATE TABLE IF NOT EXISTS constituencies (
     id TEXT NOT NULL PRIMARY KEY,
@@ -27,6 +30,9 @@ CREATE TABLE IF NOT EXISTS constituencies (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (district_id) REFERENCES districts(id) ON DELETE CASCADE
 );
+CREATE INDEX IF NOT EXISTS idx_constituencies_district ON constituencies(district_id);
+CREATE INDEX IF NOT EXISTS idx_constituencies_state ON constituencies(state_id);
+CREATE INDEX IF NOT EXISTS idx_constituencies_name ON constituencies(name);
 
 CREATE TABLE IF NOT EXISTS mandals (
     id TEXT NOT NULL PRIMARY KEY,
@@ -39,8 +45,13 @@ CREATE TABLE IF NOT EXISTS mandals (
     state_id TEXT,
     district_id TEXT,
     constituency_id TEXT,
+    admin_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_mandals_admin ON mandals(admin_id);
+CREATE INDEX IF NOT EXISTS idx_mandals_constituency ON mandals(constituency_id);
+CREATE INDEX IF NOT EXISTS idx_mandals_district ON mandals(district_id);
+CREATE INDEX IF NOT EXISTS idx_mandals_state ON mandals(state_id);
 
 CREATE TABLE IF NOT EXISTS mandal_members (
     id TEXT NOT NULL PRIMARY KEY,
@@ -50,10 +61,13 @@ CREATE TABLE IF NOT EXISTS mandal_members (
     voter_id TEXT,
     designation TEXT,
     category_key TEXT NOT NULL,
+    admin_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY (mandal_id) REFERENCES mandals(id) ON DELETE CASCADE
 );
 CREATE INDEX IF NOT EXISTS idx_mandal_members_mandal_cat ON mandal_members(mandal_id, category_key);
+CREATE INDEX IF NOT EXISTS idx_mandal_members_admin ON mandal_members(admin_id);
+CREATE INDEX IF NOT EXISTS idx_mandal_members_mandal ON mandal_members(mandal_id);
 
 CREATE TABLE IF NOT EXISTS booths (
     id TEXT NOT NULL PRIMARY KEY,
@@ -67,6 +81,8 @@ CREATE TABLE IF NOT EXISTS booths (
 );
 CREATE INDEX IF NOT EXISTS idx_booths_constituency ON booths(constituency_id);
 CREATE INDEX IF NOT EXISTS idx_booths_mandal ON booths(mandal_id);
+CREATE INDEX IF NOT EXISTS idx_booths_number ON booths(booth_number);
+CREATE INDEX IF NOT EXISTS idx_booths_const_num ON booths(constituency_id, booth_number);
 
 -- 2. Users / Admins / Role-Based Access Control (RBAC)
 CREATE TABLE IF NOT EXISTS users (
@@ -81,11 +97,19 @@ CREATE TABLE IF NOT EXISTS users (
     district_id TEXT,
     constituency_id TEXT,
     booth_id TEXT,
+    parent_admin_id TEXT,
+    parent_manager_id TEXT,
+    voter_id TEXT,
+    voter_doc_id TEXT,
     election_settings TEXT,
     disabled INTEGER NOT NULL DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+CREATE INDEX IF NOT EXISTS idx_users_parent_admin ON users(parent_admin_id);
+CREATE INDEX IF NOT EXISTS idx_users_parent_manager ON users(parent_manager_id);
+CREATE INDEX IF NOT EXISTS idx_users_voter ON users(voter_id);
 
 -- 3. Voters Directory
 CREATE TABLE IF NOT EXISTS voters (
@@ -119,7 +143,16 @@ CREATE TABLE IF NOT EXISTS voters (
 CREATE INDEX IF NOT EXISTS idx_voters_epic ON voters(voter_id);
 CREATE INDEX IF NOT EXISTS idx_voters_constituency ON voters(constituency_id);
 CREATE INDEX IF NOT EXISTS idx_voters_booth ON voters(booth_id);
+CREATE INDEX IF NOT EXISTS idx_voters_district ON voters(district_id);
+CREATE INDEX IF NOT EXISTS idx_voters_state ON voters(state_id);
+CREATE INDEX IF NOT EXISTS idx_voters_mandal ON voters(mandal_id);
 CREATE INDEX IF NOT EXISTS idx_voters_mobile ON voters(mobile);
+CREATE INDEX IF NOT EXISTS idx_voters_gender ON voters(gender);
+CREATE INDEX IF NOT EXISTS idx_voters_caste ON voters(caste);
+CREATE INDEX IF NOT EXISTS idx_voters_status ON voters(voting_status);
+CREATE INDEX IF NOT EXISTS idx_voters_karyakarta ON voters(is_karyakarta);
+CREATE INDEX IF NOT EXISTS idx_voters_created ON voters(created_at);
+CREATE INDEX IF NOT EXISTS idx_voters_const_booth ON voters(constituency_id, booth_id);
 
 -- 4. Election Cycles & Political Parties
 CREATE TABLE IF NOT EXISTS elections (
@@ -130,6 +163,7 @@ CREATE TABLE IF NOT EXISTS elections (
     status TEXT DEFAULT 'Upcoming',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_elections_year ON elections(year);
 
 CREATE TABLE IF NOT EXISTS political_parties (
     id TEXT NOT NULL PRIMARY KEY,
@@ -141,15 +175,17 @@ CREATE TABLE IF NOT EXISTS political_parties (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
--- 5. Surveys, Questionnaires & Voter Sentiments
+-- 5. Surveys, Questionnaires & Voter Assessments
 CREATE TABLE IF NOT EXISTS survey_templates (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,
     description TEXT,
     is_system INTEGER NOT NULL DEFAULT 0,
     fields TEXT NOT NULL,
+    admin_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_survey_templates_admin ON survey_templates(admin_id);
 
 CREATE TABLE IF NOT EXISTS surveys (
     id TEXT NOT NULL PRIMARY KEY,
@@ -161,11 +197,45 @@ CREATE TABLE IF NOT EXISTS surveys (
     status TEXT DEFAULT 'Draft',
     template_id TEXT,
     linked_party_ids TEXT,
+    admin_id TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
+CREATE INDEX IF NOT EXISTS idx_surveys_admin ON surveys(admin_id);
+CREATE INDEX IF NOT EXISTS idx_surveys_election ON surveys(election_id);
+
+CREATE TABLE IF NOT EXISTS voter_assessments (
+    id TEXT NOT NULL PRIMARY KEY,
+    admin_id TEXT NOT NULL,
+    voter_id TEXT NOT NULL,
+    voter_name TEXT,
+    vital_status TEXT DEFAULT 'Active',
+    physical_profile TEXT DEFAULT 'General',
+    disability_category TEXT DEFAULT 'None',
+    eci_assistance_needed INTEGER DEFAULT 0,
+    economic_category TEXT DEFAULT 'APL',
+    income_range TEXT DEFAULT '₹15,000 - ₹30,000',
+    land_ownership TEXT DEFAULT 'Small Farmer',
+    education TEXT DEFAULT 'Unspecified',
+    sentiment_score REAL DEFAULT 3.0,
+    sentiment TEXT DEFAULT 'Neutral',
+    favored_party_id TEXT,
+    favored_party_name TEXT,
+    key_concerns TEXT,
+    notes TEXT,
+    is_karyakarta INTEGER DEFAULT 0,
+    voted INTEGER DEFAULT 0,
+    recorded_by TEXT,
+    recorded_by_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_voter_assessments_admin_voter ON voter_assessments(admin_id, voter_id);
+CREATE INDEX IF NOT EXISTS idx_voter_assessments_admin ON voter_assessments(admin_id);
+CREATE INDEX IF NOT EXISTS idx_voter_assessments_voter ON voter_assessments(voter_id);
 
 CREATE TABLE IF NOT EXISTS voter_sentiments (
     id TEXT NOT NULL PRIMARY KEY,
+    admin_id TEXT,
     voter_id TEXT NOT NULL,
     voter_name TEXT NOT NULL,
     election_id TEXT,
@@ -189,6 +259,7 @@ CREATE TABLE IF NOT EXISTS voter_sentiments (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_voter_sentiments_voter ON voter_sentiments(voter_id);
+CREATE INDEX IF NOT EXISTS idx_voter_sentiments_admin ON voter_sentiments(admin_id);
 CREATE INDEX IF NOT EXISTS idx_voter_sentiments_survey ON voter_sentiments(survey_id);
 
 -- 6. Karyakartas (Volunteers) & Booth Agents
@@ -200,6 +271,8 @@ CREATE TABLE IF NOT EXISTS volunteers (
     aadhar_number TEXT,
     mobile TEXT,
     admin_id TEXT NOT NULL,
+    manager_id TEXT,
+    user_id TEXT,
     status TEXT DEFAULT 'Active',
     tasks TEXT,
     performance_rating REAL DEFAULT 5.0,
@@ -208,6 +281,11 @@ CREATE TABLE IF NOT EXISTS volunteers (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_volunteers_admin ON volunteers(admin_id);
+CREATE INDEX IF NOT EXISTS idx_volunteers_manager ON volunteers(manager_id);
+CREATE INDEX IF NOT EXISTS idx_volunteers_user ON volunteers(user_id);
+CREATE INDEX IF NOT EXISTS idx_volunteers_voter ON volunteers(voter_id);
+CREATE INDEX IF NOT EXISTS idx_volunteers_voter_doc ON volunteers(voter_doc_id);
+CREATE INDEX IF NOT EXISTS idx_volunteers_assigned_booth ON volunteers(assigned_booth_id);
 
 CREATE TABLE IF NOT EXISTS booth_agents (
     id TEXT NOT NULL PRIMARY KEY,
@@ -223,6 +301,7 @@ CREATE TABLE IF NOT EXISTS booth_agents (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_booth_agents_admin ON booth_agents(admin_id);
+CREATE INDEX IF NOT EXISTS idx_booth_agents_booth ON booth_agents(booth_id);
 
 -- 7. Benefits / Welfare Schemes
 CREATE TABLE IF NOT EXISTS benefits (
@@ -244,6 +323,7 @@ CREATE TABLE IF NOT EXISTS benefits (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_benefits_voter ON benefits(voter_doc_id);
+CREATE INDEX IF NOT EXISTS idx_benefits_voter_id ON benefits(voter_id);
 CREATE INDEX IF NOT EXISTS idx_benefits_admin ON benefits(admin_id);
 
 -- 8. Campaign Budgets & Financial Transactions
@@ -272,6 +352,7 @@ CREATE TABLE IF NOT EXISTS finance_transactions (
 );
 CREATE INDEX IF NOT EXISTS idx_finance_admin ON finance_transactions(admin_id);
 CREATE INDEX IF NOT EXISTS idx_finance_date ON finance_transactions(transaction_date);
+CREATE INDEX IF NOT EXISTS idx_finance_type ON finance_transactions(type);
 
 -- 9. WhatsApp Campaigns & Meta Configs
 CREATE TABLE IF NOT EXISTS whatsapp_configs (
@@ -328,7 +409,7 @@ INSERT OR IGNORE INTO users (
     '507fa7a0305f6ceeeeb4ebf32b851bc0ba7599cb51c05d762e15d86241c09eb6',
     'Vijay Chauhan',
     'super_admin',
-    '{"voters":"vcud","volunteers":"vcud","mandals":"vcud","booths":"vcud","benefits":"vcud","finance":"vcud","whatsapp":"vcud","surveys":"vcud","predictions":"vcud","users":"vcud","survey_campaigns":"vcud","demographics":"vcud","elections":"vcud"}',
+    '{"voters":"vcud","volunteers":"vcud","mandals":"vcud","booths":"vcud","benefits":"vcud","finance":"vcud","whatsapp":"vcud","surveys":"vcud","predictions":"vcud","users":"vcud","survey_campaigns":"vcud","demographics":"vcud","elections":"vcud","sentiment_comparison":"vcud"}',
     0
 );
 
@@ -341,3 +422,4 @@ VALUES
 ('party_2', 'Indian National Congress', 'INC', '#0284c7', '✋'),
 ('party_3', 'Aam Aadmi Party', 'AAP', '#eab308', '🧹'),
 ('party_4', 'Independent', 'IND', '#64748b', '🗳️');
+

@@ -7,7 +7,7 @@ import {
 import { auth } from './lib/firebase';
 import { api } from './lib/api';
 
-interface UserProfile {
+export interface UserProfile {
   uid: string;
   id?: string;
   username: string;
@@ -15,6 +15,7 @@ interface UserProfile {
   email: string | null;
   role: string;
   createdAt?: unknown;
+  created_at?: unknown;
   bio?: string;
   profilePicture?: string;
   disabled?: boolean;
@@ -22,12 +23,33 @@ interface UserProfile {
   rights?: Record<string, string>;
   assigned_booths?: string[];
   boothId?: string;
+  booth_id?: string;
   stateId?: string;
   districtId?: string;
   constituencyId?: string;
   state_id?: string;
   district_id?: string;
   constituency_id?: string;
+  parentAdminId?: string | null;
+  parent_admin_id?: string | null;
+  parentAdminName?: string | null;
+  parent_admin_name?: string | null;
+  parentAdminEmail?: string | null;
+  parent_admin_email?: string | null;
+  parentAdminRole?: string | null;
+  parent_admin_role?: string | null;
+  parentManagerId?: string | null;
+  parent_manager_id?: string | null;
+  parentManagerName?: string | null;
+  parent_manager_name?: string | null;
+  parentManagerEmail?: string | null;
+  parent_manager_email?: string | null;
+  parentManagerRole?: string | null;
+  parent_manager_role?: string | null;
+  voterId?: string;
+  voter_id?: string;
+  voterDocId?: string;
+  voter_doc_id?: string;
   election_settings?: Record<string, any>;
   electionSettings?: Record<string, any>;
 }

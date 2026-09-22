@@ -776,19 +776,36 @@ async function startServer() {
     }
   });
 
+  const getRequesterInfo = async (reqUser: any) => {
+    const reqUid = reqUser?.uid || reqUser?.user_id || reqUser?.sub || '';
+    const reqEmail = (reqUser?.email || '').toLowerCase();
+    const users = await query(`SELECT * FROM dbo.users WHERE id = @id OR LOWER(email) = @email`, { id: reqUid, email: reqEmail });
+    const userRow = users[0];
+    const role = userRow?.role || 'guest';
+    const isSuperAdmin = role === 'super_admin' || reqEmail === 'vijaychauhanofficial01@gmail.com';
+    const isAdmin = isSuperAdmin || role === 'admin' || role === 'manager';
+    return { reqUid, reqEmail, userRow, role, isSuperAdmin, isAdmin };
+  };
+
   // Admin Manual Password Reset (updates both Firebase Auth and SQL Server dbo.users)
-  app.post("/api/admin/reset-password", authenticateUser, async (req, res) => {
+  const handleAdminResetPassword = async (req: any, res: any) => {
     try {
       await ensureAuthTables();
-      const caller = (req as any).user;
-      const { uid, email, newPassword, password } = req.body;
+      const caller = req.user;
+      const { reqUid, reqEmail, isSuperAdmin, isAdmin } = await getRequesterInfo(caller);
+
+      if (!isAdmin && !isSuperAdmin) {
+        return res.status(403).json({ error: 'Forbidden: Admin or Super Admin privileges required.' });
+      }
+
+      const { uid, id, email, newPassword, password } = req.body;
       const pwd = newPassword || password;
 
-      if (!pwd || pwd.length < 6) {
+      if (!pwd || typeof pwd !== 'string' || pwd.length < 6) {
         return res.status(400).json({ error: 'New password must be at least 6 characters long.' });
       }
 
-      const targetIdentifier = uid || email;
+      const targetIdentifier = uid || id || email;
       if (!targetIdentifier) {
         return res.status(400).json({ error: 'User UID or email is required.' });
       }
@@ -799,8 +816,13 @@ async function startServer() {
         { target: targetIdentifier }
       );
 
-      const targetEmail = users.length > 0 ? users[0].email : (email || null);
-      const targetId = users.length > 0 ? users[0].id : (uid || null);
+      const targetUser = users.length > 0 ? users[0] : null;
+      if (targetUser && (targetUser.role === 'super_admin' || targetUser.email?.toLowerCase() === 'vijaychauhanofficial01@gmail.com') && !isSuperAdmin) {
+        return res.status(403).json({ error: 'Security Violation: Only Super Admin can reset Super Admin passwords.' });
+      }
+
+      const targetEmail = targetUser ? targetUser.email : (email || null);
+      const targetId = targetUser ? targetUser.id : (uid || id || null);
 
       // 1. Update in Firebase Auth
       let fbUpdated = false;
@@ -818,7 +840,7 @@ async function startServer() {
               await auth.createUser({
                 email: targetEmail,
                 password: pwd,
-                displayName: users[0]?.name || targetEmail.split('@')[0]
+                displayName: targetUser?.name || targetEmail.split('@')[0]
               });
               fbUpdated = true;
             }
@@ -830,10 +852,10 @@ async function startServer() {
 
       // 2. Update in SQL Server dbo.users
       const hashed = hashPassword(pwd);
-      if (targetEmail) {
+      if (targetEmail || targetId) {
         await execute(`UPDATE dbo.users SET password_hash = @hash WHERE email = @email OR id = @id`, {
           hash: hashed,
-          email: targetEmail,
+          email: targetEmail || '',
           id: targetId || ''
         });
       }
@@ -848,18 +870,10 @@ async function startServer() {
       console.error('Admin reset password error:', error);
       res.status(500).json({ error: sanitizeError(error) });
     }
-  });
-
-  const getRequesterInfo = async (reqUser: any) => {
-    const reqUid = reqUser?.uid || reqUser?.user_id || reqUser?.sub || '';
-    const reqEmail = (reqUser?.email || '').toLowerCase();
-    const users = await query(`SELECT * FROM dbo.users WHERE id = @id OR LOWER(email) = @email`, { id: reqUid, email: reqEmail });
-    const userRow = users[0];
-    const role = userRow?.role || 'guest';
-    const isSuperAdmin = role === 'super_admin' || reqEmail === 'vijaychauhanofficial01@gmail.com';
-    const isAdmin = isSuperAdmin || role === 'admin';
-    return { reqUid, reqEmail, userRow, role, isSuperAdmin, isAdmin };
   };
+
+  app.post("/api/admin/reset-password", authenticateUser, handleAdminResetPassword);
+  app.post("/api/users/reset-password", authenticateUser, handleAdminResetPassword);
 
   // Invite User & Generate Invite Link
   app.post("/api/users/invite", authenticateUser, async (req, res) => {
@@ -1925,12 +1939,23 @@ async function startServer() {
 
   app.get("/api/mandals", optionalAuth, async (req, res) => {
     try {
-      const { constituencyId, constituencyIds, districtId, districtIds, stateId, stateIds, search } = req.query;
+      const { constituencyId, constituencyIds, districtId, districtIds, stateId, stateIds, search, adminId } = req.query;
+      const caller = (req as any).user;
+      let isSuperAdmin = false;
+      let effectiveAdminId: string | null = null;
+      if (caller) {
+        const reqInfo = await getRequesterInfo(caller);
+        isSuperAdmin = reqInfo.isSuperAdmin;
+        effectiveAdminId = reqInfo.isSuperAdmin ? (String(adminId || '') || null) : (reqInfo.userRow?.parent_admin_id || reqInfo.reqUid);
+      }
+
       let sqlQuery = `
         SELECT m.*, 
                c.name as constituency_name, 
                d.name as district_name, 
                s.name as state_name,
+               u.name as admin_name,
+               u.email as admin_email,
                (SELECT COUNT(*) FROM dbo.mandal_members mm WHERE mm.mandal_id = m.id) as member_count,
                (SELECT COUNT(*) FROM dbo.booths b WHERE b.mandal_id = m.id) as booth_count,
                (SELECT COUNT(*) FROM dbo.voters v WHERE v.mandal_id = m.id) as real_voter_count
@@ -1938,9 +1963,21 @@ async function startServer() {
         LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id
         LEFT JOIN dbo.districts d ON m.district_id = d.id OR c.district_id = d.id
         LEFT JOIN dbo.states s ON m.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id
+        LEFT JOIN dbo.users u ON m.admin_id = u.id OR (m.admin_id IS NOT NULL AND LOWER(m.admin_id) = LOWER(u.email))
         WHERE 1=1
       `;
       const params: Record<string, any> = {};
+
+      if (isSuperAdmin) {
+        if (adminId && adminId !== 'All' && String(adminId).trim() !== '') {
+          sqlQuery += ` AND (m.admin_id = @reqAdminId OR LOWER(m.admin_id) = LOWER(@reqAdminId))`;
+          params.reqAdminId = String(adminId).trim();
+        }
+      } else if (effectiveAdminId) {
+        sqlQuery += ` AND (m.admin_id = @effAdminId OR LOWER(m.admin_id) = LOWER(@effAdminId))`;
+        params.effAdminId = effectiveAdminId;
+      }
+
       const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'mnd_cst', ['m.constituency_id', 'c.id'], params);
       if (cstClause) sqlQuery += ` AND ${cstClause}`;
       const dstClause = buildSafeInClause(districtId || districtIds, 'mnd_dst', ['m.district_id', 'c.district_id', 'd.id'], params);
@@ -1961,7 +1998,9 @@ async function startServer() {
 
   app.post("/api/mandals", authenticateUser, async (req, res) => {
     try {
-      const { id, name, mandal_code, mandalCode, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId } = req.body;
+      const caller = (req as any).user;
+      const { isSuperAdmin, reqUid, userRow } = await getRequesterInfo(caller);
+      const { id, name, mandal_code, mandalCode, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId, admin_id, adminId } = req.body;
       if (!name || !String(name).trim()) {
         return res.status(400).json({ error: "Mandal name is required." });
       }
@@ -1979,6 +2018,10 @@ async function startServer() {
 
       const rawSid = state_id !== undefined ? state_id : stateId;
       let finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
+      const targetAdmin = isSuperAdmin 
+        ? (admin_id || adminId || reqUid) 
+        : (userRow?.parent_admin_id || reqUid);
 
       // Auto-lookup district and state if omitted
       if (finalCid && (!finalDid || !finalSid)) {
@@ -2009,20 +2052,21 @@ async function startServer() {
                population = @population,
                state_id = @state_id,
                district_id = @district_id,
-               constituency_id = @constituency_id
+               constituency_id = @constituency_id,
+               admin_id = COALESCE(@admin_id, admin_id)
            WHERE id = @id`,
-          { id: parsedId, name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid }
+          { id: parsedId, name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid, admin_id: targetAdmin }
         );
-        return res.json({ id: targetId, name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid });
+        return res.json({ id: targetId, name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid, admin_id: targetAdmin });
       }
 
       const inserted = await query(
-        `INSERT INTO dbo.mandals (name, mandal_code, president_name, president_phone, voter_count, population, state_id, district_id, constituency_id)
+        `INSERT INTO dbo.mandals (name, mandal_code, president_name, president_phone, voter_count, population, state_id, district_id, constituency_id, admin_id)
          OUTPUT INSERTED.*
-         VALUES (@name, @mandal_code, @president_name, @president_phone, @voter_count, @population, @state_id, @district_id, @constituency_id)`,
-        { name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid }
+         VALUES (@name, @mandal_code, @president_name, @president_phone, @voter_count, @population, @state_id, @district_id, @constituency_id, @admin_id)`,
+        { name: String(name).trim(), mandal_code: mcode, president_name: pname, president_phone: pphone, voter_count: vcount, population: pop, state_id: finalSid, district_id: finalDid, constituency_id: finalCid, admin_id: targetAdmin }
       );
-      res.json(inserted[0] || { name: String(name).trim(), mandal_code: mcode });
+      res.json(inserted[0] || { name: String(name).trim(), mandal_code: mcode, admin_id: targetAdmin });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -2030,10 +2074,23 @@ async function startServer() {
 
   app.put("/api/mandals/:id", authenticateUser, async (req, res) => {
     try {
+      const caller = (req as any).user;
+      const { isSuperAdmin, reqUid, userRow } = await getRequesterInfo(caller);
       const { id } = req.params;
-      const { name, mandal_code, mandalCode, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId } = req.body;
+      const { name, mandal_code, mandalCode, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId, admin_id, adminId } = req.body;
       const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
       
+      const existing = await query(`SELECT * FROM dbo.mandals WHERE id = @id`, { id: parsedId });
+      if (!existing || existing.length === 0) {
+        return res.status(404).json({ error: 'Mandal not found' });
+      }
+
+      const mandal = existing[0];
+      const effectiveAdminId = userRow?.parent_admin_id || reqUid;
+      if (!isSuperAdmin && mandal.admin_id && mandal.admin_id !== effectiveAdminId && mandal.admin_id !== reqUid) {
+        return res.status(403).json({ error: 'Forbidden: You cannot modify another admin’s mandal.' });
+      }
+
       const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
       const finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
 
@@ -2042,6 +2099,8 @@ async function startServer() {
 
       const rawSid = state_id !== undefined ? state_id : stateId;
       const finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
+      const targetAdmin = isSuperAdmin ? (admin_id || adminId || mandal.admin_id) : mandal.admin_id;
 
       await execute(
         `UPDATE dbo.mandals 
@@ -2053,7 +2112,8 @@ async function startServer() {
              population = COALESCE(@population, population),
              state_id = COALESCE(@state_id, state_id),
              district_id = COALESCE(@district_id, district_id),
-             constituency_id = COALESCE(@constituency_id, constituency_id)
+             constituency_id = COALESCE(@constituency_id, constituency_id),
+             admin_id = COALESCE(@admin_id, admin_id)
          WHERE id = @id`,
         { 
           id: parsedId, 
@@ -2065,7 +2125,8 @@ async function startServer() {
           population: population !== undefined ? parseInt(population, 10) : null,
           state_id: finalSid,
           district_id: finalDid,
-          constituency_id: finalCid
+          constituency_id: finalCid,
+          admin_id: targetAdmin
         }
       );
       res.json({ success: true, id });
@@ -2076,8 +2137,22 @@ async function startServer() {
 
   app.delete("/api/mandals/:id", authenticateUser, async (req, res) => {
     try {
+      const caller = (req as any).user;
+      const { isSuperAdmin, reqUid, userRow } = await getRequesterInfo(caller);
       const mandalId = req.params.id;
       const parsedId = !isNaN(Number(mandalId)) ? Number(mandalId) : String(mandalId);
+
+      const existing = await query(`SELECT * FROM dbo.mandals WHERE id = @id`, { id: parsedId });
+      if (!existing || existing.length === 0) {
+        return res.status(404).json({ error: 'Mandal not found' });
+      }
+
+      const mandal = existing[0];
+      const effectiveAdminId = userRow?.parent_admin_id || reqUid;
+      if (!isSuperAdmin && mandal.admin_id && mandal.admin_id !== effectiveAdminId && mandal.admin_id !== reqUid) {
+        return res.status(403).json({ error: 'Forbidden: You cannot delete another admin’s mandal.' });
+      }
+
       // 1. Delete mandal members
       await execute(`DELETE FROM dbo.mandal_members WHERE mandal_id = @mandalId`, { mandalId: parsedId });
       // 2. Unlink booths and voters
@@ -2091,7 +2166,7 @@ async function startServer() {
     }
   });
 
-  // Mandal Members
+  // Mandal Members (Admin Scoped)
   app.get("/api/mandals/:mandalId/members", optionalAuth, async (req, res) => {
     try {
       const { mandalId } = req.params;
@@ -2113,30 +2188,45 @@ async function startServer() {
 
   app.post("/api/mandals/:mandalId/members", authenticateUser, async (req, res) => {
     try {
+      const caller = (req as any).user;
+      const { isSuperAdmin, reqUid, userRow } = await getRequesterInfo(caller);
       const { mandalId } = req.params;
       const { id, name, phone, voter_id, voterId, designation, category_key, categoryKey } = req.body;
       const parsedMandalId = !isNaN(Number(mandalId)) ? Number(mandalId) : String(mandalId);
+      
+      const mandals = await query(`SELECT * FROM dbo.mandals WHERE id = @id`, { id: parsedMandalId });
+      if (!mandals || mandals.length === 0) {
+        return res.status(404).json({ error: 'Mandal not found' });
+      }
+
+      const mandal = mandals[0];
+      const effectiveAdminId = userRow?.parent_admin_id || reqUid;
+      if (!isSuperAdmin && mandal.admin_id && mandal.admin_id !== effectiveAdminId && mandal.admin_id !== reqUid) {
+        return res.status(403).json({ error: 'Forbidden: You cannot modify members for another admin’s mandal.' });
+      }
+
       const catKey = category_key || categoryKey || 'office_bearers';
       const vid = voter_id || voterId || '';
+      const memberAdminId = mandal.admin_id || effectiveAdminId;
 
       if (id && String(id).trim() !== '') {
         const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
         await execute(
           `UPDATE dbo.mandal_members 
-           SET name = @name, phone = @phone, voter_id = @voter_id, designation = @designation, category_key = @category_key 
+           SET name = @name, phone = @phone, voter_id = @voter_id, designation = @designation, category_key = @category_key, admin_id = @admin_id
            WHERE id = @id`,
-          { id: parsedId, name: String(name).trim(), phone: phone || '', voter_id: vid, designation: designation || '', category_key: catKey }
+          { id: parsedId, name: String(name).trim(), phone: phone || '', voter_id: vid, designation: designation || '', category_key: catKey, admin_id: memberAdminId }
         );
-        return res.json({ id: parsedId, mandal_id: parsedMandalId, name: String(name).trim(), category_key: catKey });
+        return res.json({ id: parsedId, mandal_id: parsedMandalId, name: String(name).trim(), category_key: catKey, admin_id: memberAdminId });
       }
 
       const inserted = await query(
-        `INSERT INTO dbo.mandal_members (mandal_id, name, phone, voter_id, designation, category_key)
+        `INSERT INTO dbo.mandal_members (mandal_id, name, phone, voter_id, designation, category_key, admin_id)
          OUTPUT INSERTED.*
-         VALUES (@mandal_id, @name, @phone, @voter_id, @designation, @category_key)`,
-        { mandal_id: parsedMandalId, name: String(name).trim(), phone: phone || '', voter_id: vid, designation: designation || '', category_key: catKey }
+         VALUES (@mandal_id, @name, @phone, @voter_id, @designation, @category_key, @admin_id)`,
+        { mandal_id: parsedMandalId, name: String(name).trim(), phone: phone || '', voter_id: vid, designation: designation || '', category_key: catKey, admin_id: memberAdminId }
       );
-      res.json(inserted[0] || { mandal_id: parsedMandalId, name: String(name).trim(), category_key: catKey });
+      res.json(inserted[0] || { mandal_id: parsedMandalId, name: String(name).trim(), category_key: catKey, admin_id: memberAdminId });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -2144,9 +2234,23 @@ async function startServer() {
 
   app.put("/api/mandals/members/:memberId", authenticateUser, async (req, res) => {
     try {
+      const caller = (req as any).user;
+      const { isSuperAdmin, reqUid, userRow } = await getRequesterInfo(caller);
       const { memberId } = req.params;
       const { name, phone, voter_id, voterId, designation, category_key, categoryKey } = req.body;
       const parsedId = !isNaN(Number(memberId)) ? Number(memberId) : String(memberId);
+
+      const members = await query(`SELECT * FROM dbo.mandal_members WHERE id = @id`, { id: parsedId });
+      if (!members || members.length === 0) {
+        return res.status(404).json({ error: 'Member not found' });
+      }
+
+      const member = members[0];
+      const effectiveAdminId = userRow?.parent_admin_id || reqUid;
+      if (!isSuperAdmin && member.admin_id && member.admin_id !== effectiveAdminId && member.admin_id !== reqUid) {
+        return res.status(403).json({ error: 'Forbidden: You cannot modify another admin’s mandal member.' });
+      }
+
       const vid = voter_id || voterId || '';
       const catKey = category_key || categoryKey || 'office_bearers';
 
@@ -2164,7 +2268,21 @@ async function startServer() {
 
   app.delete("/api/mandals/members/:memberId", authenticateUser, async (req, res) => {
     try {
+      const caller = (req as any).user;
+      const { isSuperAdmin, reqUid, userRow } = await getRequesterInfo(caller);
       const parsedId = !isNaN(Number(req.params.memberId)) ? Number(req.params.memberId) : String(req.params.memberId);
+
+      const members = await query(`SELECT * FROM dbo.mandal_members WHERE id = @id`, { id: parsedId });
+      if (!members || members.length === 0) {
+        return res.status(404).json({ error: 'Member not found' });
+      }
+
+      const member = members[0];
+      const effectiveAdminId = userRow?.parent_admin_id || reqUid;
+      if (!isSuperAdmin && member.admin_id && member.admin_id !== effectiveAdminId && member.admin_id !== reqUid) {
+        return res.status(403).json({ error: 'Forbidden: You cannot delete another admin’s mandal member.' });
+      }
+
       await execute(`DELETE FROM dbo.mandal_members WHERE id = @id`, { id: parsedId });
       res.json({ success: true });
     } catch (error: any) {
@@ -2310,8 +2428,19 @@ async function startServer() {
 
       const voters = await query(sqlQuery, params);
 
+      const uniqueVotersMap = new Map<string, any>();
+      for (const v of voters) {
+        const key = String(v.id || v.voter_id || '');
+        if (key && !uniqueVotersMap.has(key)) {
+          uniqueVotersMap.set(key, v);
+        } else if (!key) {
+          uniqueVotersMap.set(`v_${Math.random()}`, v);
+        }
+      }
+      const uniqueVoters = Array.from(uniqueVotersMap.values());
+
       res.json({
-        data: voters,
+        data: uniqueVoters,
         total,
         page: pageNum,
         totalPages: Math.ceil(total / limitNum),
@@ -4342,6 +4471,41 @@ async function startServer() {
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Multi-Admin Voter Assessments & Sentiments for Cross-Auditing
+  app.get("/api/voter-assessments", optionalAuth, async (req, res) => {
+    try {
+      const results = await query(`
+        SELECT 
+          va.*,
+          COALESCE(u.name, 'Admin (' + CAST(va.admin_id AS VARCHAR) + ')') AS admin_name,
+          u.email AS admin_email,
+          u.role AS admin_role,
+          v.voter_id AS voter_epic,
+          COALESCE(v.name, va.voter_name) AS voter_full_name,
+          v.gender AS voter_gender,
+          v.age AS voter_age,
+          v.mobile AS voter_mobile,
+          v.village AS voter_village,
+          v.house_no AS voter_house_no,
+          v.booth_id AS voter_booth_id,
+          b.name AS booth_name,
+          b.booth_number,
+          v.constituency_id AS voter_constituency_id,
+          c.name AS constituency_name
+        FROM dbo.voter_assessments va
+        LEFT JOIN dbo.users u ON va.admin_id = u.id
+        LEFT JOIN dbo.voters v ON (va.voter_id = v.id OR va.voter_id = v.voter_id)
+        LEFT JOIN dbo.booths b ON v.booth_id = b.id
+        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
+        ORDER BY va.updated_at DESC
+      `);
+      res.json(results || []);
+    } catch (err: any) {
+      console.error('Error fetching voter assessments:', err);
+      res.status(500).json({ error: sanitizeError(err) });
     }
   });
 

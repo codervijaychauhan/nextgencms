@@ -23,7 +23,9 @@ import {
   Globe,
   SlidersHorizontal,
   UserCheck,
-  Star
+  Star,
+  Network,
+  Building2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
@@ -45,6 +47,12 @@ interface Mandal {
   districtName?: string;
   constituencyId: string;
   constituencyName?: string;
+  adminId?: string;
+  admin_id?: string;
+  adminName?: string;
+  admin_name?: string;
+  adminEmail?: string;
+  admin_email?: string;
   createdAt: unknown;
   updatedAt?: unknown;
 }
@@ -56,6 +64,8 @@ interface MandalMember {
   categoryKey: string;
   voterId?: string;
   designation?: string;
+  adminId?: string;
+  admin_id?: string;
   createdAt: unknown;
   updatedAt?: unknown;
 }
@@ -165,7 +175,7 @@ const MANDAL_CATEGORIES = [
 ];
 
 export default function MandalManagement() {
-  const { user, isSuperAdmin, hasPermission } = useAuth();
+  const { user, isSuperAdmin, isAdmin, profile, hasPermission } = useAuth();
 
   // Permission rights check
   const canView = isSuperAdmin || hasPermission('mandals', 'v');
@@ -179,6 +189,8 @@ export default function MandalManagement() {
   const [districts, setDistricts] = useState<DistrictData[]>([]);
   const [constituencies, setConstituencies] = useState<ConstituencyData[]>([]);
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
+  const [admins, setAdmins] = useState<any[]>([]);
+  const [adminFilter, setAdminFilter] = useState<string>('All');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
@@ -205,6 +217,7 @@ export default function MandalManagement() {
   const [selectedDistrict, setSelectedDistrict] = useState('');
   const [selectedConstituency, setSelectedConstituency] = useState('');
   const [selectedVolunteerId, setSelectedVolunteerId] = useState('custom');
+  const [formAdminId, setFormAdminId] = useState<string>('');
 
   // Delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState('');
@@ -233,6 +246,40 @@ export default function MandalManagement() {
   // Active expanded list key in members detail view
   const [expandedCategoryKey, setExpandedCategoryKey] = useState<string | null>('office_bearers');
 
+  // Load admins list for Super Admin
+  useEffect(() => {
+    if (!user) return;
+    if (isSuperAdmin) {
+      api.get<any[]>('/api/admin/hierarchy?all=true')
+        .then(res => {
+          const list = Array.isArray(res) ? res : ((res as any)?.results || []);
+          const admList = list.map((item: any) => item.admin || item).filter(Boolean);
+          if (admList.length > 0) {
+            setAdmins(admList);
+          } else {
+            api.get<any[]>('/api/users').then(users => {
+              setAdmins(Array.isArray(users) ? users.filter((u: any) => u.role === 'admin' || u.role === 'super_admin') : []);
+            }).catch(() => {});
+          }
+        })
+        .catch(() => {
+          api.get<any[]>('/api/users').then(users => {
+            setAdmins(Array.isArray(users) ? users.filter((u: any) => u.role === 'admin' || u.role === 'super_admin') : []);
+          }).catch(() => {});
+        });
+    }
+  }, [user, isSuperAdmin]);
+
+  // Helper to resolve human-readable Admin name
+  const getAdminName = (admId?: string, admName?: string, admEmail?: string) => {
+    if (admName && !admName.startsWith('usr_') && !admName.startsWith('admin_')) return admName;
+    const found = admins.find(a => String(a.id || a.uid) === String(admId) || a.email === admEmail || a.email === admId);
+    if (found) return found.name || found.username || found.email?.split('@')[0];
+    if (admEmail) return admEmail.split('@')[0];
+    if (admId) return admId.length > 12 ? `${admId.slice(0, 10)}...` : admId;
+    return 'Campaign Admin';
+  };
+
   // Fetch initial configuration / metadata
   useEffect(() => {
     const loadStaticData = async () => {
@@ -256,10 +303,6 @@ export default function MandalManagement() {
           stateId: String(c.state_id || c.stateId || ''), 
           districtId: String(c.district_id || c.districtId || '') 
         })));
-
-        // 4. Fetch Volunteers/Karyakartas for President assignment
-        const volList = await api.get<any[]>('/api/volunteers').catch(() => []);
-        setVolunteers(volList.map(v => ({ ...v, id: String(v.id) })));
       } catch (err) {
         console.error('Error loading metadata:', err);
         setError('Failed to load demographic metadata.');
@@ -273,13 +316,29 @@ export default function MandalManagement() {
     }
   }, [user, isAdmin]);
 
-  // Fetch Mandals from SQL API
+  // Load volunteers/karyakartas for President assignment (scoped to active admin)
+  useEffect(() => {
+    if (!user) return;
+    const loadVolunteers = async () => {
+      try {
+        const url = adminFilter !== 'All' ? `/api/volunteers?adminId=${adminFilter}` : '/api/volunteers';
+        const volList = await api.get<any[]>(url).catch(() => []);
+        setVolunteers(volList.map(v => ({ ...v, id: String(v.id) })));
+      } catch (e) {
+        console.error('Error loading volunteers for mandals:', e);
+      }
+    };
+    loadVolunteers();
+  }, [user, adminFilter]);
+
+  // Fetch Mandals from API
   const fetchMandals = async () => {
     try {
       setLoading(true);
       setError('');
       
-      const list = await api.get<Mandal[]>('/api/mandals');
+      const url = adminFilter !== 'All' ? `/api/mandals?adminId=${adminFilter}` : '/api/mandals';
+      const list = await api.get<Mandal[]>(url);
       setMandals(list.map((m: any) => ({
         ...m,
         id: String(m.id),
@@ -293,7 +352,10 @@ export default function MandalManagement() {
         districtId: String(m.district_id || m.districtId || ''),
         districtName: m.district_name || m.districtName || '',
         constituencyId: String(m.constituency_id || m.constituencyId || ''),
-        constituencyName: m.constituency_name || m.constituencyName || ''
+        constituencyName: m.constituency_name || m.constituencyName || '',
+        adminId: m.admin_id || m.adminId || '',
+        adminName: m.admin_name || m.adminName || '',
+        adminEmail: m.admin_email || m.adminEmail || ''
       })));
     } catch (err: unknown) {
       setError('Failed to fetch Mandals list.');
@@ -306,7 +368,7 @@ export default function MandalManagement() {
     if (user && canView) {
       fetchMandals();
     }
-  }, [user, canView]);
+  }, [user, canView, adminFilter]);
 
   // Fetch members for a specific Mandal
   const fetchMandalMembers = async (mandalId: string) => {
@@ -317,7 +379,8 @@ export default function MandalManagement() {
         ...item,
         id: String(item.id),
         categoryKey: item.category_key || item.categoryKey,
-        voterId: item.voter_id || item.voterId
+        voterId: item.voter_id || item.voterId,
+        adminId: item.admin_id || item.adminId || ''
       })));
     } catch (err) {
       console.error('Error fetching members:', err);
@@ -398,6 +461,7 @@ export default function MandalManagement() {
       setSelectedState(mandal.stateId);
       setSelectedDistrict(mandal.districtId);
       setSelectedConstituency(mandal.constituencyId);
+      setFormAdminId(mandal.adminId || '');
       
       const matchedVol = volunteers.find(v => v.name === mandal.presidentName && v.mobile === mandal.presidentPhone);
       setSelectedVolunteerId(matchedVol ? String(matchedVol.id) : 'custom');
@@ -414,6 +478,7 @@ export default function MandalManagement() {
       setSelectedDistrict(filterDistrict !== 'all' ? filterDistrict : '');
       setSelectedConstituency(filterConstituency !== 'all' ? filterConstituency : '');
       setSelectedVolunteerId('custom');
+      setFormAdminId(adminFilter !== 'All' ? adminFilter : (user?.uid || profile?.adminId || ''));
     }
     setIsModalOpen(true);
   };
@@ -439,7 +504,8 @@ export default function MandalManagement() {
         population: population !== '' ? Number(population) : 0,
         state_id: selectedState,
         district_id: selectedDistrict,
-        constituency_id: selectedConstituency
+        constituency_id: selectedConstituency,
+        admin_id: isSuperAdmin && formAdminId ? formAdminId : undefined
       };
 
       if (isEditMode) {
@@ -619,7 +685,7 @@ export default function MandalManagement() {
           </div>
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span className="text-xs font-bold px-2.5 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-lg uppercase tracking-wider">
                   {selectedMandalForMembers.mandalCode}
                 </span>
@@ -627,6 +693,12 @@ export default function MandalManagement() {
                   <MapPin className="h-3.5 w-3.5" />
                   {selectedMandalForMembers.constituencyName} Constituency
                 </span>
+                {isSuperAdmin && (selectedMandalForMembers.adminName || selectedMandalForMembers.adminId) && (
+                  <span className="text-xs font-bold px-2.5 py-1 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/50 rounded-lg flex items-center gap-1">
+                    <Network className="h-3.5 w-3.5" />
+                    Admin: {getAdminName(selectedMandalForMembers.adminId, selectedMandalForMembers.adminName, selectedMandalForMembers.adminEmail)}
+                  </span>
+                )}
               </div>
               <h2 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50 mt-2">
                 {selectedMandalForMembers.name} Mandal Roster
@@ -1053,89 +1125,110 @@ export default function MandalManagement() {
     );
   }
 
-  // Otherwise, default main Grid of Mandals
   return (
     <div id="mandal-management-container" className="space-y-6">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-5">
-        <div>
-          <h1 className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
-            <Layers className="h-6 w-6 text-zinc-600 dark:text-zinc-400" />
-            Mandal Management
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Create, manage, and assign leaders to administrative blocks (Mandals) mapped directly to your constituency.
+      {/* Minimalistic Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Mandals
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
+              {mandals.length} Mandals
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Administrative blocks and committee management.
           </p>
         </div>
         {canCreate && (
           <button
             id="create-mandal-btn"
             onClick={() => openModal()}
-            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 font-medium rounded-lg shadow transition-colors"
+            className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 font-semibold text-xs rounded-lg shadow-xs transition-colors"
           >
             <Plus className="h-4 w-4" />
-            Create Mandal
+            Add Mandal
           </button>
         )}
       </div>
 
       {/* Notifications */}
       {error && (
-        <div className="p-4 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 rounded-lg flex items-center gap-3 border border-red-100 dark:border-red-900/30">
-          <AlertCircle className="h-5 w-5 shrink-0" />
-          <span className="text-sm">{error}</span>
+        <div className="p-3 bg-red-50 dark:bg-red-950/20 text-red-600 dark:text-red-400 rounded-lg flex items-center gap-2.5 border border-red-100 dark:border-red-900/30 text-xs">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{error}</span>
         </div>
       )}
       {success && (
-        <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-lg flex items-center gap-3 border border-emerald-100 dark:border-emerald-900/30">
-          <CheckCircle className="h-5 w-5 shrink-0" />
-          <span className="text-sm">{success}</span>
+        <div className="p-3 bg-emerald-50 dark:bg-emerald-950/20 text-emerald-600 dark:text-emerald-400 rounded-lg flex items-center gap-2.5 border border-emerald-100 dark:border-emerald-900/30 text-xs">
+          <CheckCircle className="h-4 w-4 shrink-0" />
+          <span>{success}</span>
         </div>
       )}
 
       {/* KPI Dashboard */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-xl shadow-sm">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Total Mandals</span>
-            <Layers className="h-5 w-5 text-zinc-400" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Total Mandals</span>
+            <Layers className="h-4 w-4 text-zinc-400" />
           </div>
-          <p className="text-2xl font-bold mt-2 text-zinc-900 dark:text-zinc-50">{mandals.length}</p>
+          <p className="text-xl font-bold mt-1 text-zinc-900 dark:text-zinc-50">{mandals.length}</p>
         </div>
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-xl shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Total Active Presidents</span>
-            <User className="h-5 w-5 text-zinc-400" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Presidents</span>
+            <User className="h-4 w-4 text-zinc-400" />
           </div>
-          <p className="text-2xl font-bold mt-2 text-zinc-900 dark:text-zinc-50">
+          <p className="text-xl font-bold mt-1 text-zinc-900 dark:text-zinc-50">
             {mandals.filter(m => m.presidentName).length}
           </p>
         </div>
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-xl shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium text-zinc-500 dark:text-zinc-400">Target Voters Tracked</span>
-            <Users className="h-5 w-5 text-zinc-400" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Voters</span>
+            <Users className="h-4 w-4 text-zinc-400" />
           </div>
-          <p className="text-2xl font-bold mt-2 text-zinc-900 dark:text-zinc-50">
+          <p className="text-xl font-bold mt-1 text-zinc-900 dark:text-zinc-50">
             {mandals.reduce((acc, curr) => acc + (curr.voterCount || 0), 0).toLocaleString()}
           </p>
         </div>
       </div>
 
       {/* Filter Section */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-sm flex flex-col md:flex-row gap-4">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3 rounded-xl shadow-xs flex flex-col md:flex-row gap-3">
         <div className="relative flex-1">
-          <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
+          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
           <input
             id="search-input"
             type="text"
-            placeholder="Search by Mandal name, code, president..."
+            placeholder="Search mandals..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-4 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-sm text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400 focus:border-transparent"
+            className="w-full pl-8 pr-3 py-1.5 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
           />
         </div>
-        <div className="flex flex-wrap gap-4">
+        <div className="flex flex-wrap gap-3 items-center">
+          {/* Super Admin: Admin Selector */}
+          {isSuperAdmin && (
+            <select
+              id="admin-filter"
+              value={adminFilter}
+              onChange={(e) => setAdminFilter(e.target.value)}
+              className="px-3 py-2 border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/40 rounded-lg text-sm font-bold text-blue-700 dark:text-blue-300 focus:outline-none max-w-[220px] truncate"
+              title="Filter Mandals by Admin Scope"
+            >
+              <option value="All">👑 All Admins (Global Mandals)</option>
+              {admins.map(a => (
+                <option key={a.id || a.uid} value={String(a.id || a.uid)}>
+                  Admin: {a.name || a.username || a.email}
+                </option>
+              ))}
+            </select>
+          )}
+
           <select
             id="state-filter"
             value={filterState}
@@ -1202,9 +1295,17 @@ export default function MandalManagement() {
               <div>
                 <div className="flex justify-between items-start">
                   <div>
-                    <span className="text-xs font-semibold px-2 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded">
-                      {mandal.mandalCode}
-                    </span>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-semibold px-2 py-1 bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 rounded">
+                        {mandal.mandalCode}
+                      </span>
+                      {isSuperAdmin && (mandal.adminName || mandal.adminId) && (
+                        <span className="text-[10px] font-bold px-2 py-0.5 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40 rounded-md flex items-center gap-1">
+                          <Network className="h-2.5 w-2.5" />
+                          {getAdminName(mandal.adminId, mandal.adminName, mandal.adminEmail)}
+                        </span>
+                      )}
+                    </div>
                     <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-50 mt-2">{mandal.name}</h3>
                   </div>
                   
@@ -1364,6 +1465,28 @@ export default function MandalManagement() {
               </p>
 
               <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+                {/* Supervising Admin for Super Admin */}
+                {isSuperAdmin && (
+                  <div className="p-3 bg-blue-50/50 dark:bg-blue-950/30 rounded-xl border border-blue-100 dark:border-blue-900/40">
+                    <label className="block text-xs font-bold text-blue-700 dark:text-blue-300 uppercase tracking-wider mb-1.5 flex items-center gap-1">
+                      <Network className="h-3.5 w-3.5" /> Supervising Administrator (Admin Scope)
+                    </label>
+                    <select
+                      id="form-admin-select"
+                      value={formAdminId}
+                      onChange={(e) => setFormAdminId(e.target.value)}
+                      className="w-full px-3 py-2 border border-blue-200 dark:border-blue-800 bg-white dark:bg-zinc-900 text-xs font-bold text-blue-700 dark:text-blue-300 rounded-lg focus:outline-none"
+                    >
+                      <option value="">-- Current Admin / Self Scope --</option>
+                      {admins.map(a => (
+                        <option key={a.id || a.uid} value={String(a.id || a.uid)}>
+                          {a.name || a.username || a.email} ({a.email})
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
                 {/* Basic info */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>

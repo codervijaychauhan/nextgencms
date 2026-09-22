@@ -185,34 +185,41 @@ export default function ElectionSetup() {
   }
 
   return (
-    <div className="p-6 space-y-6 max-w-full mx-auto">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-            <Layers className="w-6 h-6 text-blue-500" />
-            Election Setup
-          </h1>
-          <p className="text-zinc-500 dark:text-zinc-400">Manage election cycles and political organizations</p>
+    <div className="space-y-6 w-full">
+      {/* Minimalistic Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-1">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Elections
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20">
+              Setup
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Manage election cycles and political parties.
+          </p>
         </div>
 
-        <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-xl w-fit">
+        <div className="flex bg-zinc-100 dark:bg-zinc-800 p-1 rounded-md w-fit">
           <button
             onClick={() => setActiveTab('elections')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'elections'
+            className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${activeTab === 'elections'
               ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-sm'
               : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
               }`}
           >
-            Election Years
+            Elections
           </button>
           <button
             onClick={() => setActiveTab('parties')}
-            className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${activeTab === 'parties'
+            className={`px-3.5 py-1.5 rounded-md text-xs font-semibold transition-all ${activeTab === 'parties'
               ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-sm'
               : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'
               }`}
           >
-            Political Parties
+            Parties
           </button>
         </div>
       </div>

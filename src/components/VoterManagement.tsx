@@ -26,12 +26,89 @@ import {
   ChevronRight,
   ChevronsLeft,
   ChevronsRight,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Edit3,
+  Phone,
+  Mail,
+  Calendar,
+  Building2,
+  Copy,
+  Check,
+  ExternalLink,
+  FileText,
+  Sparkles,
+  ShieldCheck,
+  Briefcase,
+  GraduationCap
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
 import { useAuth } from '../AuthProvider';
 import BulkImportModal from './BulkImportModal';
+import { useTableColumns, ColumnDef } from '../hooks/useTableColumns';
+import { TableColumnManager } from './common/TableColumnManager';
+
+type VoterColumnKey = 
+  | 'slNo'
+  | 'voterId'
+  | 'aadharNumber'
+  | 'name'
+  | 'relationName'
+  | 'gender'
+  | 'age'
+  | 'caste'
+  | 'houseNo'
+  | 'village'
+  | 'mandal'
+  | 'booth'
+  | 'mobile'
+  | 'additionalMobile'
+  | 'email'
+  | 'sentiment'
+  | 'favoredParty'
+  | 'isVolunteer'
+  | 'profileComplete'
+  | 'actions';
+
+const DEFAULT_VOTER_COLUMNS: ColumnDef<VoterColumnKey>[] = [
+  { id: 'voterId', label: 'EPIC / Voter ID', category: 'Identity', required: true, defaultVisible: true, minWidth: '130px' },
+  { id: 'name', label: 'Voter Name', category: 'General', required: true, defaultVisible: true, minWidth: '160px' },
+  { id: 'relationName', label: 'Father / Relative', category: 'General', defaultVisible: true, minWidth: '150px' },
+  { id: 'gender', label: 'Gender / Sex', category: 'Demographics', defaultVisible: true, minWidth: '70px' },
+  { id: 'age', label: 'Age', category: 'Demographics', defaultVisible: true, minWidth: '70px' },
+  { id: 'mobile', label: 'Primary Mobile', category: 'Contact', defaultVisible: true, minWidth: '120px' },
+  { id: 'favoredParty', label: 'Favored Party', category: 'Intelligence', defaultVisible: true, minWidth: '140px' },
+  { id: 'profileComplete', label: 'Profile Completion', category: 'Status', defaultVisible: true, minWidth: '130px' },
+  { id: 'actions', label: 'Actions', category: 'Controls', required: true, defaultVisible: true, minWidth: '100px' },
+  
+  // Additional database fields available to show/hide in the Column Customizer
+  { id: 'slNo', label: 'Sl No', category: 'General', defaultVisible: false, minWidth: '60px' },
+  { id: 'aadharNumber', label: 'Aadhaar Number', category: 'Identity', defaultVisible: false, minWidth: '130px' },
+  { id: 'caste', label: 'Caste / Community', category: 'Demographics', defaultVisible: false, minWidth: '110px' },
+  { id: 'houseNo', label: 'House Number', category: 'Address', defaultVisible: false, minWidth: '100px' },
+  { id: 'village', label: 'Village / Street', category: 'Address', defaultVisible: false, minWidth: '130px' },
+  { id: 'mandal', label: 'Mandal / Block', category: 'Address', defaultVisible: false, minWidth: '120px' },
+  { id: 'booth', label: 'Polling Station / Booth', category: 'Location', defaultVisible: false, minWidth: '150px' },
+  { id: 'additionalMobile', label: 'Alternate Mobile', category: 'Contact', defaultVisible: false, minWidth: '120px' },
+  { id: 'email', label: 'Email Address', category: 'Contact', defaultVisible: false, minWidth: '150px' },
+  { id: 'sentiment', label: 'Political Sentiment', category: 'Intelligence', defaultVisible: false, minWidth: '130px' },
+  { id: 'isVolunteer', label: 'Volunteer Status', category: 'Intelligence', defaultVisible: false, minWidth: '110px' },
+];
+
+export const DEFAULT_FALLBACK_PARTIES = [
+  { id: 'bjp', name: 'Bharatiya Janata Party', code: 'BJP', color: '#f97316' },
+  { id: 'inc', name: 'Indian National Congress', code: 'INC', color: '#3b82f6' },
+  { id: 'aap', name: 'Aam Aadmi Party', code: 'AAP', color: '#06b6d4' },
+  { id: 'bsp', name: 'Bahujan Samaj Party', code: 'BSP', color: '#1d4ed8' },
+  { id: 'sp', name: 'Samajwadi Party', code: 'SP', color: '#dc2626' },
+  { id: 'cpi_m', name: 'Communist Party of India (Marxist)', code: 'CPI(M)', color: '#b91c1c' },
+  { id: 'ncp', name: 'Nationalist Congress Party', code: 'NCP', color: '#059669' },
+  { id: 'tmc', name: 'All India Trinamool Congress', code: 'AITC', color: '#10b981' },
+  { id: 'shiv_sena', name: 'Shiv Sena', code: 'SS', color: '#ea580c' },
+  { id: 'jdu', name: 'Janata Dal (United)', code: 'JD(U)', color: '#16a34a' },
+  { id: 'rjd', name: 'Rashtriya Janata Dal', code: 'RJD', color: '#15803d' },
+  { id: 'ind', name: 'Independent / Other', code: 'IND', color: '#6b7280' },
+];
 
 interface IndiaState {
   id: string;
@@ -109,8 +186,10 @@ const calculateAge = (dobString: string): number => {
 };
 
 const VoterManagement: React.FC = () => {
-  const { user, isAdmin, isSuperAdmin, profile } = useAuth();
+  const { user, isAdmin, isSuperAdmin, isManager, profile } = useAuth();
   
+  const isVolunteer = (profile?.role === 'volunteer' || profile?.role === 'karyakarta') && !isAdmin && !isManager && !isSuperAdmin;
+
   const hasRight = (moduleId: string, right: string) => {
     const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
     if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin) return true;
@@ -163,6 +242,9 @@ const VoterManagement: React.FC = () => {
   const [boothSearchText, setBoothSearchText] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   
+  // Table Column Manager with local persistence
+  const voterColumnManager = useTableColumns('voters_table_v2', DEFAULT_VOTER_COLUMNS);
+  
   // Advanced Filter state variables
   const [showAdvancedFilters, setShowAdvancedFilters] = useState(false);
   const [filterGender, setFilterGender] = useState<string>('all');
@@ -176,11 +258,27 @@ const VoterManagement: React.FC = () => {
   
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [modalMode, setModalMode] = useState<'view' | 'edit'>('view');
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const handleCopy = (text: string, fieldName: string) => {
+    if (!text) return;
+    navigator.clipboard.writeText(text);
+    setCopiedField(fieldName);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [activeFormTab, setActiveFormTab] = useState<'main' | 'contact' | 'health_economy' | 'political_sentiment'>('main');
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
 
+  // Multi-Admin Assessments (For Super Admin oversight & isolated Admin storage)
+  const [voterAssessments, setVoterAssessments] = useState<any[]>([]);
+  const [loadingAssessments, setLoadingAssessments] = useState(false);
+
   // Political Sentiment states
+  const [parties, setParties] = useState<{ id: string; name: string; code?: string; symbol?: string; color?: string }[]>([]);
+  const [sentimentFavoredPartyId, setSentimentFavoredPartyId] = useState<string>('');
   const [sentimentStatus, setSentimentStatus] = useState<'Support' | 'Neutral' | 'Oppose' | 'Other Party'>('Neutral');
   const [sentimentNotes, setSentimentNotes] = useState('');
   const [sentimentStrength, setSentimentStrength] = useState<number>(3);
@@ -393,24 +491,25 @@ const VoterManagement: React.FC = () => {
   const rawAssignedBooths = profile?.assigned_booths || electSettings.assigned_booths || [];
 
   const allowedStateIds = !isSuperAdmin && rawState
-    ? String(rawState).split(',').map(s => s.trim()).filter(Boolean) 
+    ? String(rawState).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
     : [];
   const allowedDistrictIds = !isSuperAdmin && rawDistrict
-    ? String(rawDistrict).split(',').map(s => s.trim()).filter(Boolean) 
+    ? String(rawDistrict).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
     : [];
   const allowedConstituencyIds = !isSuperAdmin && rawConstituency
-    ? String(rawConstituency).split(',').map(s => s.trim()).filter(Boolean) 
+    ? String(rawConstituency).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
     : [];
   const allowedBoothIds = !isSuperAdmin && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
-    ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(Boolean) : (rawAssignedBooths || []).map(String)) 
+    ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') : (rawAssignedBooths || []).map(String).map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')) 
     : [];
 
-  const isRestrictedUser = !isSuperAdmin && (
+  const hasAssignedScope = isSuperAdmin || (
     allowedBoothIds.length > 0 ||
     allowedConstituencyIds.length > 0 ||
     allowedDistrictIds.length > 0 ||
     allowedStateIds.length > 0
   );
+  const isRestrictedUser = !isSuperAdmin;
 
   const fetchStates = async () => {
     try {
@@ -432,37 +531,73 @@ const VoterManagement: React.FC = () => {
   };
 
   const fetchVoters = async () => {
+    if (!isSuperAdmin && !hasAssignedScope) {
+      setVoters([]);
+      setLoading(false);
+      return;
+    }
+
     setLoading(true);
     try {
-      let url = '/api/voters?limit=1000&';
+      const params = new URLSearchParams();
+      params.set('limit', '1000');
+
+      // 1. Explicit UI filter dropdown selections
       if (selectedBoothId !== 'all') {
-        url += `boothId=${encodeURIComponent(selectedBoothId)}&`;
+        params.set('boothId', selectedBoothId);
       } else if (selectedBoothIds.length > 0) {
-        url += `boothIds=${encodeURIComponent(selectedBoothIds.join(','))}&`;
-      } else if (!isSuperAdmin && allowedBoothIds.length > 0) {
-        url += `boothIds=${encodeURIComponent(allowedBoothIds.join(','))}&`;
-      } else if (selectedConstituencyId !== 'all') {
-        url += `constituencyId=${encodeURIComponent(selectedConstituencyId)}&`;
-      } else if (selectedConstituencyIds.length > 0) {
-        url += `constituencyIds=${encodeURIComponent(selectedConstituencyIds.join(','))}&`;
-      } else if (!isSuperAdmin && allowedConstituencyIds.length > 0) {
-        url += `constituencyIds=${encodeURIComponent(allowedConstituencyIds.join(','))}&`;
-      } else if (selectedDistrictId !== 'all') {
-        url += `districtId=${encodeURIComponent(selectedDistrictId)}&`;
-      } else if (selectedDistrictIds.length > 0) {
-        url += `districtIds=${encodeURIComponent(selectedDistrictIds.join(','))}&`;
-      } else if (!isSuperAdmin && allowedDistrictIds.length > 0) {
-        url += `districtIds=${encodeURIComponent(allowedDistrictIds.join(','))}&`;
-      } else if (selectedStateId !== 'all') {
-        url += `stateId=${encodeURIComponent(selectedStateId)}&`;
-      } else if (selectedStateIds.length > 0) {
-        url += `stateIds=${encodeURIComponent(selectedStateIds.join(','))}&`;
-      } else if (!isSuperAdmin && allowedStateIds.length > 0) {
-        url += `stateIds=${encodeURIComponent(allowedStateIds.join(','))}&`;
+        params.set('boothIds', selectedBoothIds.join(','));
       }
-      
-      const res = await api.get<{ data: any[] }>(url);
-      const newVoters = (res.data || []).map(d => ({
+
+      if (selectedConstituencyId !== 'all') {
+        params.set('constituencyId', selectedConstituencyId);
+      } else if (selectedConstituencyIds.length > 0) {
+        params.set('constituencyIds', selectedConstituencyIds.join(','));
+      }
+
+      if (selectedDistrictId !== 'all') {
+        params.set('districtId', selectedDistrictId);
+      } else if (selectedDistrictIds.length > 0) {
+        params.set('districtIds', selectedDistrictIds.join(','));
+      }
+
+      if (selectedStateId !== 'all') {
+        params.set('stateId', selectedStateId);
+      } else if (selectedStateIds.length > 0) {
+        params.set('stateIds', selectedStateIds.join(','));
+      }
+
+      // 2. If non-super admin and no explicit UI filters selected, apply assigned profile scope
+      if (!isSuperAdmin) {
+        if (!params.has('boothId') && !params.has('boothIds') && allowedBoothIds.length > 0 && allowedBoothIds.length < 50) {
+          params.set('boothIds', allowedBoothIds.join(','));
+        }
+        if (!params.has('constituencyId') && !params.has('constituencyIds') && allowedConstituencyIds.length > 0) {
+          params.set('constituencyIds', allowedConstituencyIds.join(','));
+        }
+        if (!params.has('districtId') && !params.has('districtIds') && allowedDistrictIds.length > 0) {
+          params.set('districtIds', allowedDistrictIds.join(','));
+        }
+        if (!params.has('stateId') && !params.has('stateIds') && allowedStateIds.length > 0) {
+          params.set('stateIds', allowedStateIds.join(','));
+        }
+      }
+
+      const res = await api.get<{ data: any[] }>(`/api/voters?${params.toString()}`);
+      const rawList = res.data || [];
+      const seenKeys = new Set<string>();
+      const uniqueRaw: any[] = [];
+      for (const d of rawList) {
+        const key = String(d.id || d.voter_id || d.voterId || '');
+        if (key && !seenKeys.has(key)) {
+          seenKeys.add(key);
+          uniqueRaw.push(d);
+        } else if (!key) {
+          uniqueRaw.push(d);
+        }
+      }
+
+      const newVoters = uniqueRaw.map(d => ({
         ...d,
         voterId: d.voter_id || d.voterId,
         relationName: d.relation_name || d.relationName,
@@ -607,6 +742,72 @@ const VoterManagement: React.FC = () => {
     }
   }, [user]);
 
+  useEffect(() => {
+    const fetchParties = async () => {
+      try {
+        const pList = await api.get<any[]>('/api/parties');
+        const mapped = (pList || []).map(p => ({
+          id: String(p.id || p.name),
+          name: p.name || 'Party',
+          code: p.code || p.abbreviation || '',
+          symbol: p.symbol || p.logoUrl || '🗳️',
+          color: p.color || '#3b82f6'
+        }));
+        if (mapped.length > 0) {
+          // If custom parties exist, merge with standard parties so user always has complete options
+          const existingNames = new Set(mapped.map(m => m.name.toLowerCase()));
+          const combined = [...mapped, ...DEFAULT_FALLBACK_PARTIES.filter(f => !existingNames.has(f.name.toLowerCase()))];
+          setParties(combined);
+        } else {
+          setParties(DEFAULT_FALLBACK_PARTIES);
+        }
+      } catch (err) {
+        console.error("Failed to load parties, using registered defaults:", err);
+        setParties(DEFAULT_FALLBACK_PARTIES);
+      }
+    };
+    fetchParties();
+  }, []);
+
+  const loadVoterAssessments = async (voterDocId: string) => {
+    if (!voterDocId) return;
+    setLoadingAssessments(true);
+    try {
+      const list = await api.get<any[]>(`/api/voters/${voterDocId}/assessments`);
+      setVoterAssessments(list || []);
+    } catch (err) {
+      console.error("Failed to load multi-admin voter assessments:", err);
+      setVoterAssessments([]);
+    } finally {
+      setLoadingAssessments(false);
+    }
+  };
+
+  const applyAdminAssessment = (assessment: any) => {
+    if (!assessment) return;
+    setSentimentAdminId(assessment.admin_id || '');
+    setFormData(prev => ({
+      ...prev,
+      vitalStatus: assessment.vital_status || prev.vitalStatus,
+      physicalProfile: assessment.physical_profile || prev.physicalProfile,
+      disabilityCategory: assessment.disability_category || prev.disabilityCategory,
+      eciAssistanceNeeded: Boolean(assessment.eci_assistance_needed),
+      economicCategory: assessment.economic_category || prev.economicCategory,
+      incomeRange: assessment.income_range || prev.incomeRange,
+      landOwnership: assessment.land_ownership || prev.landOwnership,
+      education: assessment.education || prev.education,
+      isKaryakarta: Boolean(assessment.is_karyakarta),
+      voted: Boolean(assessment.voted)
+    }));
+    setSentimentStatus(assessment.sentiment || 'Neutral');
+    setSentimentStrength(assessment.sentiment_score !== undefined ? Number(assessment.sentiment_score) : 3);
+    setSentimentFavoredPartyId(assessment.favored_party_id || assessment.favoredPartyId || '');
+    setSentimentNotes(assessment.notes || '');
+    setSentimentIsKaryakarta(Boolean(assessment.is_karyakarta));
+    setLastSentimentUpdatedBy(assessment.recorded_by_display_name || assessment.admin_name || 'Staff');
+    setLastSentimentUpdatedAt(assessment.updated_at ? new Date(assessment.updated_at).toLocaleString() : '');
+  };
+
   const loadVoterSentiment = async (voterDocId: string, targetAdminId: string) => {
     if (!voterDocId || !targetAdminId) return;
     setLoadingSentiment(true);
@@ -617,6 +818,7 @@ const VoterManagement: React.FC = () => {
         setSentimentStatus(found.sentiment || 'Neutral');
         setSentimentNotes(found.notes || '');
         setSentimentStrength(found.sentimentScore !== undefined ? Number(found.sentimentScore) : 3);
+        setSentimentFavoredPartyId(found.favoredPartyId || found.favored_party_id || '');
         setSentimentIsKaryakarta(found.isKaryakarta || false);
         setLastSentimentUpdatedBy(found.recordedByName || found.recordedBy || 'System');
         setLastSentimentUpdatedAt(found.createdAt ? new Date(found.createdAt).toLocaleString() : '');
@@ -624,6 +826,7 @@ const VoterManagement: React.FC = () => {
         setSentimentStatus('Neutral');
         setSentimentNotes('');
         setSentimentStrength(3);
+        setSentimentFavoredPartyId('');
         setSentimentIsKaryakarta(false);
         setLastSentimentUpdatedBy('');
         setLastSentimentUpdatedAt('');
@@ -647,43 +850,78 @@ const VoterManagement: React.FC = () => {
     setError('');
 
     try {
+      const targetAdmin = sentimentAdminId || profile?.parentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '';
+      const selectedPartyObj = parties.find(p => String(p.id) === String(sentimentFavoredPartyId) || p.name === sentimentFavoredPartyId);
       const voterData = {
         ...formData,
+        adminId: targetAdmin,
         isKaryakarta: activeFormTab === 'political_sentiment' ? sentimentIsKaryakarta : formData.isKaryakarta,
+        sentimentScore: sentimentStrength,
+        sentiment: sentimentStatus,
+        favoredPartyId: sentimentFavoredPartyId,
+        favoredPartyName: selectedPartyObj?.name || '',
+        partyInclination: selectedPartyObj?.name || '',
+        notes: sentimentNotes,
         age: Number(formData.age)
       };
 
       let voterDocId = '';
+      let updatedVoterObj: Voter;
       if (editingVoter) {
         voterDocId = editingVoter.id;
         await api.put(`/api/voters/${editingVoter.id}`, voterData);
         setSuccessMessage(`Voter ${formData.name} updated successfully.`);
+        updatedVoterObj = { ...editingVoter, ...voterData, id: editingVoter.id };
       } else {
         const res = await api.post<any>('/api/voters', voterData);
-        voterDocId = res?.id || '';
+        voterDocId = res?.id || res?.data?.id || '';
         setSuccessMessage(`Voter ${formData.name} registered.`);
+        updatedVoterObj = { ...voterData, id: voterDocId } as Voter;
       }
 
       // Save Political Sentiment if provided
-      const targetAdmin = sentimentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '';
       if (targetAdmin && voterDocId) {
         try {
           await api.post('/api/voter-sentiments', {
             id: `${targetAdmin}_${voterDocId}`,
+            adminId: targetAdmin,
             voterDocId: voterDocId,
             voterName: formData.name,
             sentimentScore: sentimentStrength,
+            sentiment: sentimentStatus,
+            favoredPartyId: sentimentFavoredPartyId,
+            favoredPartyName: selectedPartyObj?.name || '',
+            partyColor: selectedPartyObj?.color || '#3b82f6',
+            partySymbol: selectedPartyObj?.symbol || '🗳️',
             notes: sentimentNotes,
             isKaryakarta: sentimentIsKaryakarta,
             recordedBy: user?.uid || '',
-            recordedByName: profile?.username || profile?.email?.split('@')[0] || 'Staff',
-            constituencyId: formData.constituencyId
+            recordedByName: profile?.username || profile?.name || profile?.email?.split('@')[0] || 'Staff',
+            constituencyId: formData.constituencyId,
+            boothId: formData.boothId
           });
+          setVoterSentiments(prev => ({
+            ...prev,
+            [voterDocId]: {
+              ...prev[voterDocId],
+              sentiment: sentimentStatus,
+              sentimentScore: sentimentStrength,
+              favoredPartyId: sentimentFavoredPartyId,
+              favoredPartyName: selectedPartyObj?.name || '',
+              partyColor: selectedPartyObj?.color || '#3b82f6',
+              partySymbol: selectedPartyObj?.symbol || '🗳️',
+              notes: sentimentNotes,
+              isKaryakarta: sentimentIsKaryakarta,
+              recordedByName: profile?.username || profile?.name || profile?.email?.split('@')[0] || 'Staff',
+              createdAt: new Date().toISOString()
+            }
+          }));
         } catch (sErr) {
           console.error("Error updating sentiment:", sErr);
         }
       }
 
+      setEditingVoter(null);
       setIsModalOpen(false);
       fetchVoters();
       setTimeout(() => setSuccessMessage(''), 3000);
@@ -707,6 +945,108 @@ const VoterManagement: React.FC = () => {
     } finally {
       setActionLoading(false);
     }
+  };
+
+  const startViewVoter = (v: Voter) => {
+    setEditingVoter(v);
+    setFormData({
+      voterId: v.voterId || '',
+      name: v.name || '',
+      relationName: v.relationName || '',
+      aadharNumber: v.aadharNumber || '',
+      gender: v.gender || 'Male',
+      age: v.age || 18,
+      dob: v.dob || '',
+      mobile: v.mobile || '',
+      email: v.email || '',
+      additionalMobile: v.additionalMobile || '',
+      address: v.address || '',
+      newAddress: v.newAddress || '',
+      houseNo: v.houseNo || '',
+      village: v.village || '',
+      caste: v.caste || 'General',
+      occupation: v.occupation || 'Private Service',
+      isKaryakarta: v.isKaryakarta || false,
+      voted: v.voted || false,
+      partNo: v.partNo || '',
+      srNo: v.srNo || '',
+      stateId: v.stateId || '',
+      districtId: v.districtId || '',
+      constituencyId: v.constituencyId || '',
+      boothId: v.boothId || '',
+      vitalStatus: v.vitalStatus || 'Active',
+      physicalProfile: v.physicalProfile || 'General',
+      disabilityCategory: v.disabilityCategory || 'None',
+      eciAssistanceNeeded: !!v.eciAssistanceNeeded,
+      economicCategory: v.economicCategory || 'APL',
+      incomeRange: v.incomeRange || '₹15,000 - ₹30,000',
+      landOwnership: v.landOwnership || 'Small Farmer',
+      education: v.education || 'Unspecified',
+    });
+    
+    // Default to target admin context
+    const currentAdminContext = profile?.parentAdminId || profile?.adminId || user?.uid || '';
+    setSentimentAdminId(currentAdminContext);
+    
+    // Explicitly load sentiment and assessments for this voter
+    const initialParty = (v as any).partyInclination || (v as any).favoredPartyId || (v as any).favoredPartyName || '';
+    setSentimentFavoredPartyId(initialParty);
+    loadVoterSentiment(v.id, currentAdminContext);
+    loadVoterAssessments(v.id);
+
+    setModalMode('view');
+    setActiveFormTab('main');
+    setIsModalOpen(true);
+  };
+
+  const startCreateVoter = () => {
+    setEditingVoter(null);
+    setFormData({
+      voterId: '', 
+      name: '', 
+      relationName: '',
+      aadharNumber: '',
+      gender: 'Male', 
+      age: 18, 
+      dob: '', 
+      mobile: '', 
+      email: '',
+      additionalMobile: '',
+      address: '', 
+      newAddress: '',
+      houseNo: '', 
+      village: '', 
+      caste: 'General', 
+      occupation: 'Private Service', 
+      isKaryakarta: false, 
+      voted: false, 
+      partNo: '', 
+      srNo: '', 
+      stateId: selectedStateIds.length > 0 ? selectedStateIds[0] : (selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '')),
+      districtId: selectedDistrictIds.length > 0 ? selectedDistrictIds[0] : (selectedDistrictId !== 'all' ? selectedDistrictId : ''),
+      constituencyId: selectedConstituencyIds.length > 0 ? selectedConstituencyIds[0] : (selectedConstituencyId !== 'all' ? selectedConstituencyId : ''),
+      boothId: selectedBoothIds.length > 0 ? selectedBoothIds[0] : (selectedBoothId !== 'all' ? selectedBoothId : ''),
+      vitalStatus: 'Active',
+      physicalProfile: 'General',
+      disabilityCategory: 'None',
+      eciAssistanceNeeded: false,
+      economicCategory: 'APL',
+      incomeRange: '₹15,000 - ₹30,000',
+      landOwnership: 'Small Farmer',
+      education: 'Unspecified',
+    });
+    setSentimentStatus('Neutral');
+    setSentimentNotes('');
+    setSentimentStrength(3);
+    setSentimentFavoredPartyId('');
+    setSentimentIsKaryakarta(false);
+    setLastSentimentUpdatedBy('');
+    setLastSentimentUpdatedAt('');
+    setSentimentAdminId(profile?.parentAdminId || profile?.adminId || user?.uid || '');
+    setVoterAssessments([]);
+    setModalMode('edit');
+    setActiveFormTab('main');
+    setIsModalOpen(true);
   };
 
   const startEditVoter = (v: Voter) => {
@@ -746,61 +1086,140 @@ const VoterManagement: React.FC = () => {
       education: v.education || 'Unspecified',
     });
     
-    // Default to current admin context or parent admin context
-    const currentAdminContext = user?.uid || '';
+    // Default to target admin context
+    const currentAdminContext = profile?.parentAdminId || profile?.adminId || user?.uid || '';
     setSentimentAdminId(currentAdminContext);
     
-    // Explicitly load sentiment for this voter & admin context
+    // Explicitly load sentiment and assessments for this voter
+    const initialParty = (v as any).partyInclination || (v as any).favoredPartyId || (v as any).favoredPartyName || '';
+    setSentimentFavoredPartyId(initialParty);
     loadVoterSentiment(v.id, currentAdminContext);
+    loadVoterAssessments(v.id);
 
-    setActiveFormTab('main');
+    setModalMode('edit');
+    setActiveFormTab(isVolunteer ? 'health_economy' : 'main');
     setIsModalOpen(true);
+  };
+
+  // Helper to resolve clean party abbreviation
+  const getPartyAbbreviation = (partyIdentifier: string) => {
+    if (!partyIdentifier) return '';
+    const trimmed = String(partyIdentifier).trim();
+    const lower = trimmed.toLowerCase();
+
+    // Check for non-decided or empty values
+    if (['none', 'na', 'n/a', 'n', '-', 'not decided', 'undecided', 'null', 'undefined', 'not set', 'no', 'unassigned'].includes(lower)) {
+      return '';
+    }
+
+    const partyObj = parties.find(
+      p => p.id === partyIdentifier || 
+           p.name?.toLowerCase() === partyIdentifier.toLowerCase() || 
+           p.code?.toLowerCase() === partyIdentifier.toLowerCase()
+    );
+    if (partyObj?.code) return partyObj.code;
+
+    const matchParen = trimmed.match(/\(([^)]+)\)/);
+    if (matchParen && matchParen[1]) return matchParen[1].toUpperCase();
+
+    if (lower.includes('bharatiya janata') || lower === 'bjp') return 'BJP';
+    if (lower.includes('congress') || lower === 'inc') return 'INC';
+    if (lower.includes('aam aadmi') || lower === 'aap') return 'AAP';
+    if (lower.includes('bahujan samaj') || lower === 'bsp') return 'BSP';
+    if (lower.includes('samajwadi') || lower === 'sp') return 'SP';
+    if (lower.includes('marxist') || lower.includes('cpi(m)') || lower === 'cpim') return 'CPI(M)';
+    if (lower.includes('communist') || lower === 'cpi') return 'CPI';
+    if (lower.includes('nationalist congress') || lower === 'ncp') return 'NCP';
+    if (lower.includes('trinamool') || lower === 'aitc' || lower === 'tmc') return 'AITC';
+    if (lower.includes('shiv sena') || lower === 'ss') return 'SS';
+    if (lower.includes('janata dal') || lower === 'jdu' || lower === 'jd(u)') return 'JD(U)';
+    if (lower.includes('rashtriya janata') || lower === 'rjd') return 'RJD';
+    if (lower.includes('independent') || lower === 'ind') return 'IND';
+
+    if (trimmed.length <= 6) return trimmed.toUpperCase();
+    return trimmed.split(' ').map(w => w[0]).join('').toUpperCase();
   };
 
   // Helper to extract full resolved location for a voter record
   const getVoterLocation = (v: Voter) => {
     const bId = String(v.boothId || (v as any).booth_id || '').trim();
-    const boothObj = booths.find(b => String(b.id) === bId);
+    const boothObj = booths.find(b => String(b.id) === bId || String(b.boothNumber) === bId || b.name === bId);
     
-    const cId = String(v.constituencyId || (v as any).constituency_id || (boothObj ? (boothObj.constituencyId || (boothObj as any).constituency_id) : '') || '').trim();
-    const constObj = constituencies.find(c => String(c.id) === cId);
+    const rawCId = String(v.constituencyId || (v as any).constituency_id || (boothObj ? (boothObj.constituencyId || (boothObj as any).constituency_id) : '') || '').trim();
+    const constObj = constituencies.find(c => String(c.id) === rawCId || c.name === rawCId);
+    const cId = constObj ? String(constObj.id) : rawCId;
+    const cName = constObj ? constObj.name : rawCId;
     
-    const dId = String(v.districtId || (v as any).district_id || (constObj ? (constObj.districtId || (constObj as any).district_id) : '') || '').trim();
-    const distObj = districts.find(d => String(d.id) === dId);
+    const rawDId = String(v.districtId || (v as any).district_id || (constObj ? (constObj.districtId || (constObj as any).district_id) : '') || '').trim();
+    const distObj = districts.find(d => String(d.id) === rawDId || d.name === rawDId);
+    const dId = distObj ? String(distObj.id) : rawDId;
+    const dName = distObj ? distObj.name : rawDId;
     
-    const sId = String(v.stateId || (v as any).state_id || (distObj ? (distObj.stateId || (distObj as any).state_id) : '') || (constObj ? (constObj.stateId || (constObj as any).state_id) : '') || '').trim();
+    const rawSId = String(v.stateId || (v as any).state_id || (distObj ? (distObj.stateId || (distObj as any).state_id) : '') || (constObj ? (constObj.stateId || (constObj as any).state_id) : '') || '').trim();
+    const stateObj = states.find(s => String(s.id) === rawSId || s.name === rawSId || s.code === rawSId);
+    const sId = stateObj ? String(stateObj.id) : rawSId;
+    const sName = stateObj ? stateObj.name : rawSId;
     
-    return { boothId: bId, constituencyId: cId, districtId: dId, stateId: sId };
+    return { 
+      boothId: bId, 
+      boothNumber: boothObj ? boothObj.boothNumber : '',
+      constituencyId: cId, 
+      constituencyName: cName,
+      districtId: dId, 
+      districtName: dName,
+      stateId: sId,
+      stateName: sName
+    };
   };
 
   // Determine if a voter is within the user's assigned scope
   const matchesUserScope = (v: Voter) => {
     if (isSuperAdmin) return true;
-    if (!isRestrictedUser) return true;
+    if (!hasAssignedScope) return false;
 
     const loc = getVoterLocation(v);
 
     // 1. Check booth level restriction
     if (allowedBoothIds.length > 0) {
-      return Boolean(loc.boothId && allowedBoothIds.includes(loc.boothId));
+      const matchBooth = allowedBoothIds.some(id => 
+        id === loc.boothId || 
+        id === loc.boothNumber ||
+        booths.some(b => String(b.id) === id && (String(b.boothNumber) === loc.boothId || b.name === loc.boothId || String(b.id) === loc.boothId))
+      );
+      if (matchBooth) return true;
     }
 
     // 2. Check constituency level restriction
     if (allowedConstituencyIds.length > 0) {
-      return Boolean(loc.constituencyId && allowedConstituencyIds.includes(loc.constituencyId));
+      const matchConst = allowedConstituencyIds.some(id => 
+        id === loc.constituencyId || 
+        id === loc.constituencyName ||
+        constituencies.some(c => String(c.id) === id && (c.name === loc.constituencyName || String(c.id) === loc.constituencyId))
+      );
+      if (matchConst) return true;
     }
 
     // 3. Check district level restriction
     if (allowedDistrictIds.length > 0) {
-      return Boolean(loc.districtId && allowedDistrictIds.includes(loc.districtId));
+      const matchDist = allowedDistrictIds.some(id => 
+        id === loc.districtId || 
+        id === loc.districtName ||
+        districts.some(d => String(d.id) === id && (d.name === loc.districtName || String(d.id) === loc.districtId))
+      );
+      if (matchDist) return true;
     }
 
     // 4. Check state level restriction
     if (allowedStateIds.length > 0) {
-      return Boolean(loc.stateId && allowedStateIds.includes(loc.stateId));
+      const matchState = allowedStateIds.some(id => 
+        id === loc.stateId || 
+        id === loc.stateName ||
+        states.some(s => String(s.id) === id && (s.name === loc.stateName || s.code === loc.stateName || String(s.id) === loc.stateId))
+      );
+      if (matchState) return true;
     }
 
-    return true;
+    return false;
   };
 
   // Scoped State IDs for dropdown filters
@@ -885,107 +1304,146 @@ const VoterManagement: React.FC = () => {
     return null;
   }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
 
-  const filteredVoters = voters.filter(v => {
-    // 1. Full text search matching
-    const term = searchTerm.trim().toLowerCase();
-    if (term) {
-      const matchesSearch = (
-        v.name?.toLowerCase().includes(term) || 
-        v.voterId?.toLowerCase().includes(term) ||
-        v.mobile?.includes(term) ||
-        v.aadharNumber?.includes(term) ||
-        v.houseNo?.toLowerCase().includes(term) ||
-        v.village?.toLowerCase().includes(term) ||
-        v.address?.toLowerCase().includes(term)
-      );
-      if (!matchesSearch) return false;
-    }
+  const filteredVoters = useMemo(() => {
+    const seenKeys = new Set<string>();
+    return voters.filter(v => {
+      const uniqueKey = String(v.id || v.voterId || '');
+      if (uniqueKey) {
+        if (seenKeys.has(uniqueKey)) return false;
+        seenKeys.add(uniqueKey);
+      }
 
-    // 2. Secure demographic scope enforcement for non-Super Admins
-    if (!matchesUserScope(v)) return false;
+      // 1. Full text search matching
+      const term = searchTerm.trim().toLowerCase();
+      if (term) {
+        const matchesSearch = (
+          v.name?.toLowerCase().includes(term) || 
+          v.voterId?.toLowerCase().includes(term) ||
+          v.mobile?.includes(term) ||
+          v.aadharNumber?.includes(term) ||
+          v.houseNo?.toLowerCase().includes(term) ||
+          v.village?.toLowerCase().includes(term) ||
+          v.address?.toLowerCase().includes(term)
+        );
+        if (!matchesSearch) return false;
+      }
 
-    // 3. Instant On-Screen Demographic Dropdown Filters
-    const loc = getVoterLocation(v);
+      // 2. Secure demographic scope enforcement for non-Super Admins
+      if (!matchesUserScope(v)) return false;
 
-    // State filter
-    if (selectedStateIds.length > 0) {
-      if (!loc.stateId || !selectedStateIds.includes(loc.stateId)) return false;
-    } else if (selectedStateId && selectedStateId !== 'all') {
-      if (loc.stateId !== selectedStateId) return false;
-    }
+      // 3. Instant On-Screen Demographic Dropdown Filters
+      const loc = getVoterLocation(v);
 
-    // District filter
-    if (selectedDistrictIds.length > 0) {
-      if (!loc.districtId || !selectedDistrictIds.includes(loc.districtId)) return false;
-    } else if (selectedDistrictId && selectedDistrictId !== 'all') {
-      if (loc.districtId !== selectedDistrictId) return false;
-    }
+      // State filter
+      if (selectedStateIds.length > 0) {
+        if (!loc.stateId || !selectedStateIds.includes(loc.stateId)) return false;
+      } else if (selectedStateId && selectedStateId !== 'all') {
+        if (loc.stateId !== selectedStateId) return false;
+      }
 
-    // Constituency filter
-    if (selectedConstituencyIds.length > 0) {
-      if (!loc.constituencyId || !selectedConstituencyIds.includes(loc.constituencyId)) return false;
-    } else if (selectedConstituencyId && selectedConstituencyId !== 'all') {
-      if (loc.constituencyId !== selectedConstituencyId) return false;
-    }
+      // District filter
+      if (selectedDistrictIds.length > 0) {
+        if (!loc.districtId || !selectedDistrictIds.includes(loc.districtId)) return false;
+      } else if (selectedDistrictId && selectedDistrictId !== 'all') {
+        if (loc.districtId !== selectedDistrictId) return false;
+      }
 
-    // Booth filter
-    if (selectedBoothIds.length > 0) {
-      if (!loc.boothId || !selectedBoothIds.includes(loc.boothId)) return false;
-    } else if (selectedBoothId && selectedBoothId !== 'all') {
-      if (loc.boothId !== selectedBoothId) return false;
-    }
+      // Constituency filter
+      if (selectedConstituencyIds.length > 0) {
+        if (!loc.constituencyId || !selectedConstituencyIds.includes(loc.constituencyId)) return false;
+      } else if (selectedConstituencyId && selectedConstituencyId !== 'all') {
+        if (loc.constituencyId !== selectedConstituencyId) return false;
+      }
 
-    // Filter by vital status
-    const vStatus = v.vitalStatus || 'Active';
-    if (filterVitalStatus !== 'all') {
-      if (filterVitalStatus === 'Active' && vStatus !== 'Active') return false;
-      if (filterVitalStatus === 'Deceased' && vStatus !== 'Deceased') return false;
-      if (filterVitalStatus === 'Migrated/Shifted' && vStatus !== 'Migrated/Shifted' && vStatus !== 'Migrated') return false;
-    }
+      // Booth filter
+      if (selectedBoothIds.length > 0) {
+        if (!loc.boothId || !selectedBoothIds.includes(loc.boothId)) return false;
+      } else if (selectedBoothId && selectedBoothId !== 'all') {
+        if (loc.boothId !== selectedBoothId) return false;
+      }
 
-    // Filter by Gender
-    if (filterGender !== 'all' && v.gender !== filterGender) return false;
+      // Filter by vital status
+      const vStatus = v.vitalStatus || 'Active';
+      if (filterVitalStatus !== 'all') {
+        if (filterVitalStatus === 'Active' && vStatus !== 'Active') return false;
+        if (filterVitalStatus === 'Deceased' && vStatus !== 'Deceased') return false;
+        if (filterVitalStatus === 'Migrated/Shifted' && vStatus !== 'Migrated/Shifted' && vStatus !== 'Migrated') return false;
+      }
 
-    // Filter by Caste
-    const vCaste = v.caste || 'General';
-    if (filterCaste !== 'all' && vCaste !== filterCaste) return false;
+      // Filter by Gender
+      if (filterGender !== 'all' && v.gender !== filterGender) return false;
 
-    // Filter by Age Group
-    if (filterAgeGroup !== 'all') {
-      const ageNum = v.age || 0;
-      if (filterAgeGroup === 'under30' && ageNum >= 30) return false;
-      if (filterAgeGroup === '30to49' && (ageNum < 30 || ageNum > 49)) return false;
-      if (filterAgeGroup === '50to69' && (ageNum < 50 || ageNum > 69)) return false;
-      if (filterAgeGroup === '70plus' && ageNum < 70) return false;
-    }
+      // Filter by Caste
+      const vCaste = v.caste || 'General';
+      if (filterCaste !== 'all' && vCaste !== filterCaste) return false;
 
-    // Filter by Economic Category
-    const vEco = v.economicCategory || 'APL';
-    if (filterEconomicCategory !== 'all' && vEco !== filterEconomicCategory) return false;
+      // Filter by Age Group
+      if (filterAgeGroup !== 'all') {
+        const ageNum = v.age || 0;
+        if (filterAgeGroup === 'under30' && ageNum >= 30) return false;
+        if (filterAgeGroup === '30to49' && (ageNum < 30 || ageNum > 49)) return false;
+        if (filterAgeGroup === '50to69' && (ageNum < 50 || ageNum > 69)) return false;
+        if (filterAgeGroup === '70plus' && ageNum < 70) return false;
+      }
 
-    // Filter by Sentiment
-    if (filterSentiment !== 'all') {
-      const sData = voterSentiments[v.id];
-      const sVal = (sData?.sentiment as string) || 'Unassigned';
-      if (filterSentiment !== sVal) return false;
-    }
+      // Filter by Economic Category
+      const vEco = v.economicCategory || 'APL';
+      if (filterEconomicCategory !== 'all' && vEco !== filterEconomicCategory) return false;
 
-    // Filter by Profile Completeness
-    if (filterCompleteness !== 'all') {
-      const comp = getCompletenessPercent(v);
-      if (filterCompleteness === 'complete' && comp < 80) return false;
-      if (filterCompleteness === 'incomplete' && comp >= 80) return false;
-    }
+      // Filter by Sentiment
+      if (filterSentiment !== 'all') {
+        const sData = voterSentiments[v.id];
+        const sVal = (sData?.sentiment as string) || 'Unassigned';
+        if (filterSentiment !== sVal) return false;
+      }
 
-    // Filter by Karyakarta (Volunteer)
-    if (filterIsKaryakarta !== 'all') {
-      const matchesKaryakarta = v.isKaryakarta === true;
-      if (filterIsKaryakarta === 'yes' && !matchesKaryakarta) return false;
-      if (filterIsKaryakarta === 'no' && matchesKaryakarta) return false;
-    }
+      // Filter by Profile Completeness
+      if (filterCompleteness !== 'all') {
+        const comp = getCompletenessPercent(v);
+        if (filterCompleteness === 'complete' && comp < 80) return false;
+        if (filterCompleteness === 'incomplete' && comp >= 80) return false;
+      }
 
-    return true;
-  });
+      // Filter by Karyakarta (Volunteer)
+      if (filterIsKaryakarta !== 'all') {
+        const matchesKaryakarta = v.isKaryakarta === true;
+        if (filterIsKaryakarta === 'yes' && !matchesKaryakarta) return false;
+        if (filterIsKaryakarta === 'no' && matchesKaryakarta) return false;
+      }
+
+      return true;
+    });
+  }, [
+    voters,
+    searchTerm,
+    filterGender,
+    filterCaste,
+    filterAgeGroup,
+    filterEconomicCategory,
+    filterSentiment,
+    filterCompleteness,
+    filterIsKaryakarta,
+    filterVitalStatus,
+    selectedStateId,
+    selectedStateIds,
+    selectedDistrictId,
+    selectedDistrictIds,
+    selectedConstituencyId,
+    selectedConstituencyIds,
+    selectedBoothId,
+    selectedBoothIds,
+    voterSentiments,
+    isSuperAdmin,
+    hasAssignedScope,
+    allowedBoothIds,
+    allowedConstituencyIds,
+    allowedDistrictIds,
+    allowedStateIds,
+    booths,
+    constituencies,
+    districts,
+    states
+  ]);
 
   const filterableStates = states.filter(s => 
     !validScopedStateIds || validScopedStateIds.includes(String(s.id))
@@ -1034,7 +1492,7 @@ const VoterManagement: React.FC = () => {
   const paginatedVoters = filteredVoters.slice((activePage - 1) * pageSize, activePage * pageSize);
 
   return (
-    <div className="p-4 sm:p-8 space-y-8 animate-in fade-in duration-500 max-w-full mx-auto">
+    <div className="space-y-6 w-full animate-in fade-in duration-500">
       {/* Notifications */}
       <AnimatePresence>
         {successMessage && (
@@ -1052,154 +1510,101 @@ const VoterManagement: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 sm:gap-6 bg-white dark:bg-zinc-950 p-4 sm:p-6 md:p-8 rounded-2xl md:rounded-[32px] border border-zinc-200 dark:border-zinc-800 shadow-sm shadow-zinc-100 dark:shadow-none">
-        <div className="space-y-2 w-full md:w-auto">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-zinc-950 dark:bg-zinc-100 flex items-center justify-center text-white dark:text-zinc-950 shadow-lg shrink-0">
-              <Users size={24} />
-            </div>
-            <div>
-              <h1 className="text-xl sm:text-2xl font-black text-zinc-900 dark:text-white tracking-tight">Voter Registry</h1>
-              <p className="text-[10px] text-zinc-500 font-bold uppercase tracking-widest">Election Management System</p>
-            </div>
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Voters
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+              {voters.length.toLocaleString()} Total
+            </span>
           </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Electorate directory and registration records.
+          </p>
         </div>
 
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-          {hasRight('voters', 'c') && (
+          {!isVolunteer && hasRight('voters', 'c') && (
             <>
               <button 
                 onClick={() => setIsImportModalOpen(true)}
-                className="h-11 px-5 rounded-[14px] bg-zinc-100 dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 font-black text-[10px] uppercase tracking-wider hover:bg-zinc-200 dark:hover:bg-zinc-800 transition-all flex items-center justify-center gap-2 shadow-sm"
+                className="h-9 px-3.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-semibold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-1.5 shadow-xs"
               >
-                <Upload size={14} /> Bulk Import Voters
+                <Upload size={13} /> Import
               </button>
               <button 
-                onClick={() => {
-                  setEditingVoter(null);
-                  setFormData({
-                    voterId: '', 
-                    name: '', 
-                    gender: 'Male', 
-                    age: 18, 
-                    dob: '', 
-                    mobile: '', 
-                    email: '',
-                    additionalMobile: '',
-                    address: '', 
-                    newAddress: '',
-                    houseNo: '', 
-                    village: '', 
-                    caste: 'General', 
-                    occupation: 'Private Service', 
-                    isKaryakarta: false, 
-                    voted: false, 
-                    partNo: '', 
-                    srNo: '',
-                    stateId: selectedStateIds.length > 0 ? selectedStateIds[0] : (selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '')),
-                    districtId: selectedDistrictIds.length > 0 ? selectedDistrictIds[0] : (selectedDistrictId !== 'all' ? selectedDistrictId : ''),
-                    constituencyId: selectedConstituencyIds.length > 0 ? selectedConstituencyIds[0] : (selectedConstituencyId !== 'all' ? selectedConstituencyId : ''),
-                    boothId: selectedBoothIds.length > 0 ? selectedBoothIds[0] : (selectedBoothId !== 'all' ? selectedBoothId : ''),
-                    vitalStatus: 'Active',
-                    physicalProfile: 'General',
-                    disabilityCategory: 'None',
-                    eciAssistanceNeeded: false,
-                    economicCategory: 'APL',
-                    incomeRange: '₹15,000 - ₹30,000',
-                    landOwnership: 'Small Farmer',
-                    education: 'Unspecified',
-                  });
-                  setSentimentStatus('Neutral');
-                  setSentimentNotes('');
-                  setLastSentimentUpdatedBy('');
-                  setLastSentimentUpdatedAt('');
-                  setSentimentAdminId(user?.uid || '');
-                  setActiveFormTab('main');
-                  setIsModalOpen(true);
-                }}
-                className="webapp-button-primary h-11 px-6 flex items-center justify-center gap-2 text-[10px] uppercase tracking-wider font-black shadow-lg shadow-blue-600/10"
+                onClick={startCreateVoter}
+                className="webapp-button-primary h-9 px-4 flex items-center justify-center gap-1.5 text-xs font-semibold shadow-xs"
               >
-                <Plus size={18} /> Add Voter
+                <Plus size={15} /> Add Voter
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Dynamic Summary Stats Cards Section */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
+      {/* Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {(() => {
           const stats = computeSectionAggregates();
           const sections = [
             {
-              title: "Main Profile",
-              desc: "Name, ID, Aadhaar, Gender, DOB",
+              title: "Profile",
               filled: stats.main.filledVoters,
               blank: stats.main.blankVoters,
               color: "text-emerald-600 dark:text-emerald-400",
               bgColor: "bg-emerald-50 dark:bg-emerald-950/20",
-              borderColor: "border-emerald-100 dark:border-emerald-900/30",
               progressColor: "bg-emerald-500",
               filledFields: stats.main.totalFilledFields,
               blankFields: stats.main.totalBlankFields,
-              totalFieldsCount: 8,
-              icon: <UserCheck className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+              icon: <UserCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
             },
             {
-              title: "Contact & Address",
-              desc: "Mobile, Village, District, Booth",
+              title: "Contact & Area",
               filled: stats.address.filledVoters,
               blank: stats.address.blankVoters,
               color: "text-blue-600 dark:text-blue-400",
               bgColor: "bg-blue-50 dark:bg-blue-950/20",
-              borderColor: "border-blue-100 dark:border-blue-900/30",
               progressColor: "bg-blue-500",
               filledFields: stats.address.totalFilledFields,
               blankFields: stats.address.totalBlankFields,
-              totalFieldsCount: 10,
-              icon: <MapPin className="w-5 h-5 text-blue-600 dark:text-blue-400" />
+              icon: <MapPin className="w-4 h-4 text-blue-600 dark:text-blue-400" />
             },
             {
               title: "Health & Vital",
-              desc: "Status, Disability, ECI help",
               filled: stats.health.filledVoters,
               blank: stats.health.blankVoters,
               color: "text-purple-600 dark:text-purple-400",
               bgColor: "bg-purple-50 dark:bg-purple-950/15",
-              borderColor: "border-purple-100 dark:border-purple-900/30",
               progressColor: "bg-purple-500",
               filledFields: stats.health.totalFilledFields,
               blankFields: stats.health.totalBlankFields,
-              totalFieldsCount: 4,
-              icon: <Activity className="w-5 h-5 text-purple-600 dark:text-purple-400" />
+              icon: <Activity className="w-4 h-4 text-purple-600 dark:text-purple-400" />
             },
             {
-              title: "Economy Stats",
-              desc: "Category, Income, Land ownership",
+              title: "Economy",
               filled: stats.economy.filledVoters,
               blank: stats.economy.blankVoters,
               color: "text-orange-600 dark:text-orange-400",
               bgColor: "bg-orange-50 dark:bg-orange-950/20",
-              borderColor: "border-orange-100 dark:border-orange-900/30",
               progressColor: "bg-orange-500",
               filledFields: stats.economy.totalFilledFields,
               blankFields: stats.economy.totalBlankFields,
-              totalFieldsCount: 3,
-              icon: <Coins className="w-5 h-5 text-orange-600 dark:text-orange-400" />
+              icon: <Coins className="w-4 h-4 text-orange-600 dark:text-orange-400" />
             },
             {
-              title: "Political Sentiment",
-              desc: "Voter political support sentiment",
+              title: "Sentiment",
               filled: stats.political.filledVoters,
               blank: stats.political.blankVoters,
               color: "text-amber-600 dark:text-amber-400",
               bgColor: "bg-amber-50 dark:bg-amber-950/20",
-              borderColor: "border-amber-100 dark:border-amber-900/30",
               progressColor: "bg-amber-500",
               filledFields: stats.political.totalFilledFields,
               blankFields: stats.political.totalBlankFields,
-              totalFieldsCount: 1,
-              icon: <CheckCircle className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+              icon: <CheckCircle className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             }
           ];
 
@@ -1209,50 +1614,31 @@ const VoterManagement: React.FC = () => {
             return (
               <div 
                 key={idx} 
-                className="bg-white dark:bg-zinc-950 p-4 rounded-3xl border border-zinc-200 dark:border-zinc-800 shadow-sm flex flex-col justify-between hover:shadow-md transition-all gap-4"
+                className="bg-white dark:bg-zinc-900 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xs flex flex-col justify-between hover:border-zinc-300 dark:hover:border-zinc-700 transition-all gap-2.5"
               >
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
-                    <div className={`p-2 rounded-xl ${sec.bgColor} ${sec.color}`}>
+                    <div className={`p-1.5 rounded-lg ${sec.bgColor} ${sec.color}`}>
                       {sec.icon}
                     </div>
-                    <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-900 px-2 py-0.5 rounded-full select-none">
-                      {compPercent}% Filled
+                    <span className="text-[10px] font-bold text-zinc-500 dark:text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
+                      {compPercent}%
                     </span>
                   </div>
-                  <div>
-                    <h3 className="text-xs font-black text-zinc-800 dark:text-zinc-200 tracking-tight leading-none">{sec.title}</h3>
-                    <p className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold mt-1 leading-tight truncate" title={sec.desc}>
-                      {sec.desc}
-                    </p>
-                  </div>
+                  <h3 className="text-xs font-bold text-zinc-800 dark:text-zinc-200">{sec.title}</h3>
                 </div>
 
-                <div className="space-y-3.5 pt-1">
-                  {/* Progress bar */}
-                  <div className="w-full bg-zinc-100 dark:bg-zinc-900 rounded-full h-1.5 overflow-hidden">
+                <div className="space-y-2">
+                  <div className="w-full bg-zinc-100 dark:bg-zinc-800 rounded-full h-1 overflow-hidden">
                     <div 
-                      className={`h-full ${sec.progressColor} transition-all duration-500`}
+                      className={`h-full ${sec.progressColor} transition-all duration-300`}
                       style={{ width: `${compPercent}%` }}
                     />
                   </div>
                   
-                  {/* Counts */}
-                  <div className="grid grid-cols-2 gap-2 border-t border-zinc-100 dark:border-zinc-900 pt-2 flex-wrap">
-                    <div>
-                      <div className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-widest leading-none">Filled</div>
-                      <div className="text-[13px] font-black text-zinc-800 dark:text-zinc-100 mt-1 flex items-baseline gap-0.5">
-                        <span>{sec.filled}</span>
-                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold">V</span>
-                      </div>
-                    </div>
-                    <div className="border-l border-zinc-100 dark:border-zinc-900 pl-2">
-                      <div className="text-[8px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-widest leading-none font-bold">Blank</div>
-                      <div className="text-[13px] font-black text-zinc-500 dark:text-zinc-400 mt-1 flex items-baseline gap-0.5">
-                        <span>{sec.blank}</span>
-                        <span className="text-[9px] text-zinc-500 dark:text-zinc-400 font-bold">V</span>
-                      </div>
-                    </div>
+                  <div className="flex items-center justify-between text-[10px] text-zinc-500 dark:text-zinc-400">
+                    <span>Filled: <strong className="text-zinc-800 dark:text-zinc-200">{sec.filled}</strong></span>
+                    <span>Blank: <strong>{sec.blank}</strong></span>
                   </div>
                 </div>
               </div>
@@ -1779,160 +2165,291 @@ const VoterManagement: React.FC = () => {
           </div>
         </div>
 
+        {/* Table Action Toolbar with Column Customizer */}
+        <div className="px-6 py-3 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-xs font-bold text-zinc-600 dark:text-zinc-400">
+              Showing <strong className="text-zinc-900 dark:text-white">{filteredVoters.length}</strong> registered voters
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <TableColumnManager columnManager={voterColumnManager} tableName="Voters" />
+          </div>
+        </div>
+
         {/* Table View (Desktop) */}
         <div className="overflow-x-auto hidden md:block">
             <table className="w-full text-left border-collapse min-w-[1000px]">
             <thead>
               <tr className="bg-zinc-50/50 dark:bg-zinc-900/30 border-b border-zinc-200 dark:border-zinc-800">
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Sl No</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">EPIC & Aadhaar</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Name</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Father/Husband Name</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Sex</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Age</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Type</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Village</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Booth</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Mobile</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Sentiment</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Profile Complete</th>
-                <th className="px-6 py-4 text-right text-[10px] font-black uppercase text-zinc-400 tracking-wider">Action</th>
+                {voterColumnManager.visibleColumns.map(col => (
+                  <th
+                    key={col.id}
+                    className={`px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider ${col.id === 'actions' ? 'text-right' : ''}`}
+                    style={{ minWidth: col.minWidth }}
+                  >
+                    {col.label}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
               {loading && voters.length === 0 ? (
-                <tr><td colSpan={13} className="py-20 text-center"><Loader2 size={24} className="animate-spin mx-auto text-zinc-300" /></td></tr>
+                <tr>
+                  <td colSpan={voterColumnManager.visibleColumns.length || 1} className="py-20 text-center">
+                    <Loader2 size={24} className="animate-spin mx-auto text-zinc-300" />
+                  </td>
+                </tr>
               ) : filteredVoters.length === 0 ? (
-                <tr><td colSpan={13} className="py-20 text-center text-zinc-400 text-xs">No voters found matching criteria.</td></tr>
+                <tr>
+                  <td colSpan={voterColumnManager.visibleColumns.length || 1} className="py-20 text-center text-zinc-400 text-xs">
+                    No voters found matching criteria.
+                  </td>
+                </tr>
               ) : (
                 paginatedVoters.map((v, index) => (
-                   <tr key={v.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 transition-colors">
-                    <td className="px-6 py-5 text-xs font-bold text-zinc-400 dark:text-zinc-650">
-                      {(activePage - 1) * pageSize + index + 1}
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-[10px] font-black text-blue-600 bg-blue-50 dark:bg-zinc-850 px-1.5 py-0.5 rounded w-fit">
-                          {v.voterId}
-                        </span>
-                        {v.aadharNumber && (
-                          <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono leading-none mt-1">
-                            Aadhaar: {v.aadharNumber}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-6 py-5">
-                      <div className="font-bold text-zinc-900 dark:text-zinc-100 text-sm leading-tight">{v.name}</div>
-                    </td>
-                    <td className="px-6 py-5">
-                      {v.relationName ? (
-                        <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-                          {v.relationName}
-                        </div>
-                      ) : (
-                        <span className="text-xs text-zinc-400 italic">Not set</span>
-                      )}
-                    </td>
-                    <td className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      {v.gender ? v.gender.charAt(0).toUpperCase() : 'N/A'}
-                    </td>
-                    <td className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      {v.age} Yrs
-                    </td>
-                    <td className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      <div className="font-bold">{v.caste || 'General'}</div>
-                    </td>
-                    <td className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      <div>{v.village || 'N/A'}</div>
-                    </td>
-                    <td className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      {(() => {
-                        const booth = booths.find(b => b.id === v.boothId);
-                        return (
-                          <div>
-                            <div className="line-clamp-1 text-zinc-800 dark:text-zinc-200 font-bold">{booth ? booth.name : 'N/A'}</div>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      <div className="font-bold">{v.mobile || 'No Mobile'}</div>
-                      {v.additionalMobile && <div className="text-[10px] text-zinc-400 dark:text-zinc-500 font-normal mt-0.5">Alt: {v.additionalMobile}</div>}
-                      {v.email && <div className="text-[10px] text-blue-500 hover:underline mt-0.5 max-w-[150px] truncate" title={v.email}>{v.email}</div>}
-                    </td>
-                    <td className="px-6 py-5">
-                      {(() => {
-                        const sentimentData = voterSentiments[v.id];
-                        const sentiment = sentimentData?.sentiment as string || 'Unassigned';
-                        
-                        let badgeColor = 'bg-zinc-100 text-zinc-650 dark:bg-zinc-900 dark:text-zinc-400';
-                        if (sentiment === 'Support') badgeColor = 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-500/20';
-                        else if (sentiment === 'Neutral') badgeColor = 'bg-zinc-500/10 text-zinc-655 dark:bg-zinc-800 dark:text-zinc-400 border border-zinc-500/20';
-                        else if (sentiment === 'Oppose') badgeColor = 'bg-red-500/10 text-red-650 dark:bg-red-950/30 dark:text-red-400 border border-red-500/20';
-                        else if (sentiment === 'Other Party') badgeColor = 'bg-amber-500/10 text-amber-650 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-500/20';
-                        
-                        return (
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${badgeColor}`}>
-                            {sentiment === 'Support' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
-                            {sentiment === 'Neutral' && <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />}
-                            {sentiment === 'Oppose' && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
-                            {sentiment === 'Other Party' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
-                            {sentiment === 'Unassigned' && <span className="w-1.5 h-1.5 rounded-full bg-zinc-350 dark:bg-zinc-700" />}
-                            {sentiment}
-                          </span>
-                        );
-                      })() /* end of sentiment cell */}
-                    </td>
-                    <td className="px-6 py-5">
-                      {(() => {
-                        const percent = getCompletenessPercent(v);
-                        let badgeColor = 'text-red-650 bg-red-500/10 border-red-500/20 dark:text-red-400 dark:bg-red-950/20';
-                        let barColor = 'bg-red-500';
-                        if (percent >= 75) {
-                          badgeColor = 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-400 dark:bg-emerald-950/25';
-                          barColor = 'bg-emerald-500';
-                        } else if (percent >= 40) {
-                          badgeColor = 'text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-400 dark:bg-amber-950/20';
-                          barColor = 'bg-amber-500';
+                  <tr key={v.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 transition-colors">
+                    {voterColumnManager.visibleColumns.map(col => {
+                      switch (col.id) {
+                        case 'slNo':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-bold text-zinc-400 dark:text-zinc-650">
+                              {(activePage - 1) * pageSize + index + 1}
+                            </td>
+                          );
+                        case 'voterId':
+                          return (
+                            <td key={col.id} className="px-6 py-5">
+                              <div className="flex flex-col gap-1">
+                                <span className="text-[10px] font-black text-blue-600 bg-blue-50 dark:bg-zinc-850 px-1.5 py-0.5 rounded w-fit">
+                                  {v.voterId}
+                                </span>
+                                {v.aadharNumber && (
+                                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono leading-none mt-1">
+                                    Aadhaar: {v.aadharNumber}
+                                  </span>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        case 'aadharNumber':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-mono font-bold text-zinc-700 dark:text-zinc-300">
+                              {v.aadharNumber || <span className="text-zinc-400 font-bold">-</span>}
+                            </td>
+                          );
+                        case 'name':
+                          return (
+                            <td key={col.id} className="px-6 py-5">
+                              <div className="font-bold text-zinc-900 dark:text-zinc-100 text-sm leading-tight">{v.name}</div>
+                            </td>
+                          );
+                        case 'relationName':
+                          return (
+                            <td key={col.id} className="px-6 py-5">
+                              {v.relationName ? (
+                                <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                                  {v.relationName}
+                                </div>
+                              ) : (
+                                <span className="text-xs text-zinc-400 font-bold">-</span>
+                              )}
+                            </td>
+                          );
+                        case 'gender': {
+                          const g = (v.gender || '').trim().toUpperCase();
+                          const displayGender = g.startsWith('M') ? 'M' : g.startsWith('F') ? 'F' : (g.startsWith('T') || g.startsWith('O')) ? 'O' : '-';
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {displayGender}
+                            </td>
+                          );
                         }
-                        return (
-                          <div className="flex flex-col gap-1.5 w-24">
-                            <div className="flex items-center justify-between">
-                              <span className={`px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide border uppercase leading-none ${badgeColor}`}>
-                                {percent}% Complete
+                        case 'age':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.age ? `${v.age} Yrs` : '-'}
+                            </td>
+                          );
+                        case 'caste':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="font-bold">{v.caste || '-'}</div>
+                            </td>
+                          );
+                        case 'houseNo':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {(v as any).houseNo || (v as any).houseNumber || (v as any).doorNo || <span className="text-zinc-400 font-bold">-</span>}
+                            </td>
+                          );
+                        case 'village':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div>{v.village || (v as any).section || '-'}</div>
+                            </td>
+                          );
+                        case 'mandal':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div>{(v as any).mandal || '-'}</div>
+                            </td>
+                          );
+                        case 'booth': {
+                          const booth = booths.find(b => b.id === v.boothId);
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="line-clamp-1 text-zinc-800 dark:text-zinc-200 font-bold">{booth ? booth.name : '-'}</div>
+                            </td>
+                          );
+                        }
+                        case 'mobile':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="font-bold">{v.mobile || '-'}</div>
+                              {v.additionalMobile && <div className="text-[10px] text-zinc-400 dark:text-zinc-500 font-normal mt-0.5">Alt: {v.additionalMobile}</div>}
+                              {v.email && <div className="text-[10px] text-blue-500 hover:underline mt-0.5 max-w-[150px] truncate" title={v.email}>{v.email}</div>}
+                            </td>
+                          );
+                        case 'additionalMobile':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.additionalMobile || <span className="text-zinc-400 font-bold">-</span>}
+                            </td>
+                          );
+                        case 'email':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.email ? (
+                                <a href={`mailto:${v.email}`} className="text-blue-500 hover:underline truncate max-w-[160px] block">
+                                  {v.email}
+                                </a>
+                              ) : (
+                                <span className="text-zinc-400 font-bold">-</span>
+                              )}
+                            </td>
+                          );
+                        case 'sentiment': {
+                          const sentimentData = voterSentiments[v.id];
+                          const sentiment = sentimentData?.sentiment as string || 'Unassigned';
+                          let badgeColor = 'bg-zinc-100 text-zinc-650 dark:bg-zinc-900 dark:text-zinc-400';
+                          if (sentiment === 'Support') badgeColor = 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-500/20';
+                          else if (sentiment === 'Neutral') badgeColor = 'bg-zinc-500/10 text-zinc-655 dark:bg-zinc-800 dark:text-zinc-400 border border-zinc-500/20';
+                          else if (sentiment === 'Oppose') badgeColor = 'bg-red-500/10 text-red-650 dark:bg-red-950/30 dark:text-red-400 border border-red-500/20';
+                          else if (sentiment === 'Other Party') badgeColor = 'bg-amber-500/10 text-amber-650 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-500/20';
+                          
+                          return (
+                            <td key={col.id} className="px-6 py-5">
+                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${badgeColor}`}>
+                                {sentiment === 'Support' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
+                                {sentiment === 'Neutral' && <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />}
+                                {sentiment === 'Oppose' && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
+                                {sentiment === 'Other Party' && <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />}
+                                {sentiment === 'Unassigned' && <span className="w-1.5 h-1.5 rounded-full bg-zinc-350 dark:bg-zinc-700" />}
+                                {sentiment}
                               </span>
-                            </div>
-                            <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
-                              <div className={`h-full rounded-full ${barColor}`} style={{ width: `${percent}%` }} />
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </td>
-                    <td className="px-6 py-5 text-right">
-                      <div className="flex justify-end gap-1.5">
-                        {hasRight('voters', 'u') && (
-                          <button 
-                            onClick={() => startEditVoter(v)}
-                            title="View & Edit Details"
-                            className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-550 dark:text-zinc-400 hover:text-blue-600 hover:border-blue-300 dark:hover:text-blue-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider shadow-xs transform active:scale-95 transition-all cursor-pointer"
-                          >
-                            <Eye size={13} />
-                            <span>View</span>
-                          </button>
-                        )}
-                        {hasRight('voters', 'd') && (
-                          <button 
-                            onClick={() => setDeletingId(v.id)} 
-                            title="Delete Voter"
-                            className="p-1 px-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-400 hover:text-red-600 hover:border-red-300 dark:hover:text-red-400 rounded-lg transform active:scale-95 transition-all cursor-pointer"
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
-                      </div>
-                    </td>
+                            </td>
+                          );
+                        }
+                        case 'favoredParty': {
+                          const sData = voterSentiments[v.id];
+                          const rawParty = (sData as any)?.favoredPartyName || (sData as any)?.favored_party_name || (sData as any)?.favoredPartyId || (v as any).favoredPartyName || v.partyInclination || '';
+                          const partyObj = parties.find(p => p.id === rawParty || p.name?.toLowerCase() === rawParty.toLowerCase() || p.code?.toLowerCase() === rawParty.toLowerCase());
+                          const abbrev = getPartyAbbreviation(rawParty);
+                          const fullName = partyObj?.name || rawParty;
+
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                              {abbrev ? (
+                                <span 
+                                  className="inline-flex items-center px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white uppercase font-bold text-xs" 
+                                  title={fullName}
+                                >
+                                  {abbrev}
+                                </span>
+                              ) : (
+                                <span className="text-zinc-400 font-bold text-xs">-</span>
+                              )}
+                            </td>
+                          );
+                        }
+                        case 'isVolunteer':
+                          return (
+                            <td key={col.id} className="px-6 py-5">
+                              {(v as any).isVolunteer || (v as any).is_volunteer || (v as any).isKaryakarta ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black uppercase bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                                  ★ Volunteer
+                                </span>
+                              ) : (
+                                <span className="text-[10px] text-zinc-400">Voter</span>
+                              )}
+                            </td>
+                          );
+                        case 'profileComplete': {
+                          const percent = getCompletenessPercent(v);
+                          let badgeColor = 'text-red-650 bg-red-500/10 border-red-500/20 dark:text-red-400 dark:bg-red-950/20';
+                          let barColor = 'bg-red-500';
+                          if (percent >= 75) {
+                            badgeColor = 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-400 dark:bg-emerald-950/25';
+                            barColor = 'bg-emerald-500';
+                          } else if (percent >= 40) {
+                            badgeColor = 'text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-400 dark:bg-amber-950/20';
+                            barColor = 'bg-amber-500';
+                          }
+                          return (
+                            <td key={col.id} className="px-6 py-5">
+                              <div className="flex flex-col gap-1.5 w-24">
+                                <div className="flex items-center justify-between">
+                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide border uppercase leading-none ${badgeColor}`}>
+                                    {percent}% Complete
+                                  </span>
+                                </div>
+                                <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                                  <div className={`h-full rounded-full ${barColor}`} style={{ width: `${percent}%` }} />
+                                </div>
+                              </div>
+                            </td>
+                          );
+                        }
+                        case 'actions':
+                          return (
+                            <td key={col.id} className="px-6 py-5 text-right">
+                              <div className="flex justify-end gap-1.5">
+                                <button 
+                                  onClick={() => startViewVoter(v)}
+                                  title="View Voter Details"
+                                  className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-blue-600 hover:border-blue-300 dark:hover:text-blue-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider shadow-xs transform active:scale-95 transition-all cursor-pointer"
+                                >
+                                  <Eye size={12} />
+                                  <span>View</span>
+                                </button>
+                                {hasRight('voters', 'u') && (
+                                  <button 
+                                    onClick={() => startEditVoter(v)}
+                                    title="Edit Voter Information"
+                                    className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-amber-600 hover:border-amber-300 dark:hover:text-amber-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider shadow-xs transform active:scale-95 transition-all cursor-pointer"
+                                  >
+                                    <Edit3 size={12} />
+                                    <span>Edit</span>
+                                  </button>
+                                )}
+                                {!isVolunteer && hasRight('voters', 'd') && (
+                                  <button 
+                                    onClick={() => setDeletingId(v.id)} 
+                                    title="Delete Voter Record"
+                                    className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-500 hover:text-red-600 hover:border-red-300 dark:hover:text-red-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider shadow-xs transform active:scale-95 transition-all cursor-pointer"
+                                  >
+                                    <Trash2 size={12} />
+                                    <span>Delete</span>
+                                  </button>
+                                )}
+                              </div>
+                            </td>
+                          );
+                        default:
+                          return null;
+                      }
+                    })}
                   </tr>
                 ))
               )}
@@ -1947,7 +2464,7 @@ const VoterManagement: React.FC = () => {
            ) : paginatedVoters.map(v => (
              <div key={v.id} className="p-4 space-y-4">
                <div className="flex justify-between items-start">
-                 <div className="flex items-center gap-3">
+                 <div className="flex items-center gap-3 cursor-pointer" onClick={() => startViewVoter(v)}>
                     <div className="w-10 h-10 rounded-xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center text-zinc-500 shrink-0">
                       <UserSquare2 size={20} />
                     </div>
@@ -1995,23 +2512,32 @@ const VoterManagement: React.FC = () => {
                     </div>
                  </div>
                   <div className="flex gap-1.5 items-center">
+                    <button 
+                      onClick={() => startViewVoter(v)} 
+                      title="View Voter Details"
+                      className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-blue-600 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                    >
+                      <Eye size={12} />
+                      <span>View</span>
+                    </button>
                     {hasRight('voters', 'u') && (
                       <button 
                         onClick={() => startEditVoter(v)} 
-                        title="View Details"
-                        className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-550 dark:text-zinc-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider cursor-pointer"
+                        title="Edit Voter"
+                        className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-amber-600 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider cursor-pointer"
                       >
-                        <Eye size={12} />
-                        <span>View</span>
+                        <Edit3 size={12} />
+                        <span>Edit</span>
                       </button>
                     )}
-                    {hasRight('voters', 'd') && (
+                    {!isVolunteer && hasRight('voters', 'd') && (
                       <button 
                         onClick={() => setDeletingId(v.id)} 
                         title="Delete Voter"
-                        className="p-1 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-405 hover:text-red-600 rounded-lg cursor-pointer flex items-center justify-center"
+                        className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-500 hover:text-red-600 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider cursor-pointer"
                       >
                         <Trash2 size={12} />
+                        <span>Delete</span>
                       </button>
                     )}
                   </div>
@@ -2171,77 +2697,750 @@ const VoterManagement: React.FC = () => {
         </div>
       </div>
 
-      {/* Voter Entry Modal */}
+      {/* Voter Entry / View Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 bg-white dark:bg-zinc-950 flex flex-col w-full h-full overflow-hidden animate-in fade-in duration-100">
           <div className="relative w-full h-full flex flex-col overflow-hidden">
-            <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 shrink-0">
-                <div className="max-w-4xl mx-auto w-full flex justify-between items-center">
-                  <div>
-                     <h3 className="text-xl font-black text-zinc-900 dark:text-white">{editingVoter ? 'Update Voter' : 'New Voter Entry'}</h3>
-                     <p className="text-[10px] font-black text-zinc-500 dark:text-zinc-400 uppercase tracking-widest">Election Registry Management</p>
+            
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/90 dark:bg-zinc-900/90 shrink-0">
+              <div className="max-w-5xl mx-auto w-full flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 shadow-xs ${
+                    modalMode === 'view' 
+                      ? 'bg-blue-600 text-white dark:bg-blue-500' 
+                      : 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                  }`}>
+                    {modalMode === 'view' ? <UserSquare2 size={22} /> : (editingVoter ? <Edit3 size={20} /> : <Plus size={22} />)}
                   </div>
-                  <button onClick={() => setIsModalOpen(false)} className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"><X size={20} /></button>
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg sm:text-xl font-black text-zinc-900 dark:text-white tracking-tight">
+                        {modalMode === 'view' 
+                          ? (editingVoter?.name || 'Voter Information') 
+                          : (editingVoter ? 'Edit Voter Information' : 'New Voter Entry')}
+                      </h3>
+                      {modalMode === 'view' && editingVoter && (
+                        <>
+                          <span className="text-[10px] font-black text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-900/50 px-2 py-0.5 rounded-md font-mono">
+                            {editingVoter.voterId}
+                          </span>
+                          <span className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                            editingVoter.vitalStatus === 'Deceased' ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/40' :
+                            editingVoter.vitalStatus === 'Migrated/Shifted' ? 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/40' :
+                            'bg-emerald-50 text-emerald-600 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/40'
+                          }`}>
+                            {editingVoter.vitalStatus || 'Active'}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                    <p className="text-[11px] font-medium text-zinc-500 dark:text-zinc-400 mt-0.5">
+                      {modalMode === 'view' && editingVoter
+                        ? `${editingVoter.gender}, ${editingVoter.age} Yrs • ${editingVoter.relationName ? `F/H: ${editingVoter.relationName}` : 'Elector Record'}`
+                        : (editingVoter 
+                            ? `Updating details for ${formData.name || editingVoter.name} (${formData.voterId || editingVoter.voterId})` 
+                            : 'Fill in the details to register a new voter in the campaign registry.')}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  <button 
+                    onClick={() => setIsModalOpen(false)} 
+                    className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+                    title="Close modal"
+                  >
+                    <X size={20} />
+                  </button>
                 </div>
               </div>
+            </div>
 
-              {/* Horizontal scrollable or wrap container for modular tabs */}
-              <div className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 shrink-0">
-                <div className="max-w-4xl mx-auto w-full px-6 py-3 flex gap-1.5 overflow-x-auto scrollbar-none">
-                  {[
-                    { id: 'main', label: '1. Main Details' },
-                    { id: 'contact', label: '2. Address & Contacts' },
-                    { id: 'health_economy', label: '3. Health & Economy' },
-                    { id: 'political_sentiment', label: '4. Political Sentiment' }
-                  ].map(tab => (
-                    <button
-                      key={tab.id}
-                      type="button"
-                      onClick={() => setActiveFormTab(tab.id as 'main' | 'contact' | 'health_economy' | 'political_sentiment')}
-                      className={`px-5 py-2.5 text-[11px] uppercase tracking-wider font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer ${
-                        activeFormTab === tab.id
-                          ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 shadow-sm'
-                          : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/60'
-                      }`}
+            {/* Modular Tab Navigation */}
+            <div className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/30 shrink-0">
+              <div className="max-w-5xl mx-auto w-full px-6 py-2.5 flex gap-2 overflow-x-auto scrollbar-none">
+                {[
+                  { id: 'main', label: modalMode === 'view' ? '1. Overview & Identity' : '1. Main Details' },
+                  { id: 'contact', label: '2. Address & Contacts' },
+                  { id: 'health_economy', label: '3. Health & Economy' },
+                  { id: 'political_sentiment', label: '4. Political Sentiment' }
+                ].map(tab => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => setActiveFormTab(tab.id as 'main' | 'contact' | 'health_economy' | 'political_sentiment')}
+                    className={`px-4 sm:px-5 py-2 text-[11px] uppercase tracking-wider font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer ${
+                      activeFormTab === tab.id
+                        ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 shadow-sm'
+                        : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-800/60'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* VIEW MODE CONTENT */}
+            {modalMode === 'view' && editingVoter ? (
+              <div className="flex-1 overflow-hidden flex flex-col">
+                <div className="flex-1 overflow-y-auto custom-scrollbar">
+                  <div className="max-w-5xl mx-auto w-full p-6 sm:p-8 space-y-6">
+                    {(() => {
+                      const loc = getVoterLocation(editingVoter);
+                      const completeness = getCompletenessPercent(editingVoter);
+                      const sData = voterSentiments[editingVoter.id];
+                      const currentSentiment = sentimentStatus || (sData?.sentiment as string) || 'Unassigned';
+
+                      return (
+                        <>
+                          {/* TAB 1: OVERVIEW & IDENTITY (VIEW MODE) */}
+                          {activeFormTab === 'main' && (
+                            <div className="space-y-6 animate-in fade-in duration-200">
+                              
+                              {/* Quick Header Summary Card */}
+                              <div className="p-5 rounded-3xl bg-gradient-to-r from-blue-50/70 via-indigo-50/40 to-zinc-50/60 dark:from-blue-950/20 dark:via-indigo-950/15 dark:to-zinc-900/30 border border-blue-100 dark:border-blue-900/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div className="flex items-center gap-4">
+                                  <div className="w-14 h-14 rounded-2xl bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800/50 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-sm shrink-0">
+                                    <UserSquare2 size={30} />
+                                  </div>
+                                  <div>
+                                    <div className="text-base sm:text-lg font-black text-zinc-900 dark:text-white">
+                                      {editingVoter.name}
+                                    </div>
+                                    <div className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
+                                      {editingVoter.relationName ? `Relation: ${editingVoter.relationName}` : 'No relative specified'}
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                                      <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                                        {editingVoter.gender}, {editingVoter.age} Yrs
+                                      </span>
+                                      {editingVoter.caste && (
+                                        <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 bg-zinc-200/60 dark:bg-zinc-800 px-2 py-0.5 rounded">
+                                          {editingVoter.caste}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 border-t md:border-t-0 md:border-l border-zinc-200 dark:border-zinc-800 pt-3 md:pt-0 md:pl-6">
+                                  <div className="space-y-1">
+                                    <span className="text-[9px] font-black uppercase tracking-widest text-zinc-400 block">Profile Completeness</span>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-sm font-black text-zinc-900 dark:text-white">{completeness}%</span>
+                                      <div className="w-24 bg-zinc-200 dark:bg-zinc-800 h-2 rounded-full overflow-hidden">
+                                        <div 
+                                          className={`h-full rounded-full ${completeness >= 75 ? 'bg-emerald-500' : completeness >= 40 ? 'bg-amber-500' : 'bg-red-500'}`}
+                                          style={{ width: `${completeness}%` }}
+                                        />
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {hasRight('voters', 'u') && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setModalMode('edit')}
+                                      className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs flex items-center gap-1.5 transition-all shadow-sm cursor-pointer shrink-0"
+                                    >
+                                      <Edit3 size={13} />
+                                      <span>Edit Details</span>
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Identity Profile Grid */}
+                              <div className="space-y-3">
+                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <ShieldCheck size={14} className="text-blue-500" /> Identity & Personal Attributes
+                                </h4>
+                                
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                                  {/* EPIC ID */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                                    <div>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Voter ID (EPIC)</span>
+                                      <span className="text-sm font-black text-blue-600 dark:text-blue-400 font-mono mt-0.5 block">
+                                        {editingVoter.voterId || '—'}
+                                      </span>
+                                    </div>
+                                    {editingVoter.voterId && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleCopy(editingVoter.voterId, 'epic')}
+                                        className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-all"
+                                        title="Copy Voter ID"
+                                      >
+                                        {copiedField === 'epic' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Aadhaar */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                                    <div>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Aadhaar Number</span>
+                                      <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 font-mono mt-0.5 block">
+                                        {editingVoter.aadharNumber || 'Not recorded'}
+                                      </span>
+                                    </div>
+                                    {editingVoter.aadharNumber && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleCopy(editingVoter.aadharNumber || '', 'aadhar')}
+                                        className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-all"
+                                        title="Copy Aadhaar"
+                                      >
+                                        {copiedField === 'aadhar' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Full Name */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Full Name</span>
+                                    <span className="text-sm font-bold text-zinc-900 dark:text-zinc-100 mt-0.5 block">
+                                      {editingVoter.name}
+                                    </span>
+                                  </div>
+
+                                  {/* Father / Husband Name */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Father / Husband Name</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.relationName || 'Not recorded'}
+                                    </span>
+                                  </div>
+
+                                  {/* Gender & Age */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Gender & Age</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.gender} • {editingVoter.age} Years
+                                    </span>
+                                  </div>
+
+                                  {/* Date of Birth */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Date of Birth</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.dob ? new Date(editingVoter.dob).toLocaleDateString() : 'Not recorded'}
+                                    </span>
+                                  </div>
+
+                                  {/* Caste / Category */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Caste / Category</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.caste || 'General'}
+                                    </span>
+                                  </div>
+
+                                  {/* Occupation */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Occupation</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.occupation || 'Private Service'}
+                                    </span>
+                                  </div>
+
+                                  {/* Education */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Education Qualification</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.education || 'Unspecified'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Administrative Geography Details */}
+                              <div className="space-y-3 pt-2">
+                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <MapPin size={14} className="text-blue-500" /> Administrative Deployment & Hierarchy
+                                </h4>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                                  {/* State */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">State</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {loc.stateName || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  {/* District */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">District</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {loc.districtName || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  {/* Constituency */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Constituency</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {loc.constituencyName || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  {/* Polling Booth */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 sm:col-span-2 lg:col-span-1">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Polling Booth</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
+                                      {loc.boothNumber ? `#${loc.boothNumber} - ` : ''}{booths.find(b => b.id === editingVoter.boothId)?.name || loc.boothId || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  {/* Part No */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Part Number</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block font-mono">
+                                      {editingVoter.partNo || '—'}
+                                    </span>
+                                  </div>
+
+                                  {/* Serial No */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Serial Number</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block font-mono">
+                                      {editingVoter.srNo || '—'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* TAB 2: ADDRESS & CONTACTS (VIEW MODE) */}
+                          {activeFormTab === 'contact' && (
+                            <div className="space-y-6 animate-in fade-in duration-200">
+                              
+                              {/* Contact Information */}
+                              <div className="space-y-3">
+                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <Phone size={14} className="text-blue-500" /> Contact Channels & Telephony
+                                </h4>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                                  {/* Primary Mobile */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                                    <div>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Primary Mobile</span>
+                                      {editingVoter.mobile ? (
+                                        <a href={`tel:${editingVoter.mobile}`} className="text-sm font-black text-blue-600 dark:text-blue-400 hover:underline mt-0.5 block">
+                                          📞 {editingVoter.mobile}
+                                        </a>
+                                      ) : (
+                                        <span className="text-sm font-medium text-zinc-400 italic mt-0.5 block">Not recorded</span>
+                                      )}
+                                    </div>
+                                    {editingVoter.mobile && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleCopy(editingVoter.mobile || '', 'mobile')}
+                                        className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-all"
+                                        title="Copy Mobile"
+                                      >
+                                        {copiedField === 'mobile' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Additional Mobile */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                                    <div>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Alternate Mobile</span>
+                                      {editingVoter.additionalMobile ? (
+                                        <a href={`tel:${editingVoter.additionalMobile}`} className="text-sm font-black text-blue-600 dark:text-blue-400 hover:underline mt-0.5 block">
+                                          📞 {editingVoter.additionalMobile}
+                                        </a>
+                                      ) : (
+                                        <span className="text-sm font-medium text-zinc-400 italic mt-0.5 block">None</span>
+                                      )}
+                                    </div>
+                                    {editingVoter.additionalMobile && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleCopy(editingVoter.additionalMobile || '', 'addMobile')}
+                                        className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-all"
+                                        title="Copy Alternate Mobile"
+                                      >
+                                        {copiedField === 'addMobile' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                                      </button>
+                                    )}
+                                  </div>
+
+                                  {/* Email */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                                    <div className="min-w-0 flex-1">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Email Address</span>
+                                      {editingVoter.email ? (
+                                        <a href={`mailto:${editingVoter.email}`} className="text-sm font-bold text-blue-600 dark:text-blue-400 hover:underline mt-0.5 block truncate" title={editingVoter.email}>
+                                          ✉️ {editingVoter.email}
+                                        </a>
+                                      ) : (
+                                        <span className="text-sm font-medium text-zinc-400 italic mt-0.5 block">Not recorded</span>
+                                      )}
+                                    </div>
+                                    {editingVoter.email && (
+                                      <button 
+                                        type="button"
+                                        onClick={() => handleCopy(editingVoter.email || '', 'email')}
+                                        className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-200 dark:hover:bg-zinc-800 rounded-lg transition-all shrink-0 ml-2"
+                                        title="Copy Email"
+                                      >
+                                        {copiedField === 'email' ? <Check size={14} className="text-emerald-500" /> : <Copy size={14} />}
+                                      </button>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Physical Residential Address */}
+                              <div className="space-y-3 pt-2">
+                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <Home size={14} className="text-blue-500" /> Physical Residence & Local Habitat
+                                </h4>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">House No</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.houseNo || 'Not specified'}
+                                    </span>
+                                  </div>
+
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Village / Society</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                      {editingVoter.village || 'Not specified'}
+                                    </span>
+                                  </div>
+
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 sm:col-span-2">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Complete Registered Address</span>
+                                    <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 mt-1 leading-relaxed">
+                                      {editingVoter.address || 'No complete address description provided.'}
+                                    </p>
+                                  </div>
+
+                                  {editingVoter.newAddress && (
+                                    <div className="p-4 rounded-2xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 sm:col-span-2">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300 block">Shifted / Migrated Address Tracker</span>
+                                      <p className="text-sm font-medium text-zinc-800 dark:text-zinc-200 mt-1 leading-relaxed">
+                                        {editingVoter.newAddress}
+                                      </p>
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* TAB 3: HEALTH & ECONOMY (VIEW MODE) */}
+                          {activeFormTab === 'health_economy' && (
+                            <div className="space-y-6 animate-in fade-in duration-200">
+                              
+                              {/* Health & Vital Status */}
+                              <div className="space-y-3">
+                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <Activity size={14} className="text-purple-500" /> Health & Vital Demographics
+                                </h4>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+                                  {/* Vital Status */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Vital Status</span>
+                                    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider mt-1.5 ${
+                                      editingVoter.vitalStatus === 'Deceased' ? 'bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/40 dark:text-red-400' :
+                                      editingVoter.vitalStatus === 'Migrated/Shifted' ? 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400' :
+                                      'bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400'
+                                    }`}>
+                                      {editingVoter.vitalStatus || 'Active'}
+                                    </span>
+                                  </div>
+
+                                  {/* Physical Profile */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Physical Profile</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
+                                      {editingVoter.physicalProfile || 'General'}
+                                    </span>
+                                  </div>
+
+                                  {/* Disability Category */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Disability Category</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
+                                      {editingVoter.disabilityCategory || 'None'}
+                                    </span>
+                                  </div>
+
+                                  {/* ECI Assistance */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">ECI Assistance</span>
+                                    <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-black uppercase tracking-wider mt-1.5 ${
+                                      editingVoter.eciAssistanceNeeded 
+                                        ? 'bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300' 
+                                        : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+                                    }`}>
+                                      {editingVoter.eciAssistanceNeeded ? 'Assistance Required' : 'Standard'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Economic Profile */}
+                              <div className="space-y-3 pt-2">
+                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <Coins size={14} className="text-orange-500" /> Economic & Welfare Profile
+                                </h4>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Economic Category</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
+                                      {editingVoter.economicCategory || 'APL'}
+                                    </span>
+                                  </div>
+
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Monthly Household Income</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
+                                      {editingVoter.incomeRange || '₹15,000 - ₹30,000'}
+                                    </span>
+                                  </div>
+
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Land Ownership</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
+                                      {editingVoter.landOwnership || 'Small Farmer'}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Civic & Staff Status */}
+                              <div className="space-y-3 pt-2">
+                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <UserCheck size={14} className="text-emerald-500" /> Operational & Electoral Engagement
+                                </h4>
+
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                                    <div>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Karyakarta / Volunteer Status</span>
+                                      <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                        {editingVoter.isKaryakarta ? 'Active Connection Volunteer' : 'Standard Elector'}
+                                      </span>
+                                    </div>
+                                    <div className={`p-2 rounded-xl ${editingVoter.isKaryakarta ? 'bg-orange-500 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400'}`}>
+                                      <UserCheck size={18} />
+                                    </div>
+                                  </div>
+
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
+                                    <div>
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Voting Cast Status</span>
+                                      <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                        {editingVoter.voted ? 'Voted (Ballot Cast)' : 'Pending (Not Cast)'}
+                                      </span>
+                                    </div>
+                                    <div className={`p-2 rounded-xl ${editingVoter.voted ? 'bg-green-500 text-white' : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400'}`}>
+                                      <CheckCircle size={18} />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* TAB 4: POLITICAL SENTIMENT (VIEW MODE) */}
+                          {activeFormTab === 'political_sentiment' && (
+                            <div className="space-y-6 animate-in fade-in duration-200">
+                              
+                              {/* Sentiment Header Card */}
+                              <div className="p-5 rounded-3xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 space-y-4">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200/60 dark:border-zinc-800 pb-3">
+                                  <div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">Voter Support Sentiment</span>
+                                    <div className="flex items-center gap-2 mt-1">
+                                      <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black uppercase tracking-wider ${
+                                        currentSentiment === 'Support' ? 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400 border border-emerald-500/20' :
+                                        currentSentiment === 'Neutral' ? 'bg-zinc-500/10 text-zinc-650 dark:bg-zinc-800 dark:text-zinc-400 border border-zinc-500/20' :
+                                        currentSentiment === 'Oppose' ? 'bg-red-500/10 text-red-650 dark:bg-red-950/40 dark:text-red-400 border border-red-500/20' :
+                                        currentSentiment === 'Other Party' ? 'bg-amber-500/10 text-amber-650 dark:bg-amber-950/40 dark:text-amber-400 border border-amber-500/20' :
+                                        'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+                                      }`}>
+                                        <span className={`w-2 h-2 rounded-full ${
+                                          currentSentiment === 'Support' ? 'bg-emerald-500' :
+                                          currentSentiment === 'Neutral' ? 'bg-zinc-400' :
+                                          currentSentiment === 'Oppose' ? 'bg-red-500' :
+                                          currentSentiment === 'Other Party' ? 'bg-amber-500' :
+                                          'bg-zinc-350'
+                                        }`} />
+                                        {currentSentiment}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div>
+                                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">Sentiment Strength Rating</span>
+                                    <div className="flex items-center gap-1.5 mt-1">
+                                      {[1, 2, 3, 4, 5].map(st => (
+                                        <div 
+                                          key={st}
+                                          className={`w-6 h-6 rounded-lg text-[11px] font-black flex items-center justify-center ${
+                                            st <= sentimentStrength 
+                                              ? 'bg-amber-500 text-white shadow-xs' 
+                                              : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-400'
+                                          }`}
+                                        >
+                                          ★
+                                        </div>
+                                      ))}
+                                      <span className="text-xs font-bold text-zinc-600 dark:text-zinc-300 ml-1">
+                                        ({sentimentStrength}/5)
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Favored Political Party */}
+                                <div>
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block mb-1">Registered Party Alignment</span>
+                                  <div className="p-3 rounded-2xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
+                                    <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                      {parties.find(p => p.id === sentimentFavoredPartyId || p.name === sentimentFavoredPartyId)?.name || sentimentFavoredPartyId || (sData?.favoredPartyName as string) || '-'}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Notes & Field Intel */}
+                                <div>
+                                  <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block mb-1.5">Campaign Intel Notes & Feedback</span>
+                                  <div className="p-4 rounded-2xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-sm font-medium text-zinc-800 dark:text-zinc-200 leading-relaxed min-h-[70px]">
+                                    {sentimentNotes || (sData?.notes as string) || (
+                                      <span className="text-zinc-400 italic">No voter sentiment notes or field feedback recorded yet.</span>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Metadata Footer */}
+                                {(lastSentimentUpdatedBy || lastSentimentUpdatedAt) && (
+                                  <div className="flex flex-wrap items-center justify-between text-[10px] font-bold text-zinc-400 uppercase tracking-wider pt-2 border-t border-zinc-200/50 dark:border-zinc-800/50">
+                                    {lastSentimentUpdatedBy && <span>Recorded By: <strong className="text-zinc-700 dark:text-zinc-300">{lastSentimentUpdatedBy}</strong></span>}
+                                    {lastSentimentUpdatedAt && <span>Updated: <strong className="text-zinc-700 dark:text-zinc-300">{lastSentimentUpdatedAt}</strong></span>}
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Super Admin Multi-Admin Assessments */}
+                              {isSuperAdmin && voterAssessments.length > 0 && (
+                                <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/70 via-indigo-50/70 to-purple-50/70 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border border-blue-200 dark:border-blue-900/40 space-y-3">
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-xs font-black uppercase text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                                      <Users size={14} /> Multi-Admin Assessments for this Voter ({voterAssessments.length})
+                                    </span>
+                                    <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-200/70 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                                      Super Admin Intel
+                                    </span>
+                                  </div>
+                                  
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                                    {voterAssessments.map(a => (
+                                      <div key={a.id} className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2">
+                                        <div className="flex items-center justify-between">
+                                          <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                            👑 {a.admin_name}
+                                          </span>
+                                          <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                                            a.sentiment === 'Support' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' :
+                                            a.sentiment === 'Oppose' ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400' :
+                                            'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                                          }`}>
+                                            {a.sentiment || 'Neutral'} ({a.sentiment_score || 3}★)
+                                          </span>
+                                        </div>
+                                        {a.notes && (
+                                          <p className="text-[10px] text-zinc-500 italic bg-zinc-50 dark:bg-zinc-950/60 p-1.5 rounded">
+                                            "{a.notes}"
+                                          </p>
+                                        )}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )}
+                        </>
+                      );
+                    })()}
+                  </div>
+                </div>
+
+                {/* View Mode Footer */}
+                <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 shrink-0 p-5">
+                  <div className="max-w-5xl mx-auto w-full flex justify-end items-center">
+                    <button 
+                      type="button" 
+                      onClick={() => setIsModalOpen(false)} 
+                      className="webapp-button-secondary px-6 py-2.5 text-xs font-bold cursor-pointer"
                     >
-                      {tab.label}
+                      Close
                     </button>
-                  ))}
+                  </div>
                 </div>
               </div>
-
+            ) : (
+              /* EDIT MODE CONTENT & FORM */
               <form onSubmit={handleCreateOrUpdate} className="flex-1 overflow-hidden flex flex-col">
                 <div className="flex-1 overflow-y-auto custom-scrollbar">
                   <div className="max-w-4xl mx-auto w-full p-8 space-y-6">
                   
                   {activeFormTab === 'main' && (
                     <div className="space-y-6 animate-in fade-in duration-200">
+                      {isVolunteer && (
+                        <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2.5">
+                          <AlertCircle size={18} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span className="font-medium">
+                            <strong>Master Demographic Registry:</strong> Core voter identity details are managed by Campaign Managers and Admins. You can review this data and update the <strong>Health & Economy</strong> and <strong>Political Sentiment</strong> tabs.
+                          </span>
+                        </div>
+                      )}
+
                       {/* Basic Identity Details */}
                       <div className="space-y-4">
                         <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Basic Identity</h4>
                         <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Voter ID (EPIC NO)</label>
-                            <input required value={formData.voterId} onChange={e => setFormData({ ...formData, voterId: e.target.value.toUpperCase() })} className="webapp-input w-full h-11 text-sm font-black" placeholder="e.g. ABC1234567" />
+                            <input disabled={isVolunteer} required value={formData.voterId} onChange={e => setFormData({ ...formData, voterId: e.target.value.toUpperCase() })} className={`webapp-input w-full h-11 text-sm font-black ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. ABC1234567" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Full Name</label>
-                            <input required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="As per voter list" />
+                            <input disabled={isVolunteer} required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="As per voter list" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Father / Husband Name</label>
-                            <input value={formData.relationName || ''} onChange={e => setFormData({ ...formData, relationName: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="Father's or Husband's Name" />
+                            <input disabled={isVolunteer} value={formData.relationName || ''} onChange={e => setFormData({ ...formData, relationName: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="Father's or Husband's Name" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Aadhar Number</label>
-                            <input value={formData.aadharNumber} onChange={e => setFormData({ ...formData, aadharNumber: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 1234 5678 9012" />
+                            <input disabled={isVolunteer} value={formData.aadharNumber} onChange={e => setFormData({ ...formData, aadharNumber: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 1234 5678 9012" />
                           </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Gender</label>
-                            <select value={formData.gender} onChange={e => setFormData({ ...formData, gender: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select disabled={isVolunteer} value={formData.gender} onChange={e => setFormData({ ...formData, gender: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
                               <option value="Male">Male</option>
                               <option value="Female">Female</option>
                               <option value="Other">Other</option>
@@ -2251,13 +3450,14 @@ const VoterManagement: React.FC = () => {
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Date of Birth</label>
                             <input 
                               type="date" 
+                              disabled={isVolunteer}
                               required
                               value={formData.dob} 
                               onChange={e => {
                                 const dobVal = e.target.value;
                                 setFormData({ ...formData, dob: dobVal, age: calculateAge(dobVal) });
                               }} 
-                              className="webapp-input w-full h-11 text-sm font-bold" 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} 
                             />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
@@ -2271,10 +3471,10 @@ const VoterManagement: React.FC = () => {
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Caste / Category</label>
-                            <select value={formData.caste || 'General'} onChange={e => setFormData({ ...formData, caste: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select disabled={isVolunteer} value={formData.caste || 'General'} onChange={e => setFormData({ ...formData, caste: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
                               <option value="General">General</option>
                               <option value="OBC">OBC (Other Backward Classes)</option>
                               <option value="SC">SC (Scheduled Caste)</option>
@@ -2284,7 +3484,7 @@ const VoterManagement: React.FC = () => {
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Occupation</label>
-                            <select value={formData.occupation || 'Private Service'} onChange={e => setFormData({ ...formData, occupation: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select disabled={isVolunteer} value={formData.occupation || 'Private Service'} onChange={e => setFormData({ ...formData, occupation: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
                               <option value="Farmer">Farmer / Agriculture</option>
                               <option value="Government Service">Government Service</option>
                               <option value="Private Service">Private Service</option>
@@ -2310,6 +3510,25 @@ const VoterManagement: React.FC = () => {
                               <option value="Doctorate">Doctorate / Professional</option>
                             </select>
                           </div>
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Party Alignment / Favored</label>
+                            <select
+                              value={sentimentFavoredPartyId}
+                              onChange={e => {
+                                setSentimentFavoredPartyId(e.target.value);
+                                const sel = parties.find(p => p.id === e.target.value || p.name === e.target.value);
+                                setFormData(prev => ({ ...prev, partyInclination: sel?.name || e.target.value }));
+                              }}
+                              className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900 cursor-pointer"
+                            >
+                              <option value="">-- Choose Inclined Party --</option>
+                              {parties.map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} {p.code ? `(${p.code})` : ''}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
                         </div>
                       </div>
 
@@ -2319,14 +3538,14 @@ const VoterManagement: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">State</label>
-                            <select required value={formData.stateId} onChange={e => setFormData({ ...formData, stateId: e.target.value, districtId: '', constituencyId: '', boothId: '' })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select disabled={isVolunteer} required value={formData.stateId} onChange={e => setFormData({ ...formData, stateId: e.target.value, districtId: '', constituencyId: '', boothId: '' })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
                               <option value="" disabled>Select State</option>
                               {states.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">District</label>
-                            <select required value={formData.districtId} onChange={e => setFormData({ ...formData, districtId: e.target.value, constituencyId: '', boothId: '' })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select disabled={isVolunteer} required value={formData.districtId} onChange={e => setFormData({ ...formData, districtId: e.target.value, constituencyId: '', boothId: '' })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
                               <option value="" disabled>Select District</option>
                               {districts.filter(d => d.stateId === formData.stateId).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
                             </select>
@@ -2336,14 +3555,14 @@ const VoterManagement: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Constituency</label>
-                            <select required value={formData.constituencyId} onChange={e => setFormData({ ...formData, constituencyId: e.target.value, boothId: '' })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select disabled={isVolunteer} required value={formData.constituencyId} onChange={e => setFormData({ ...formData, constituencyId: e.target.value, boothId: '' })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
                               <option value="" disabled>Select Constituency</option>
                               {constituencies.filter(c => c.districtId === formData.districtId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Booth</label>
-                            <select required value={formData.boothId} onChange={e => setFormData({ ...formData, boothId: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select disabled={isVolunteer} required value={formData.boothId} onChange={e => setFormData({ ...formData, boothId: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
                               <option value="" disabled>Select Booth</option>
                               {booths.filter(b => b.constituencyId === formData.constituencyId).map(b => <option key={b.id} value={b.id}>#{b.boothNumber} - {b.name}</option>)}
                             </select>
@@ -2353,11 +3572,11 @@ const VoterManagement: React.FC = () => {
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Part No</label>
-                            <input value={formData.partNo} onChange={e => setFormData({ ...formData, partNo: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 52" />
+                            <input disabled={isVolunteer} value={formData.partNo} onChange={e => setFormData({ ...formData, partNo: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 52" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Serial No</label>
-                            <input value={formData.srNo} onChange={e => setFormData({ ...formData, srNo: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 142" />
+                            <input disabled={isVolunteer} value={formData.srNo} onChange={e => setFormData({ ...formData, srNo: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 142" />
                           </div>
                         </div>
                       </div>
@@ -2366,47 +3585,124 @@ const VoterManagement: React.FC = () => {
 
                   {activeFormTab === 'contact' && (
                     <div className="space-y-6 animate-in fade-in duration-200">
+                      {isVolunteer && (
+                        <div className="p-3.5 rounded-xl bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/60 text-amber-800 dark:text-amber-300 text-xs flex items-center gap-2.5">
+                          <AlertCircle size={18} className="shrink-0 text-amber-600 dark:text-amber-400" />
+                          <span className="font-medium">
+                            <strong>Master Contact Registry:</strong> Address and telephone registry are managed by Campaign Managers and Admins.
+                          </span>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1.5 flex flex-col">
                           <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Primary Mobile</label>
-                          <input type="tel" value={formData.mobile} onChange={e => setFormData({ ...formData, mobile: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="e.g. 9876543210" />
+                          <input disabled={isVolunteer} type="tel" value={formData.mobile} onChange={e => setFormData({ ...formData, mobile: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 9876543210" />
                         </div>
                         <div className="space-y-1.5 flex flex-col">
                           <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Additional Mobile (Optional)</label>
-                          <input type="tel" value={formData.additionalMobile} onChange={e => setFormData({ ...formData, additionalMobile: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold" placeholder="Alternate, Sub-contact" />
+                          <input disabled={isVolunteer} type="tel" value={formData.additionalMobile} onChange={e => setFormData({ ...formData, additionalMobile: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="Alternate, Sub-contact" />
                         </div>
                       </div>
 
                       <div className="space-y-1.5 flex flex-col">
                         <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Email Address</label>
-                        <input type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold placeholder-zinc-400 dark:placeholder-zinc-500" placeholder="e.g. name@domain.com" />
+                        <input disabled={isVolunteer} type="email" value={formData.email} onChange={e => setFormData({ ...formData, email: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold placeholder-zinc-400 dark:placeholder-zinc-500 ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. name@domain.com" />
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="space-y-1.5 flex flex-col">
                           <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">House No</label>
-                          <input value={formData.houseNo} onChange={e => setFormData({ ...formData, houseNo: e.target.value })} className="webapp-input w-full h-11 text-sm" placeholder="e.g. 154-C" />
+                          <input disabled={isVolunteer} value={formData.houseNo} onChange={e => setFormData({ ...formData, houseNo: e.target.value })} className={`webapp-input w-full h-11 text-sm ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 154-C" />
                         </div>
                         <div className="space-y-1.5 flex flex-col">
                           <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Village / Society</label>
-                          <input value={formData.village} onChange={e => setFormData({ ...formData, village: e.target.value })} className="webapp-input w-full h-11 text-sm" placeholder="e.g. Green Meadows" />
+                          <input disabled={isVolunteer} value={formData.village} onChange={e => setFormData({ ...formData, village: e.target.value })} className={`webapp-input w-full h-11 text-sm ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. Green Meadows" />
                         </div>
                       </div>
 
                       <div className="space-y-1.5 flex flex-col">
                         <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Full Address</label>
-                        <textarea value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} className="webapp-input w-full h-20 text-sm py-2" placeholder="Full residential physical address details..." />
+                        <textarea disabled={isVolunteer} value={formData.address} onChange={e => setFormData({ ...formData, address: e.target.value })} className={`webapp-input w-full h-20 text-sm py-2 ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="Full residential physical address details..." />
                       </div>
 
                       <div className="space-y-1.5 flex flex-col">
                         <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">New Address (Shifted/Migrated Track)</label>
-                        <textarea value={formData.newAddress} onChange={e => setFormData({ ...formData, newAddress: e.target.value })} className="webapp-input w-full h-16 text-sm py-2" placeholder="If voter shifted, track current location here..." />
+                        <textarea disabled={isVolunteer} value={formData.newAddress} onChange={e => setFormData({ ...formData, newAddress: e.target.value })} className={`webapp-input w-full h-16 text-sm py-2 ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="If voter shifted, track current location here..." />
                       </div>
                     </div>
                   )}
 
                   {activeFormTab === 'health_economy' && (
                     <div className="space-y-6 animate-in fade-in duration-200">
+                      
+                      {/* Super Admin Multi-Admin Overview */}
+                      {isSuperAdmin && voterAssessments.length > 0 && (
+                        <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/70 via-indigo-50/70 to-purple-50/70 dark:from-blue-950/30 dark:via-indigo-950/30 dark:to-purple-950/30 border border-blue-200 dark:border-blue-900/40 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <span className="text-xs font-black uppercase text-blue-700 dark:text-blue-300 flex items-center gap-1.5">
+                              <Users size={14} /> Multi-Admin Assessments for this Voter ({voterAssessments.length})
+                            </span>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-200/70 dark:bg-blue-900/60 text-blue-800 dark:text-blue-200">
+                              Super Admin Unified Intel
+                            </span>
+                          </div>
+                          
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                            {voterAssessments.map(a => (
+                              <div key={a.id} className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                    👑 {a.admin_name}
+                                  </span>
+                                  <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
+                                    a.sentiment === 'Support' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' :
+                                    a.sentiment === 'Oppose' ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-400' :
+                                    'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                                  }`}>
+                                    {a.sentiment || 'Neutral'} ({a.sentiment_score || 3}★)
+                                  </span>
+                                </div>
+                                <div className="text-[11px] text-zinc-600 dark:text-zinc-400 grid grid-cols-2 gap-1 font-medium">
+                                  <div>Health: <strong className="text-zinc-800 dark:text-zinc-200">{a.physical_profile || 'General'}</strong></div>
+                                  <div>Economy: <strong className="text-zinc-800 dark:text-zinc-200">{a.economic_category || 'APL'}</strong></div>
+                                  <div>Vital: <strong className="text-zinc-800 dark:text-zinc-200">{a.vital_status || 'Active'}</strong></div>
+                                  <div>Income: <strong className="text-zinc-800 dark:text-zinc-200">{a.income_range || '—'}</strong></div>
+                                </div>
+                                {a.notes && (
+                                  <p className="text-[10px] text-zinc-500 italic bg-zinc-50 dark:bg-zinc-950/60 p-1.5 rounded">
+                                    "{a.notes}"
+                                  </p>
+                                )}
+                                <div className="flex items-center justify-between pt-1 border-t border-zinc-100 dark:border-zinc-800 text-[9px] text-zinc-400">
+                                  <span>By {a.recorded_by_display_name || 'Staff'}</span>
+                                  <button
+                                    type="button"
+                                    onClick={() => applyAdminAssessment(a)}
+                                    className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all"
+                                  >
+                                    Load this Assessment
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Non-Super Admin Sector context card */}
+                      {!isSuperAdmin && (
+                        <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
+                          <div>
+                            <span className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider block">Campaign Administrator Sector</span>
+                            <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
+                              Sector Admin: {profile?.parentAdminName || profile?.name || 'Assigned Admin'} ({profile?.role === 'volunteer' ? 'Karyakarta Assessment' : (profile?.role === 'manager' ? 'Campaign Manager' : 'Admin Staff')})
+                            </span>
+                          </div>
+                          <span className="text-[9px] bg-emerald-100 dark:bg-emerald-950/60 text-emerald-800 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-900/50 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Sector Secured</span>
+                        </div>
+                      )}
+
                       {/* Health Section */}
                       <div className="space-y-4">
                         <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Health & Vital Status</h4>
@@ -2555,29 +3851,41 @@ const VoterManagement: React.FC = () => {
                           
                           {/* Admin Context Selector - visible to Super Admin or read-only info for other roles */}
                           {isSuperAdmin ? (
-                            <div className="space-y-1.5 flex flex-col">
-                              <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Admin Profile Context</label>
+                            <div className="space-y-2 p-3.5 rounded-2xl bg-blue-50/50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40">
+                              <div className="flex items-center justify-between">
+                                <label className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300 tracking-wider flex items-center gap-1.5">
+                                  <Users size={13} /> Active Admin Assessment Context
+                                </label>
+                                <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400">Super Admin Mode</span>
+                              </div>
                               <select 
                                 value={sentimentAdminId} 
-                                onChange={e => setSentimentAdminId(e.target.value)} 
-                                className="webapp-input w-full h-11 text-sm font-bold"
+                                onChange={e => {
+                                  const newAdmId = e.target.value;
+                                  setSentimentAdminId(newAdmId);
+                                  const matching = voterAssessments.find(a => a.admin_id === newAdmId);
+                                  if (matching) {
+                                    applyAdminAssessment(matching);
+                                  }
+                                }} 
+                                className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900"
                               >
-                                <option value="">-- Select Admin Context --</option>
+                                <option value="">-- Choose Admin Context --</option>
                                 {allAdmins.map(adm => (
                                   <option key={adm.uid} value={adm.uid}>{adm.username} ({adm.role === 'super_admin' ? 'Super Admin' : 'Admin'} - {adm.email})</option>
                                 ))}
                               </select>
-                              <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">*As Super Admin, you can record or view voter sentiment from any administrator's point of view.</p>
+                              <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">*As Super Admin, you can switch between any administrator to inspect or record their linked assessment.</p>
                             </div>
                           ) : (
                             <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
                               <div>
                                 <span className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider block">Campaign Administrator Context</span>
                                 <span className="text-xs font-bold text-zinc-800 dark:text-zinc-200">
-                                  {profile?.username || profile?.email?.split('@')[0]} ({profile?.role === 'manager' ? 'Campaign Manager' : (profile?.role === 'volunteer' ? 'Karyakarta Staff' : 'Admin Staff')})
+                                  Sector Admin: {profile?.parentAdminName || profile?.name || 'Assigned Admin'} ({profile?.role === 'volunteer' ? 'Karyakarta Staff' : (profile?.role === 'manager' ? 'Campaign Manager' : 'Admin Staff')})
                                 </span>
                               </div>
-                              <span className="text-[9px] bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-400 border border-blue-200 dark:border-blue-900/50 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Locked</span>
+                              <span className="text-[9px] bg-blue-100 dark:bg-blue-950/60 text-blue-800 dark:text-blue-400 border border-blue-200 dark:border-blue-900/50 px-2 py-0.5 rounded-full font-black uppercase tracking-wider">Sector Secured</span>
                             </div>
                           )}
 
@@ -2608,6 +3916,34 @@ const VoterManagement: React.FC = () => {
                                 );
                               })}
                             </div>
+                          </div>
+
+                          {/* Registered Political Party Preference */}
+                          <div className="space-y-2">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider block flex items-center justify-between">
+                              <span>Registered Political Party Preference / Alignment</span>
+                              {sentimentFavoredPartyId && (
+                                <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold lowercase">
+                                  Selected: {parties.find(p => p.id === sentimentFavoredPartyId || p.name === sentimentFavoredPartyId)?.name || sentimentFavoredPartyId}
+                                </span>
+                              )}
+                            </label>
+                            <select
+                              value={sentimentFavoredPartyId}
+                              onChange={e => {
+                                setSentimentFavoredPartyId(e.target.value);
+                                const sel = parties.find(p => p.id === e.target.value || p.name === e.target.value);
+                                setFormData(prev => ({ ...prev, partyInclination: sel?.name || e.target.value }));
+                              }}
+                              className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 cursor-pointer focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="">-- Choose Inclined / Favored Party --</option>
+                              {parties.map(p => (
+                                <option key={p.id} value={p.id}>
+                                  {p.name} {p.code ? `(${p.code})` : ''}
+                                </option>
+                              ))}
+                            </select>
                           </div>
 
                           {/* Sentiment Strength (1-5) */}
@@ -2695,7 +4031,13 @@ const VoterManagement: React.FC = () => {
                 <div className="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/80 shrink-0 p-6">
                   <div className="max-w-4xl mx-auto w-full flex flex-col sm:flex-row justify-between gap-3">
                     <div className="flex gap-2">
-                      <button type="button" onClick={() => setIsModalOpen(false)} className="webapp-button-secondary px-5 py-2.5 text-xs font-bold cursor-pointer">Abort</button>
+                      <button 
+                        type="button" 
+                        onClick={() => setIsModalOpen(false)} 
+                        className="webapp-button-secondary px-5 py-2.5 text-xs font-bold cursor-pointer"
+                      >
+                        Cancel
+                      </button>
                       {activeFormTab !== 'main' && (
                         <button 
                           type="button" 
@@ -2735,9 +4077,10 @@ const VoterManagement: React.FC = () => {
                   </div>
                 </div>
               </form>
-            </div>
+            )}
           </div>
-        )}
+        </div>
+      )}
 
        {/* Bulk Import Modal */}
        <BulkImportModal

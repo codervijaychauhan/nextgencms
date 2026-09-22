@@ -55,14 +55,27 @@ const DEFAULT_ALLOCATIONS: Record<string, number> = {
 
 export default function FinanceTracker() {
   const { user, profile, isSuperAdmin } = useAuth();
-  const adminId = user?.uid || 'default_admin';
+  const adminId = user?.uid || profile?.uid || 'default_admin';
   const adminName = profile?.username || user?.displayName || 'Admin';
 
+  const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isEffectiveSuperAdmin = isSuperAdmin || userEmail === 'vijaychauhanofficial01@gmail.com';
+  const myAdminIds = [
+    user?.uid,
+    profile?.uid,
+    profile?.id,
+    profile?.parentAdminId,
+    profile?.parent_admin_id,
+    profile?.adminId
+  ].filter(Boolean).map(id => String(id).trim());
+
   const hasRight = (moduleId: string, right: string) => {
-    const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
-    if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin) return true;
+    if (isEffectiveSuperAdmin) return true;
+    const userRole = (profile?.role || (user as any)?.role || '').toLowerCase();
+    if (['super_admin', 'admin', 'superadmin'].includes(userRole)) return true;
     const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
-    return perms.includes(right);
+    if (perms === true || perms === 1 || perms === '*') return true;
+    return typeof perms === 'string' && perms.includes(right);
   };
 
   const [loading, setLoading] = useState(true);
@@ -177,10 +190,18 @@ export default function FinanceTracker() {
     try {
       // 1. Fetch budgets and custom categories
       const budgets = await api.get<any[]>('/api/finance/budgets');
-      const currentBudget = (budgets || []).find(b => 
-        (b.adminId === adminId || b.admin_id === adminId) && 
-        (String(b.electionYear) === String(targetYear) || String(b.election_year) === String(targetYear))
-      ) || (budgets || []).find(b => (b.adminId === adminId || b.admin_id === adminId));
+      let currentBudget: any = null;
+      if (isEffectiveSuperAdmin) {
+        currentBudget = (budgets || []).find(b => 
+          (b.adminId === adminId || b.admin_id === adminId) && 
+          (String(b.electionYear) === String(targetYear) || String(b.election_year) === String(targetYear))
+        ) || (budgets || []).find(b => (b.adminId === adminId || b.admin_id === adminId)) || (budgets || [])[0];
+      } else {
+        currentBudget = (budgets || []).find(b => 
+          myAdminIds.includes(String(b.adminId || b.admin_id || '').trim()) && 
+          (String(b.electionYear) === String(targetYear) || String(b.election_year) === String(targetYear))
+        ) || (budgets || []).find(b => myAdminIds.includes(String(b.adminId || b.admin_id || '').trim()));
+      }
       
       let loadedCats = DEFAULT_CATEGORIES;
       let allocMap = { ...DEFAULT_ALLOCATIONS };
@@ -206,9 +227,9 @@ export default function FinanceTracker() {
 
       // 2. Fetch Transactions
       const txData = await api.get<any[]>('/api/finance/transactions');
-      const txList: Transaction[] = (txData || []).map(d => ({
+      let txList: Transaction[] = (txData || []).map(d => ({
         id: String(d.id),
-        adminId: d.adminId || d.admin_id || adminId,
+        adminId: String(d.adminId || d.admin_id || adminId).trim(),
         type: d.type || 'expense',
         title: d.title || '',
         amount: typeof d.amount === 'number' ? d.amount : parseFloat(d.amount || '0'),
@@ -219,6 +240,11 @@ export default function FinanceTracker() {
         notes: d.notes || '',
         createdAt: d.createdAt || d.created_at
       }));
+
+      // Scoped to logged in admin user unless super admin
+      if (!isEffectiveSuperAdmin) {
+        txList = txList.filter(t => myAdminIds.includes(t.adminId) || t.adminId === String(user?.uid || '').trim());
+      }
 
       txList.sort((a, b) => b.date.localeCompare(a.date));
       setTransactions(txList);
@@ -662,196 +688,169 @@ export default function FinanceTracker() {
   }
 
   return (
-    <div className="space-y-8 animate-fade-in text-zinc-900 dark:text-zinc-100 pb-16">
-      
-      {/* Module Title Section */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 border-b border-zinc-200 dark:border-zinc-800 pb-6">
-        <div>
-          <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-widest bg-emerald-500/10 px-2.5 py-1 rounded-md">
-            Campaign Ledger
-          </span>
-          <h1 className="text-3xl font-bold tracking-tight mt-2 text-zinc-900 dark:text-white">
-            Finance & Budget
-          </h1>
-          <p className="text-zinc-500 dark:text-zinc-400 text-sm mt-1 max-w-xl">
-            Personal workspace for <strong className="text-zinc-900 dark:text-white">{adminName}</strong> to track campaign funds, register income and expense transactions, and manage custom spending categories.
+    <div className="space-y-6 w-full animate-fade-in text-zinc-900 dark:text-zinc-100 pb-16">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Finance
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+              Year {selectedYear}
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Campaign income, expenses, and budget ledger.
           </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2.5">
+        <div className="flex flex-wrap items-center gap-2">
           {hasRight('finance', 'u') && (
             <button
               onClick={handleOpenBudgetModal}
-              className="flex items-center gap-2 px-3.5 py-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-2 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-xs"
             >
               <Sliders className="w-3.5 h-3.5 text-blue-500" />
-              Budget Allocations
+              Allocations
             </button>
           )}
 
           <button
             onClick={() => setIsReportModalOpen(true)}
-            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-950 text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-sm"
+            className="flex items-center gap-1.5 px-3 py-2 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-xs"
           >
             <Printer className="w-3.5 h-3.5" />
-            Generate Report
+            Report
           </button>
 
           {hasRight('finance', 'c') && (
             <button
               onClick={() => handleOpenNewTx('expense')}
-              className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-xl transition-all cursor-pointer shadow-sm"
+              className="flex items-center gap-1.5 px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg transition-all cursor-pointer shadow-xs"
             >
-              <Plus className="w-4 h-4" />
-              Add Transaction
+              <Plus className="w-3.5 h-3.5" />
+              Add Entry
             </button>
           )}
         </div>
       </div>
 
-      {/* Timeframe & Year Selector filters */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 bg-zinc-50 dark:bg-zinc-900/40 p-4 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-sm">
-        <div className="md:col-span-4">
-          <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Fiscal Period & Ledger Filter</h3>
-          <p className="text-xs text-zinc-500">Select active year to configure custom categories and view matching transactions.</p>
-        </div>
-        <div className="md:col-span-8 flex flex-col sm:flex-row items-stretch sm:items-center gap-3 justify-end">
-          {/* Year selector manual type */}
-          <div className="flex items-center gap-1.5 w-full sm:w-auto">
-            <input
-              type="text"
-              list="configured-years"
-              value={yearInput}
-              onChange={(e) => setYearInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  setSelectedYear(yearInput);
-                }
-              }}
-              placeholder="Type Year (e.g. 2026)"
-              className="w-full sm:w-44 px-3 py-2 border border-zinc-200 dark:border-zinc-800 text-xs font-bold rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100 shadow-sm"
-            />
-            <datalist id="configured-years">
-              {['2024', '2025', '2026', '2027', '2028', '2029', '2030', '2031', '2032', '2033', '2034', '2035'].map(y => (
-                <option key={y} value={y} />
-              ))}
-            </datalist>
-            <button
-              type="button"
-              onClick={() => setSelectedYear(yearInput)}
-              className="px-3.5 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold rounded-xl cursor-pointer shadow-sm transition-all shrink-0"
-            >
-              Go
-            </button>
-          </div>
-
-          {/* Timeframe selector */}
-          <div className="flex bg-zinc-200/60 dark:bg-zinc-950 p-1 rounded-xl font-sans">
-            {(['weekly', 'monthly', 'yearly', 'all'] as const).map((tf) => (
-              <button
-                key={tf}
-                onClick={() => setTimeframe(tf)}
-                className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all capitalize cursor-pointer whitespace-nowrap ${
-                  timeframe === tf
-                    ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-sm'
-                    : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
-                }`}
-              >
-                {tf === 'all' ? 'All-Time' : tf}
-              </button>
+      {/* Period & Year Selector */}
+      <div className="flex flex-col sm:flex-row items-center justify-between gap-3 bg-zinc-50 dark:bg-zinc-900/40 p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xs">
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <input
+            type="text"
+            list="configured-years"
+            value={yearInput}
+            onChange={(e) => setYearInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                setSelectedYear(yearInput);
+              }
+            }}
+            placeholder="Year (e.g. 2026)"
+            className="w-28 px-2.5 py-1.5 border border-zinc-200 dark:border-zinc-800 text-xs font-bold rounded-lg focus:outline-none focus:ring-1 focus:ring-blue-500 bg-white dark:bg-zinc-950 text-zinc-800 dark:text-zinc-100"
+          />
+          <datalist id="configured-years">
+            {['2024', '2025', '2026', '2027', '2028', '2029', '2030'].map(y => (
+              <option key={y} value={y} />
             ))}
-          </div>
+          </datalist>
+          <button
+            type="button"
+            onClick={() => setSelectedYear(yearInput)}
+            className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold rounded-lg cursor-pointer transition-all"
+          >
+            Set
+          </button>
+        </div>
+
+        {/* Timeframe selector */}
+        <div className="flex bg-zinc-200/60 dark:bg-zinc-950 p-0.5 rounded-lg font-sans">
+          {(['weekly', 'monthly', 'yearly', 'all'] as const).map((tf) => (
+            <button
+              key={tf}
+              onClick={() => setTimeframe(tf)}
+              className={`px-3 py-1 text-xs font-semibold rounded-md transition-all capitalize cursor-pointer whitespace-nowrap ${
+                timeframe === tf
+                  ? 'bg-white dark:bg-zinc-800 text-zinc-950 dark:text-white shadow-xs'
+                  : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
+              }`}
+            >
+              {tf === 'all' ? 'All' : tf}
+            </button>
+          ))}
         </div>
       </div>
 
       {/* Main Stats Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
-        
-        {/* Card 1: Total Funds In */}
-        <div className="p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl relative overflow-hidden shadow-sm">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {/* Card 1: Funds In */}
+        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl relative overflow-hidden shadow-xs">
           <div className="flex justify-between items-start">
-            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 font-sans uppercase tracking-wider text-[10px]">Total Funds In</span>
-            <div className="p-2 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
-              <ArrowDownLeft className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Funds In</span>
+            <div className="p-1.5 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 rounded-lg">
+              <ArrowDownLeft className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-4">
-            <h3 className="text-2xl font-bold tracking-tight text-zinc-950 dark:text-white">
+          <div className="mt-2">
+            <h3 className="text-xl font-bold tracking-tight text-zinc-950 dark:text-white">
               {formatLakhs(totalIncome)}
             </h3>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-600 dark:text-emerald-400">
-                +{incomes.length} receipts
-              </span>
-            </div>
+            <span className="text-[10px] text-emerald-600 font-medium">+{incomes.length} entries</span>
           </div>
-          <div className="absolute bottom-0 inset-x-0 h-1 bg-emerald-500" />
         </div>
 
-        {/* Card 2: Total Funds Out */}
-        <div className="p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl relative overflow-hidden shadow-sm">
+        {/* Card 2: Funds Out */}
+        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl relative overflow-hidden shadow-xs">
           <div className="flex justify-between items-start">
-            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 font-sans uppercase tracking-wider text-[10px]">Total Funds Out</span>
-            <div className="p-2 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg">
-              <ArrowUpRight className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Funds Out</span>
+            <div className="p-1.5 bg-amber-500/10 text-amber-600 dark:text-amber-400 rounded-lg">
+              <ArrowUpRight className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-4">
-            <h3 className="text-2xl font-bold tracking-tight text-zinc-950 dark:text-white">
+          <div className="mt-2">
+            <h3 className="text-xl font-bold tracking-tight text-zinc-950 dark:text-white">
               {formatLakhs(totalSpent)}
             </h3>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-600 dark:text-amber-400">
-                -{expenses.length} payments
-              </span>
-            </div>
+            <span className="text-[10px] text-amber-600 font-medium">-{expenses.length} entries</span>
           </div>
-          <div className="absolute bottom-0 inset-x-0 h-1 bg-amber-500" />
         </div>
 
         {/* Card 3: Net Balance */}
-        <div className="p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl relative overflow-hidden shadow-sm">
+        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl relative overflow-hidden shadow-xs">
           <div className="flex justify-between items-start">
-            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 font-sans uppercase tracking-wider text-[10px]">Net Balance</span>
-            <div className={`p-2 rounded-lg ${netBalance >= 0 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600'}`}>
-              <Coins className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Net Balance</span>
+            <div className={`p-1.5 rounded-lg ${netBalance >= 0 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-600'}`}>
+              <Coins className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-4">
-            <h3 className={`text-2xl font-bold tracking-tight ${netBalance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
+          <div className="mt-2">
+            <h3 className={`text-xl font-bold tracking-tight ${netBalance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500'}`}>
               {formatLakhs(netBalance)}
             </h3>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${netBalance >= 0 ? 'bg-emerald-500/10 text-emerald-600' : 'bg-red-500/10 text-red-500'}`}>
-                {netBalance >= 0 ? 'Surplus' : 'Deficit'}
-              </span>
-            </div>
+            <span className={`text-[10px] font-bold ${netBalance >= 0 ? 'text-emerald-600' : 'text-red-500'}`}>
+              {netBalance >= 0 ? 'Surplus' : 'Deficit'}
+            </span>
           </div>
-          <div className={`absolute bottom-0 inset-x-0 h-1 ${netBalance >= 0 ? 'bg-emerald-600' : 'bg-red-500'}`} />
         </div>
 
         {/* Card 4: Top Category */}
-        <div className="p-6 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl relative overflow-hidden shadow-sm">
+        <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl relative overflow-hidden shadow-xs">
           <div className="flex justify-between items-start">
-            <span className="text-xs font-medium text-zinc-500 dark:text-zinc-400 font-sans uppercase tracking-wider text-[10px]">Top Spending</span>
-            <div className="p-2 bg-blue-500/10 text-blue-500 rounded-lg">
-              <Tag className="w-4 h-4" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Top Spending</span>
+            <div className="p-1.5 bg-blue-500/10 text-blue-500 rounded-lg">
+              <Tag className="w-3.5 h-3.5" />
             </div>
           </div>
-          <div className="mt-4">
-            <h3 className="text-lg font-bold tracking-tight text-zinc-950 dark:text-white truncate" title={topCategoryName}>
+          <div className="mt-2">
+            <h3 className="text-base font-bold tracking-tight text-zinc-950 dark:text-white truncate" title={topCategoryName}>
               {topCategoryName}
             </h3>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-500">
-                {formatLakhs(topCategorySpent)}
-              </span>
-              <span className="text-[10px] text-zinc-400">spent</span>
-            </div>
+            <span className="text-[10px] text-zinc-400 font-medium">{formatLakhs(topCategorySpent)}</span>
           </div>
-          <div className="absolute bottom-0 inset-x-0 h-1 bg-blue-500" />
         </div>
-
       </div>
 
       {/* Financial Flow Interactive SVG Trend Chart */}

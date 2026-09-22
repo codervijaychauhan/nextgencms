@@ -752,7 +752,7 @@ export default function WBSender() {
   }
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
+    <div className="space-y-6 w-full">
       
       {/* Dynamic Toast Alerts */}
       <AnimatePresence>
@@ -779,37 +779,37 @@ export default function WBSender() {
         )}
       </AnimatePresence>
 
-      {/* Main Header */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-6">
-        <div className="space-y-1">
-          <div className="flex items-center gap-3">
-            <span className="p-3 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 rounded-2xl shrink-0 shadow-xs">
-              <MessageSquare className="w-6 h-6" />
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Broadcasts
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+              WhatsApp
             </span>
-            <div>
-              <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-white">WB Sender Dashboard</h1>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                Official Meta WABA Campaign Manager, Category Targeting & Multi-Tenant Isolated Senders
-              </p>
-            </div>
           </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Messaging campaigns, templates, and broadcast delivery logs.
+          </p>
         </div>
 
-        {/* Tab Selection Navigation */}
-        <div className="flex flex-wrap items-center gap-1.5 p-1 bg-zinc-100 dark:bg-zinc-800/60 rounded-2xl max-w-max self-start md:self-center">
+        {/* Tab Navigation */}
+        <div className="flex flex-wrap items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-800/60 rounded-lg max-w-max self-start sm:self-auto">
           {[
-            { id: 'overview', label: 'Campaigns Dashboard' },
-            { id: 'campaigns', label: 'Create Campaign' },
-            { id: 'templates', label: 'Templates Builder' },
-            { id: 'onboard', label: 'WABA Connections' },
-            { id: 'webhook', label: 'Callbacks & Live Chat' }
+            { id: 'overview', label: 'Campaigns' },
+            { id: 'campaigns', label: 'New Broadcast' },
+            { id: 'templates', label: 'Templates' },
+            { id: 'onboard', label: 'Accounts' },
+            { id: 'webhook', label: 'Inbox' }
           ].map(tab => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id as 'overview' | 'campaigns' | 'templates' | 'onboard' | 'webhook')}
-              className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+              className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all cursor-pointer ${
                 activeTab === tab.id
-                  ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white shadow-xs border border-zinc-200/50 dark:border-zinc-800'
+                  ? 'bg-white dark:bg-zinc-900 text-zinc-950 dark:text-white shadow-xs'
                   : 'text-zinc-500 hover:text-zinc-950 dark:hover:text-zinc-300'
               }`}
             >

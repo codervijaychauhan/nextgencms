@@ -25,6 +25,7 @@ Helpful Commands Cheat Sheet:
 ---------------------------------------------------------------------------------------
 Command                   | Description
 ---------------------------------------------------------------------------------------
+npm run build
 npm run dev               | Run local UI on localhost:3000 connected to live Cloudflare D1
 npm run deploy            | Build & deploy frontend + worker code to Cloudflare in 1 step
 npm run d1:init           | Execute/Update database schema on remote Cloudflare D1

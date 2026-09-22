@@ -57,13 +57,16 @@ const BENEFIT_SUGGESTIONS = [
 ];
 
 export default function Benefits() {
-  const { user, isSuperAdmin, profile } = useAuth();
+  const { user, isSuperAdmin, isAdmin, profile } = useAuth();
   
   const hasRight = (moduleId: string, right: string) => {
     const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
     if (userEmail === 'vijaychauhanofficial01@gmail.com' || isSuperAdmin) return true;
+    const userRole = (profile?.role || (user as any)?.role || '').toLowerCase();
+    if (['super_admin', 'admin', 'superadmin'].includes(userRole)) return true;
     const perms = profile?.permissions?.[moduleId] || profile?.rights?.[moduleId] || '';
-    return perms.includes(right);
+    if (perms === true || perms === 1 || perms === '*') return true;
+    return typeof perms === 'string' && perms.includes(right);
   };
   
   // State variables
@@ -123,9 +126,20 @@ export default function Benefits() {
   const [editWitnessSearch, setEditWitnessSearch] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
-  // Load high-privilege users specifically for the Admin dropdown filter
+  const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isEffectiveSuperAdmin = isSuperAdmin || userEmail === 'vijaychauhanofficial01@gmail.com';
+  const myAdminIds = useMemo(() => [
+    user?.uid,
+    profile?.uid,
+    profile?.id,
+    profile?.parentAdminId,
+    profile?.parent_admin_id,
+    profile?.adminId
+  ].filter(Boolean).map(id => String(id).trim()), [user, profile]);
+
+  // Load high-privilege users specifically for the Admin dropdown filter (Super Admin only)
   useEffect(() => {
-    if (!user || !isAdmin) {
+    if (!user || !isEffectiveSuperAdmin) {
       setAdminUsers([]);
       return;
     }
@@ -150,7 +164,7 @@ export default function Benefits() {
       }
     };
     fetchAdmins();
-  }, [user, isAdmin]);
+  }, [user, isEffectiveSuperAdmin]);
 
   const fetchBenefits = async () => {
     if (!user) return;
@@ -442,13 +456,19 @@ export default function Benefits() {
     }
   };
 
-  // Derive benefits filtered by Admin selection (Super Admin feature)
+  // Derive benefits filtered by Admin selection (Super Admin feature) or scoped to user
   const benefitsFilteredByAdmin = useMemo(() => {
-    if (!isAdmin || selectedAdminId === 'All') {
+    if (!isEffectiveSuperAdmin) {
+      return benefits.filter(b => {
+        const bAdmin = String(b.adminId || '').trim();
+        return myAdminIds.includes(bAdmin) || bAdmin === String(user?.uid || '').trim();
+      });
+    }
+    if (selectedAdminId === 'All') {
       return benefits;
     }
-    return benefits.filter(b => b.adminId === selectedAdminId);
-  }, [benefits, selectedAdminId, isAdmin]);
+    return benefits.filter(b => String(b.adminId || '').trim() === selectedAdminId);
+  }, [benefits, selectedAdminId, isEffectiveSuperAdmin, myAdminIds, user]);
 
   // Map admin UIDs to details for display and counts
   const adminMap = useMemo(() => {
@@ -552,25 +572,30 @@ export default function Benefits() {
   }
 
   return (
-    <div className="space-y-8">
-      {/* HEADER SECTION */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-black tracking-tight text-zinc-900 dark:text-white uppercase">
-            Benefits Tracker
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-1">
-            Track and monitor the real-time allocation of government and party-backed benefit programs to citizens.
+    <div className="space-y-6 w-full">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Benefits
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-pink-500/10 text-pink-600 dark:text-pink-400 border border-pink-500/20">
+              {benefits.length} Records
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Citizen welfare schemes and aid records.
           </p>
         </div>
 
         {hasRight('benefits', 'c') && (
           <button 
             onClick={() => setIsOpen(true)}
-            className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs uppercase tracking-wider px-5 py-3 rounded-xl flex items-center justify-center gap-2 transition-all active:scale-95 shadow-sm shrink-0"
+            className="bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-950 font-semibold text-xs px-3.5 py-2 rounded-lg flex items-center justify-center gap-1.5 transition-all shadow-xs shrink-0"
           >
-            <Plus size={16} />
-            Register Benefit
+            <Plus size={14} />
+            Add Benefit
           </button>
         )}
       </div>
@@ -582,9 +607,9 @@ export default function Benefits() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="bg-green-50 dark:bg-green-950/20 border border-green-200 dark:border-green-900 text-green-800 dark:text-green-300 px-4 py-3.5 rounded-xl text-xs flex items-center gap-2.5 font-medium shadow-sm"
+            className="bg-emerald-50 dark:bg-emerald-950/20 border border-emerald-200 dark:border-emerald-900 text-emerald-800 dark:text-emerald-300 px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 font-medium shadow-2xs"
           >
-            <CheckCircle2 size={16} className="text-green-600 dark:text-green-400 shrink-0" />
+            <CheckCircle2 size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
             <span>{success}</span>
           </motion.div>
         )}
@@ -594,84 +619,66 @@ export default function Benefits() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -10 }}
-            className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 text-red-800 dark:text-red-300 px-4 py-3.5 rounded-xl text-xs flex items-center gap-2.5 font-medium shadow-sm"
+            className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900 text-red-800 dark:text-red-300 px-3.5 py-2.5 rounded-xl text-xs flex items-center gap-2 font-medium shadow-2xs"
           >
-            <AlertCircle size={16} className="text-red-600 dark:text-red-400 shrink-0" />
+            <AlertCircle size={15} className="text-red-600 dark:text-red-400 shrink-0" />
             <span>{error}</span>
           </motion.div>
         )}
       </AnimatePresence>
 
       {/* METRICS GRID */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {/* Metric 1 */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">Total Disbursements</span>
-            <div className="w-8 h-8 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
-              <Banknote size={16} />
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">Total Disbursed</span>
+            <div className="w-7 h-7 rounded-lg bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center">
+              <Banknote size={14} />
             </div>
           </div>
-          <p className="text-2xl font-black text-zinc-900 dark:text-white mt-3 font-mono">
+          <p className="text-xl font-bold text-zinc-900 dark:text-white mt-1 font-mono">
             ₹{stats.totAmt.toLocaleString('en-IN')}
           </p>
-          <div className="text-[10px] text-zinc-500 dark:text-zinc-500 mt-1">
-            Recorded across {benefits.length} distributed packages
-          </div>
         </div>
 
         {/* Metric 2 */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">Unique Beneficiaries</span>
-            <div className="w-8 h-8 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
-              <User size={16} />
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">Beneficiaries</span>
+            <div className="w-7 h-7 rounded-lg bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center">
+              <User size={14} />
             </div>
           </div>
-          <p className="text-2xl font-black text-zinc-900 dark:text-white mt-3 font-mono">
+          <p className="text-xl font-bold text-zinc-900 dark:text-white mt-1 font-mono">
             {stats.beneficiariesCount}
           </p>
-          <div className="text-[10px] text-zinc-500 dark:text-zinc-500 mt-1">
-            Voters registered on campaign payroll
-          </div>
         </div>
 
         {/* Metric 3 */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">Gov-Backed Support</span>
-            <div className="w-8 h-8 rounded-lg bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
-              <Landmark size={16} />
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">Gov Support</span>
+            <div className="w-7 h-7 rounded-lg bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center">
+              <Landmark size={14} />
             </div>
           </div>
-          <p className="text-2xl font-black text-zinc-900 dark:text-white mt-3 font-mono">
+          <p className="text-xl font-bold text-zinc-900 dark:text-white mt-1 font-mono">
             ₹{stats.govAmt.toLocaleString('en-IN')}
           </p>
-          <div className="text-[10px] text-zinc-500 dark:text-zinc-500 mt-1 flex justify-between items-center">
-            <span>Official schemes deployed</span>
-            <span className="bg-purple-100 dark:bg-purple-950 text-purple-800 dark:text-purple-300 font-bold px-1.5 py-0.5 rounded text-[8px] font-sans">
-              {stats.govCount} Entries
-            </span>
-          </div>
         </div>
 
         {/* Metric 4 */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl p-5 shadow-sm">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-3.5 shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] uppercase font-black tracking-widest text-zinc-400">Party-Backed Support</span>
-            <div className="w-8 h-8 rounded-lg bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400 flex items-center justify-center">
-              <Gift size={16} />
+            <span className="text-[10px] uppercase font-bold tracking-wider text-zinc-400">Party Support</span>
+            <div className="w-7 h-7 rounded-lg bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center">
+              <CreditCard size={14} />
             </div>
           </div>
-          <p className="text-2xl font-black text-zinc-900 dark:text-white mt-3 font-mono">
+          <p className="text-xl font-bold text-zinc-900 dark:text-white mt-1 font-mono">
             ₹{stats.partyAmt.toLocaleString('en-IN')}
           </p>
-          <div className="text-[10px] text-zinc-500 dark:text-zinc-500 mt-1 flex justify-between items-center">
-            <span>Direct campaign outreach</span>
-            <span className="bg-orange-100 dark:bg-orange-950 text-orange-850 dark:text-orange-300 font-bold px-1.5 py-0.5 rounded text-[8px] font-sans">
-              {stats.partyCount} Entries
-            </span>
-          </div>
         </div>
       </div>
 
@@ -691,7 +698,7 @@ export default function Benefits() {
 
           <div className="flex flex-wrap items-center gap-4">
             {/* Admin selector filter (Visible only to Super Admin) */}
-            {isAdmin && (
+            {isEffectiveSuperAdmin && adminUsers.length > 0 && (
               <div className="flex items-center gap-2">
                 <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400">
                   <User size={13} />

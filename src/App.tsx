@@ -26,6 +26,7 @@ import VolunteerManagement from './components/VolunteerManagement';
 import BoothAgentManagement from './components/BoothAgentManagement';
 import Benefits from './components/Benefits';
 import { PredictionsAnalytics } from './components/PredictionsAnalytics';
+import AdminSentimentComparison from './components/AdminSentimentComparison';
 import FinanceTracker from './components/FinanceTracker';
 import WBSender from './components/WBSender';
 import MandalManagement from './components/MandalManagement';
@@ -49,8 +50,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen text-zinc-900 dark:text-zinc-100 flex flex-col md:flex-row">
       <Navigation />
-      <main className={`flex-1 min-w-0 overflow-x-hidden transition-all duration-300 min-h-screen ${isCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
-        <div className="max-w-full mx-auto px-4 sm:px-6 md:px-8 py-6 md:py-8 min-w-0">
+      <main className={`flex-1 min-w-0 overflow-x-hidden transition-all duration-200 min-h-screen md:pt-16 ${isCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
+        <div className="w-full px-4 sm:px-6 md:px-8 py-6 md:py-8 min-w-0">
           {children}
         </div>
       </main>
@@ -83,14 +84,46 @@ function PermissionRoute({ children, moduleId }: { children: React.ReactNode, mo
   
   const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
   const isSuper = isSuperAdmin || userEmail === 'vijaychauhanofficial01@gmail.com';
+  const userRole = (profile?.role || (user as any)?.role || '').toLowerCase();
 
-  const canAccess = isSuper || moduleId === 'dashboard' || (
-    profile && !profile.disabled && profile.role !== 'guest' && Boolean(
-      (profile.permissions?.[moduleId] || profile.rights?.[moduleId])?.length
-    )
+  // Super admins and dashboard route are always allowed
+  if (isSuper || userRole === 'super_admin' || moduleId === 'dashboard') {
+    return <>{children}</>;
+  }
+
+  if (!profile || profile.disabled || userRole === 'guest') {
+    return <Navigate to="/dashboard" replace />;
+  }
+
+  const permKey = moduleId === 'predictions'
+    ? (profile.permissions?.predictions ?? profile.permissions?.analytics ?? profile.rights?.predictions ?? profile.rights?.analytics)
+    : (moduleId === 'survey_campaigns' ? (profile.permissions?.survey_campaigns ?? profile.permissions?.surveys ?? profile.rights?.survey_campaigns ?? profile.rights?.surveys)
+    : (profile.permissions?.[moduleId] ?? profile.rights?.[moduleId]));
+
+  const hasAccess = Boolean(
+    permKey === true || 
+    permKey === 1 || 
+    permKey === '*' ||
+    (typeof permKey === 'string' && permKey.length > 0) ||
+    (Array.isArray(permKey) && permKey.length > 0)
   );
   
-  if (!canAccess) {
+  if (!hasAccess) {
+    return <Navigate to="/dashboard" replace />;
+  }
+  
+  return <>{children}</>;
+}
+
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const { profile, isSuperAdmin, user, loading } = useAuth();
+  
+  if (loading) return null;
+  
+  const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
+  const isSuper = isSuperAdmin || userEmail === 'vijaychauhanofficial01@gmail.com';
+
+  if (!isSuper) {
     return <Navigate to="/dashboard" replace />;
   }
   
@@ -125,6 +158,7 @@ export default function App() {
             <Route path="/admin/whatsapp" element={<ProtectedRoute><PermissionRoute moduleId="whatsapp"><WBSender /></PermissionRoute></ProtectedRoute>} />
             <Route path="/admin/mandals" element={<ProtectedRoute><PermissionRoute moduleId="mandals"><MandalManagement /></PermissionRoute></ProtectedRoute>} />
             <Route path="/admin/analytics" element={<ProtectedRoute><PermissionRoute moduleId="predictions"><PredictionsAnalytics /></PermissionRoute></ProtectedRoute>} />
+            <Route path="/admin/sentiment-comparison" element={<ProtectedRoute><PermissionRoute moduleId="sentiment_comparison"><AdminSentimentComparison /></PermissionRoute></ProtectedRoute>} />
             
             <Route path="/" element={<Navigate to="/dashboard" />} />
           </Routes>

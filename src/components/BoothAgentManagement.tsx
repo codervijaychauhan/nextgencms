@@ -16,6 +16,12 @@ interface PollingBooth {
   village?: string;
   constituencyId: string;
   constituencyName?: string;
+  districtId?: string;
+  districtName?: string;
+  stateId?: string;
+  stateName?: string;
+  mandalId?: string;
+  mandalName?: string;
 }
 
 interface Volunteer {
@@ -42,7 +48,7 @@ interface BoothAssignment {
 }
 
 export default function BoothAgentManagement() {
-  const { user, isSuperAdmin, profile } = useAuth();
+  const { user, isSuperAdmin, isAdmin, profile } = useAuth();
   
   const hasRight = (moduleId: string, right: string) => {
     const userEmail = (user?.email || profile?.email || '').toLowerCase().trim();
@@ -51,6 +57,41 @@ export default function BoothAgentManagement() {
     return perms.includes(right);
   };
   
+  const normalizeId = (id: any): string => {
+    if (id === null || id === undefined) return '';
+    return String(id).trim().replace(/\.0$/, '');
+  };
+
+  // Allowed Demographics Based on Role & Profile Scoping
+  const electSettings = profile?.election_settings || profile?.electionSettings || {};
+  const rawState = profile?.stateId || profile?.state_id || electSettings.state_id || electSettings.stateId || '';
+  const rawDistrict = profile?.districtId || profile?.district_id || electSettings.district_id || electSettings.districtId || '';
+  const rawConstituency = profile?.constituencyId || profile?.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '';
+  const rawBooth = profile?.boothId || profile?.booth_id || electSettings.booth_id || electSettings.boothId || '';
+  const rawAssignedBooths = profile?.assigned_booths || electSettings.assigned_booths || [];
+
+  const allowedStateIds = !isSuperAdmin && rawState
+    ? String(rawState).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedDistrictIds = !isSuperAdmin && rawDistrict
+    ? String(rawDistrict).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedConstituencyIds = !isSuperAdmin && rawConstituency
+    ? String(rawConstituency).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedBoothIds = !isSuperAdmin && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
+    ? (rawBooth 
+        ? String(rawBooth).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+        : (rawAssignedBooths || []).map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')) 
+    : [];
+
+  const hasAssignedScope = isSuperAdmin || (
+    allowedBoothIds.length > 0 ||
+    allowedConstituencyIds.length > 0 ||
+    allowedDistrictIds.length > 0 ||
+    allowedStateIds.length > 0
+  );
+
   const [booths, setBooths] = useState<PollingBooth[]>([]);
   const [volunteers, setVolunteers] = useState<Volunteer[]>([]);
   const [assignments, setAssignments] = useState<BoothAssignment[]>([]);
@@ -164,29 +205,60 @@ export default function BoothAgentManagement() {
       ]);
 
       let list: PollingBooth[] = (boothsData || []).map((data: any) => ({
-        id: String(data.id),
+        id: normalizeId(data.id),
         name: data.name || '',
         boothNumber: String(data.boothNumber || data.booth_number || ''),
         address: data.address || '',
         village: data.village || '',
-        constituencyId: String(data.constituencyId || data.constituency_id || ''),
-        constituencyName: data.constituencyName || data.constituency_name || ''
+        constituencyId: normalizeId(data.constituencyId || data.constituency_id || ''),
+        constituencyName: data.constituencyName || data.constituency_name || '',
+        districtId: normalizeId(data.districtId || data.district_id || ''),
+        districtName: data.districtName || data.district_name || '',
+        stateId: normalizeId(data.stateId || data.state_id || ''),
+        stateName: data.stateName || data.state_name || '',
+        mandalId: normalizeId(data.mandalId || data.mandal_id || ''),
+        mandalName: data.mandalName || data.mandal_name || ''
       }));
 
       // Filter by Allowed ID scopes if not global super_admin
-      const allowedConstituencyIds = (!isAdmin && profile?.constituencyId) ? profile.constituencyId.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
-      const allowedBoothIds = (!isAdmin && profile?.boothId) ? profile.boothId.split(',').map((s: string) => s.trim()).filter(Boolean) : [];
-      
-      const hasAnyScope = allowedConstituencyIds.length > 0 || allowedBoothIds.length > 0;
-      
-      if (!isAdmin && !hasAnyScope) {
-        list = [];
-      } else if (!isAdmin) {
-        list = list.filter(b => {
-          if (allowedBoothIds.length > 0 && !allowedBoothIds.includes(b.id)) return false;
-          if (allowedConstituencyIds.length > 0 && !allowedConstituencyIds.includes(b.constituencyId)) return false;
-          return true;
-        });
+      if (!isSuperAdmin) {
+        if (!hasAssignedScope) {
+          list = [];
+        } else {
+          list = list.filter(b => {
+            const bId = normalizeId(b.id);
+            const bConstId = normalizeId(b.constituencyId);
+            const bDistId = normalizeId(b.districtId);
+            const bStateId = normalizeId(b.stateId);
+
+            // 1. If specific booth(s) are assigned, only show those booths
+            if (allowedBoothIds.length > 0) {
+              return allowedBoothIds.includes(bId) || 
+                     allowedBoothIds.includes(b.boothNumber) || 
+                     allowedBoothIds.includes(b.name);
+            }
+
+            // 2. If specific constituency(s) are assigned, only show booths in those constituencies
+            if (allowedConstituencyIds.length > 0) {
+              return allowedConstituencyIds.includes(bConstId) || 
+                     (b.constituencyName && allowedConstituencyIds.includes(b.constituencyName));
+            }
+
+            // 3. If specific district(s) are assigned, only show booths in those districts
+            if (allowedDistrictIds.length > 0) {
+              return allowedDistrictIds.includes(bDistId) || 
+                     (b.districtName && allowedDistrictIds.includes(b.districtName));
+            }
+
+            // 4. If specific state(s) are assigned, only show booths in those states
+            if (allowedStateIds.length > 0) {
+              return allowedStateIds.includes(bStateId) || 
+                     (b.stateName && allowedStateIds.includes(b.stateName));
+            }
+
+            return true;
+          });
+        }
       }
 
       list.sort((a, b) => {
@@ -210,7 +282,7 @@ export default function BoothAgentManagement() {
       const assignList: BoothAssignment[] = (assignData || []).map((data: any) => ({
         id: String(data.id),
         adminId: String(data.adminId || data.admin_id || ''),
-        boothId: String(data.boothId || data.booth_id || ''),
+        boothId: normalizeId(data.boothId || data.booth_id || ''),
         boothNumber: String(data.boothNumber || data.booth_number || ''),
         boothName: data.boothName || data.booth_name || '',
         agentVolunteerDocId: String(data.agentVolunteerDocId || data.agent_volunteer_id || ''),
@@ -230,7 +302,7 @@ export default function BoothAgentManagement() {
 
   useEffect(() => {
     fetchData();
-  }, [user, isAdmin, profile]);
+  }, [user, isSuperAdmin, isAdmin, profile]);
 
   const handleAssignAgent = async (volunteer: Volunteer, designation: string) => {
     if (!activeBoothForAssignment || !user) return;
@@ -332,11 +404,13 @@ export default function BoothAgentManagement() {
 
   // Derive assignments filtered by Admin selection (Super Admin feature)
   const assignmentsFilteredByAdmin = React.useMemo(() => {
+    const visibleBoothIds = new Set(booths.map(b => normalizeId(b.id)));
+    const base = assignments.filter(a => visibleBoothIds.has(normalizeId(a.boothId)));
     if (selectedAdminId === 'All') {
-      return assignments;
+      return base;
     }
-    return assignments.filter(a => a.adminId === selectedAdminId);
-  }, [assignments, selectedAdminId]);
+    return base.filter(a => a.adminId === selectedAdminId);
+  }, [assignments, selectedAdminId, booths]);
 
   // Map admin UIDs to details for display and counts
   const adminMap = React.useMemo(() => {
@@ -359,7 +433,7 @@ export default function BoothAgentManagement() {
   // Metrics
   const totalBooths = booths.length;
   const uniqueAssignedCount = new Set(assignmentsFilteredByAdmin.map(as => as.boothId)).size;
-  const unassignedCount = totalBooths - uniqueAssignedCount;
+  const unassignedCount = Math.max(0, totalBooths - uniqueAssignedCount);
 
   // Instantly filter the booths list
   const filteredBooths = booths.filter(b => {
@@ -369,7 +443,9 @@ export default function BoothAgentManagement() {
       (b.boothNumber || '').toLowerCase().includes(s) ||
       (b.name || '').toLowerCase().includes(s) ||
       (b.address || '').toLowerCase().includes(s) ||
-      (b.village || '').toLowerCase().includes(s)
+      (b.village || '').toLowerCase().includes(s) ||
+      (b.constituencyName || '').toLowerCase().includes(s) ||
+      (b.districtName || '').toLowerCase().includes(s)
     );
   });
 
@@ -386,43 +462,67 @@ export default function BoothAgentManagement() {
   }
 
   return (
-    <div className="space-y-8">
-      {/* Header Panel */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-6 rounded-2xl shadow-sm">
-        <div>
-          <h1 className="text-2xl font-black text-zinc-900 dark:text-white flex items-center gap-2 tracking-tight">
-            <Building2 className="text-rose-500" />
-            Booth Management
-          </h1>
-          <p className="text-zinc-500 text-xs mt-1">
-            Assign designated Karyakartas to booths to secure physical field verification parameters and track constituency updates.
+    <div className="space-y-6 w-full">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="space-y-0.5">
+          <div className="flex items-center gap-2.5">
+            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+              Booths
+            </h1>
+            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
+              {totalBooths} Booths
+            </span>
+          </div>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400">
+            Polling station coverage and karyakarta assignments.
           </p>
         </div>
         <button 
           onClick={fetchData}
-          className="flex items-center justify-center gap-2 bg-zinc-900 dark:bg-zinc-100 dark:text-zinc-950 text-white text-xs font-bold px-4 py-2.5 rounded-xl transition-all hover:bg-zinc-800"
+          className="flex items-center justify-center gap-1.5 bg-zinc-900 dark:bg-zinc-100 dark:text-zinc-950 text-white text-xs font-semibold px-3.5 py-2 rounded-lg transition-all hover:bg-zinc-800 shadow-xs"
         >
-          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
-          Sync Booth Registry
+          <RefreshCw size={13} className={loading ? 'animate-spin' : ''} />
+          Sync
         </button>
       </div>
 
+      {/* Active Regional Scope Banner for Scoped Users */}
+      {!isSuperAdmin && hasAssignedScope && (
+        <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-blue-50/80 dark:bg-blue-950/40 border border-blue-200/80 dark:border-blue-800/60 rounded-xl text-xs shadow-2xs">
+          <MapPin size={13} className="text-blue-600 dark:text-blue-400 shrink-0" />
+          <span className="font-semibold text-blue-900 dark:text-blue-200">
+            Assigned Scope:
+          </span>
+          {allowedBoothIds.length > 0 && (
+            <span className="px-2 py-0.5 rounded bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 font-semibold text-blue-700 dark:text-blue-300 text-xs">
+              {allowedBoothIds.length} Booths
+            </span>
+          )}
+          {allowedConstituencyIds.length > 0 && (
+            <span className="px-2 py-0.5 rounded bg-white dark:bg-zinc-900 border border-blue-200 dark:border-blue-800 font-semibold text-blue-700 dark:text-blue-300 text-xs">
+              {allowedConstituencyIds.length} Constituencies
+            </span>
+          )}
+        </div>
+      )}
+
       {/* Metrics Panel */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl">
-          <p className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Total Active Booths</p>
-          <h2 className="text-3xl font-black text-zinc-900 dark:text-white mt-1">{totalBooths}</h2>
-          <span className="text-[10px] text-zinc-500 font-medium mt-1 inline-block">Registered under your allowed constituencies</span>
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
+          <p className="text-[10px] font-bold uppercase text-zinc-400 tracking-wider">Total Booths</p>
+          <h2 className="text-2xl font-bold text-zinc-900 dark:text-white mt-0.5">{totalBooths}</h2>
         </div>
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl">
-          <p className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Booths with Karyakartas</p>
-          <h2 className="text-3xl font-black text-emerald-600 dark:text-emerald-400 mt-1">{uniqueAssignedCount}</h2>
-          <span className="text-[10px] text-emerald-500 font-medium mt-1 inline-block">{Math.round((uniqueAssignedCount/Math.max(totalBooths, 1))*100)}% coverage secured</span>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
+          <p className="text-[10px] font-bold uppercase text-zinc-400 tracking-wider">Assigned</p>
+          <div className="flex items-baseline gap-2 mt-0.5">
+            <h2 className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{uniqueAssignedCount}</h2>
+            <span className="text-xs text-emerald-600 font-medium">({Math.round((uniqueAssignedCount/Math.max(totalBooths, 1))*100)}%)</span>
+          </div>
         </div>
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-5 rounded-2xl">
-          <p className="text-[10px] font-black uppercase text-zinc-400 tracking-wider">Booths Without Karyakartas</p>
-          <h2 className="text-3xl font-black text-rose-500 mt-1">{unassignedCount}</h2>
-          <span className="text-[10px] text-rose-500 font-medium mt-1 inline-block">Requires active field recruitment</span>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
+          <p className="text-[10px] font-bold uppercase text-zinc-400 tracking-wider">Unassigned</p>
+          <h2 className="text-2xl font-bold text-rose-500 mt-0.5">{unassignedCount}</h2>
         </div>
       </div>
 
