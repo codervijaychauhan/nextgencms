@@ -31,3 +31,17 @@ npm run deploy            | Build & deploy frontend + worker code to Cloudflare 
 npm run d1:init           | Execute/Update database schema on remote Cloudflare D1
 npm run dev:worker        | Test local worker backend code directly against remote D1
 ---------------------------------------------------------------------------------------
+
+git commands
+
+git status
+
+git add .
+
+git commit -m "Add initial project files"
+
+git 
+
+
+
+======================================================================================

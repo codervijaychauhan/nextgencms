@@ -1,9 +1,10 @@
-import React from 'react';
+import React, { useEffect, useRef, type ReactNode } from 'react';
 import { 
   BrowserRouter as Router, 
   Routes, 
   Route, 
-  Navigate 
+  Navigate,
+  useLocation 
 } from 'react-router-dom';
 import { AuthProvider, useAuth } from './AuthProvider';
 import { ThemeProvider } from './ThemeProvider';
@@ -30,10 +31,38 @@ import AdminSentimentComparison from './components/AdminSentimentComparison';
 import FinanceTracker from './components/FinanceTracker';
 import WBSender from './components/WBSender';
 import MandalManagement from './components/MandalManagement';
+import PrivacyPolicy from './components/PrivacyPolicy';
+import TermsOfService from './components/TermsOfService';
+import BroadcastFeedView from './components/BroadcastFeedView';
+
+function ScrollToTop() {
+  const { pathname, search } = useLocation();
+
+  React.useEffect(() => {
+    window.scrollTo(0, 0);
+    document.documentElement.scrollTo(0, 0);
+    document.body.scrollTo(0, 0);
+    const scrollContainers = document.querySelectorAll('main, [data-scroll-container]');
+    scrollContainers.forEach((el) => {
+      el.scrollTo(0, 0);
+    });
+  }, [pathname, search]);
+
+  return null;
+}
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const { isCollapsed } = useSidebar();
+  const { pathname } = useLocation();
+  const mainRef = React.useRef<HTMLElement>(null);
+
+  React.useEffect(() => {
+    window.scrollTo(0, 0);
+    if (mainRef.current) {
+      mainRef.current.scrollTo(0, 0);
+    }
+  }, [pathname]);
 
   if (loading) {
     return (
@@ -50,8 +79,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen text-zinc-900 dark:text-zinc-100 flex flex-col md:flex-row">
       <Navigation />
-      <main className={`flex-1 min-w-0 overflow-x-hidden transition-all duration-200 min-h-screen md:pt-16 ${isCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
-        <div className="w-full px-4 sm:px-6 md:px-8 py-6 md:py-8 min-w-0">
+      <main ref={mainRef} className={`flex-1 min-w-0 overflow-x-hidden transition-all duration-200 min-h-screen ${isCollapsed ? 'md:ml-20' : 'md:ml-64'}`}>
+        <div className="w-full px-4 sm:px-6 md:px-8 py-5 sm:py-6 min-w-0">
           {children}
         </div>
       </main>
@@ -136,11 +165,23 @@ export default function App() {
       <SidebarProvider>
         <AuthProvider>
           <Router>
-          <Routes>
+            <ScrollToTop />
+            <Routes>
             <Route path="/login" element={<PublicRoute><Login /></PublicRoute>} />
             <Route path="/signup" element={<PublicRoute><SignUp /></PublicRoute>} />
             <Route path="/forgot-password" element={<PublicRoute><ForgotPassword /></PublicRoute>} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            
+            {/* Public Legal & Policy Pages (accessible without login) */}
+            <Route path="/privacy" element={<PrivacyPolicy />} />
+            <Route path="/privacy-policy" element={<PrivacyPolicy />} />
+            <Route path="/terms" element={<TermsOfService />} />
+            <Route path="/terms-of-service" element={<TermsOfService />} />
+
+            {/* Public WhatsApp Extension Live Stream Feeds (Token-verified, accessible without app login) */}
+            <Route path="/broadcast-feed/:token" element={<BroadcastFeedView />} />
+            <Route path="/voter-feed/:token" element={<BroadcastFeedView />} />
+            <Route path="/w/:token" element={<BroadcastFeedView />} />
             
             <Route path="/dashboard" element={<ProtectedRoute><PermissionRoute moduleId="dashboard"><Dashboard /></PermissionRoute></ProtectedRoute>} />
             <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />

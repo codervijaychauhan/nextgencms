@@ -900,16 +900,16 @@ export const AdminSentimentComparison: React.FC = () => {
       {/* Comparison Matrix Table */}
       <div className="bg-white dark:bg-zinc-900/60 rounded-3xl border border-zinc-200 dark:border-zinc-800 overflow-hidden shadow-xs">
         <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[900px]">
+          <table className="w-full text-left border-collapse min-w-[900px] whitespace-nowrap">
             <thead>
               <tr className="bg-zinc-50/70 dark:bg-zinc-800/40 border-b border-zinc-200 dark:border-zinc-800">
-                <th className="px-5 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Voter Profile</th>
-                <th className="px-4 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Booth / Location</th>
-                <th className="px-4 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider text-center">Consensus Status</th>
+                <th className="px-3 py-2 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Voter Profile</th>
+                <th className="px-3 py-2 text-[10px] font-black uppercase text-zinc-400 tracking-wider">Booth / Location</th>
+                <th className="px-3 py-2 text-[10px] font-black uppercase text-zinc-400 tracking-wider text-center">Consensus Status</th>
                 
                 {/* Columns for selected admins */}
                 {admins.filter(a => selectedAdminIds.includes(a.id)).map(admin => (
-                  <th key={admin.id} className="px-4 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider">
+                  <th key={admin.id} className="px-3 py-2 text-[10px] font-black uppercase text-zinc-400 tracking-wider">
                     <div className="flex items-center gap-1.5">
                       <span>{admin.name}</span>
                       <span className="text-[8px] font-mono px-1 py-0.2 rounded bg-zinc-200 dark:bg-zinc-800 text-zinc-500 lowercase">
@@ -919,20 +919,20 @@ export const AdminSentimentComparison: React.FC = () => {
                   </th>
                 ))}
                 
-                <th className="px-4 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider text-right">Action</th>
+                <th className="px-3 py-2 text-[10px] font-black uppercase text-zinc-400 tracking-wider text-right">Action</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
+            <tbody className="divide-y divide-zinc-150 dark:divide-zinc-800/60">
               {loading ? (
                 <tr>
-                  <td colSpan={4 + selectedAdminIds.length} className="py-20 text-center text-zinc-400">
+                  <td colSpan={4 + selectedAdminIds.length} className="py-12 text-center text-zinc-400">
                     <Loader2 size={24} className="animate-spin mx-auto text-blue-500 mb-2" />
                     <span className="text-xs font-bold">Aggregating multi-admin assessments...</span>
                   </td>
                 </tr>
               ) : filteredRows.length === 0 ? (
                 <tr>
-                  <td colSpan={4 + selectedAdminIds.length} className="py-16 text-center text-zinc-400 text-xs font-bold">
+                  <td colSpan={4 + selectedAdminIds.length} className="py-12 text-center text-zinc-400 text-xs font-bold">
                     No voter records matching the selected comparison filters.
                   </td>
                 </tr>
@@ -948,42 +948,39 @@ export const AdminSentimentComparison: React.FC = () => {
                       }`}
                     >
                       {/* Voter info */}
-                      <td className="px-5 py-4">
-                        <div className="font-extrabold text-xs text-zinc-900 dark:text-white flex items-center gap-1.5">
-                          <span>{row.name}</span>
+                      <td className="px-3 py-2">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-extrabold text-xs text-zinc-900 dark:text-white truncate max-w-[150px]" title={row.name}>{row.name}</span>
+                          <span className="text-[10px] font-mono font-bold text-blue-600 dark:text-blue-400 shrink-0">({row.voterEpic})</span>
                           {(Object.values(row.adminAssessments) as VoterAssessmentRecord[]).some(a => a.is_karyakarta === 1 || a.is_karyakarta === true) && (
-                            <span className="px-1.5 py-0.2 rounded text-[8px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-600 border border-blue-500/20">
+                            <span className="px-1 py-0.2 rounded text-[8px] font-black uppercase tracking-wider bg-blue-500/10 text-blue-600 border border-blue-500/20 shrink-0">
                               Karyakarta
                             </span>
                           )}
                         </div>
-                        <div className="text-[10px] text-zinc-400 font-mono mt-0.5 flex items-center gap-2">
-                          <span className="text-blue-600 font-bold">{row.voterEpic}</span>
-                          {row.gender && <span>• {row.gender}, {row.age}Y</span>}
-                          {row.mobile && <span>• 📞 {row.mobile}</span>}
-                        </div>
                       </td>
 
                       {/* Location */}
-                      <td className="px-4 py-4 text-xs font-medium text-zinc-600 dark:text-zinc-300">
-                        <div>{row.boothName || (row.boothNumber ? `Booth #${row.boothNumber}` : 'Unassigned Booth')}</div>
-                        {row.village && <div className="text-[10px] text-zinc-400">📍 {row.village}</div>}
+                      <td className="px-3 py-2 text-xs font-medium text-zinc-600 dark:text-zinc-300">
+                        <div className="truncate max-w-[160px]" title={row.boothName || (row.boothNumber ? `Booth #${row.boothNumber}` : '-')}>
+                          {row.boothName || (row.boothNumber ? `Booth #${row.boothNumber}` : '-')}
+                        </div>
                       </td>
 
                       {/* Consensus Status */}
-                      <td className="px-4 py-4 text-center">
+                      <td className="px-3 py-2 text-center">
                         {row.hasConflict ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-600 border border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-400">
-                            <AlertTriangle size={11} />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-500/10 text-amber-600 border border-amber-500/30 dark:bg-amber-950/40 dark:text-amber-400">
+                            <AlertTriangle size={10} />
                             <span>Divergence</span>
                           </span>
                         ) : row.hasConsensus ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-400">
-                            <CheckCircle size={11} />
+                          <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-500/10 text-emerald-600 border border-emerald-500/30 dark:bg-emerald-950/40 dark:text-emerald-400">
+                            <CheckCircle size={10} />
                             <span>Consensus</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[10px] font-bold text-zinc-400 bg-zinc-100 dark:bg-zinc-800">
                             <span>1 Assessment</span>
                           </span>
                         )}
@@ -993,13 +990,13 @@ export const AdminSentimentComparison: React.FC = () => {
                       {selectedAdminsList.map(admin => {
                         const ass = row.adminAssessments[admin.id];
                         return (
-                          <td key={admin.id} className="px-4 py-4">
-                            <div className="space-y-1">
+                          <td key={admin.id} className="px-3 py-2">
+                            <div className="flex items-center gap-1.5">
                               {getSentimentPill(ass?.sentiment, ass?.sentiment_score)}
                               {ass?.notes && (
-                                <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-normal italic truncate max-w-[140px]" title={ass.notes}>
+                                <span className="text-[10px] text-zinc-400 italic truncate max-w-[100px]" title={ass.notes}>
                                   "{ass.notes}"
-                                </div>
+                                </span>
                               )}
                             </div>
                           </td>
@@ -1007,13 +1004,13 @@ export const AdminSentimentComparison: React.FC = () => {
                       })}
 
                       {/* Action View */}
-                      <td className="px-4 py-4 text-right">
+                      <td className="px-3 py-2 text-right">
                         <button
                           type="button"
                           onClick={() => setSelectedVoterDetail(row)}
-                          className="p-1 px-2.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:text-blue-600 hover:border-blue-300 rounded-xl text-[10px] font-black uppercase tracking-wider flex items-center gap-1 ml-auto cursor-pointer transition-all active:scale-95 shadow-2xs"
+                          className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-300 hover:text-blue-600 hover:border-blue-300 rounded-lg text-[10px] font-bold uppercase tracking-wider flex items-center gap-1 ml-auto cursor-pointer transition-all active:scale-95 shadow-2xs"
                         >
-                          <Eye size={12} />
+                          <Eye size={11} />
                           <span>Compare</span>
                         </button>
                       </td>

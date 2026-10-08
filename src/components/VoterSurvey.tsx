@@ -39,6 +39,7 @@ interface Voter {
   voterId: string;
   name: string;
   relationName?: string;
+  relationType?: string;
   constituencyId: string;
   boothId: string;
   stateId?: string;
@@ -615,6 +616,7 @@ export default function VoterSurvey() {
         ...v,
         voterId: v.voter_id || v.voterId || '',
         relationName: v.relation_name || v.relationName || '',
+        relationType: v.relation_type || v.relationType || 'Father',
         boothId: v.booth_id || v.boothId || '',
         constituencyId: v.constituency_id || v.constituencyId || '',
         stateId: v.state_id || v.stateId || '',
@@ -1182,7 +1184,7 @@ export default function VoterSurvey() {
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-zinc-500">{v.voterId} {v.relationName ? `• F/H: ${v.relationName}` : ''} • {v.village || 'No Village'}</p>
+                              <p className="text-xs text-zinc-500">{v.voterId} {v.relationName ? `• ${v.relationType || 'F/H'}: ${v.relationName}` : ''} • {v.village || 'No Village'}</p>
                             </div>
                             <UserPlus className={`w-4 h-4 ${isAlreadyDone ? 'text-red-400' : 'text-blue-500'}`} />
                           </button>
@@ -2396,30 +2398,30 @@ export default function VoterSurvey() {
               <div className="w-full overflow-x-auto min-w-0 border-t border-zinc-100 dark:border-zinc-800">
                 <table className="w-full min-w-full table-auto text-left border-collapse whitespace-nowrap">
                   <thead>
-                    <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-400 uppercase tracking-wider bg-zinc-50/50 dark:bg-zinc-900/35">
-                      <th className="px-6 py-4">Respondent Voter</th>
-                      <th className="px-6 py-4">EPIC ID</th>
-                      <th className="px-6 py-4">Mobile</th>
-                      <th className="px-6 py-4">Email</th>
-                      <th className="px-6 py-4">Father/Husband Name</th>
-                      <th className="px-6 py-4">Age / Gender</th>
-                      <th className="px-6 py-4">Village</th>
-                      <th className="px-6 py-4">Campaign Survey</th>
-                      <th className="px-6 py-4">Election Cycle</th>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-400 uppercase tracking-wider bg-zinc-50/70 dark:bg-zinc-900/50">
+                      <th className="px-4 py-2">Respondent Voter</th>
+                      <th className="px-4 py-2">EPIC ID</th>
+                      <th className="px-4 py-2">Mobile</th>
+                      <th className="px-4 py-2">Email</th>
+                      <th className="px-4 py-2">Father/Husband Name</th>
+                      <th className="px-4 py-2">Age / Gender</th>
+                      <th className="px-4 py-2">Village</th>
+                      <th className="px-4 py-2">Campaign Survey</th>
+                      <th className="px-4 py-2">Election Cycle</th>
                       {isReportCustomTemplate ? (
                         (reportTemplate?.fields || []).map(f => (
-                          <th key={f.id} className="px-6 py-4">{f.label}</th>
+                          <th key={f.id} className="px-4 py-2">{f.label}</th>
                         ))
                       ) : (
                         <>
-                          <th className="px-6 py-4">Sentiment Strength</th>
-                          <th className="px-6 py-4">Supporting Party</th>
-                          <th className="px-6 py-4">Key Concerns Reported</th>
+                          <th className="px-4 py-2">Sentiment Strength</th>
+                          <th className="px-4 py-2">Supporting Party</th>
+                          <th className="px-4 py-2">Key Concerns Reported</th>
                         </>
                       )}
-                      <th className="px-6 py-4">Recorded By</th>
-                      <th className="px-6 py-4">Date</th>
-                      <th className="px-6 py-4 text-right">Action</th>
+                      <th className="px-4 py-2">Recorded By</th>
+                      <th className="px-4 py-2">Date</th>
+                      <th className="px-4 py-2 text-right">Action</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -2428,41 +2430,36 @@ export default function VoterSurvey() {
                       return (
                         <tr key={s.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-900/40 text-xs">
                           {/* Voter Details */}
-                          <td className="px-6 py-4">
-                            <span className="font-bold text-zinc-900 dark:text-white block">{s.voterName}</span>
+                          <td className="px-4 py-2">
+                            <span className="font-bold text-zinc-900 dark:text-white block truncate max-w-[150px]" title={s.voterName}>{s.voterName}</span>
                           </td>
-                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-400 font-mono">
-                            {vDetail?.voterId || '—'}
+                          <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400 font-mono">
+                            {vDetail?.voterId || '-'}
                           </td>
-                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-400 font-mono">
-                            {vDetail?.mobile || s.mobile || '—'}
+                          <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400 font-mono">
+                            {vDetail?.mobile || s.mobile || '-'}
                           </td>
-                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-400 font-mono">
-                            {vDetail?.email || s.email || '—'}
+                          <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400 font-mono">
+                            {vDetail?.email || s.email || '-'}
                           </td>
-                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-400">
-                            {vDetail?.relationName || '—'}
+                          <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400 truncate max-w-[140px]">
+                            {vDetail?.relationName || '-'}
                           </td>
-                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-400">
+                          <td className="px-4 py-2 text-zinc-600 dark:text-zinc-400">
                             {vDetail?.age && vDetail?.gender 
-                              ? `${vDetail.age} / ${vDetail.gender}` 
-                              : vDetail?.age || vDetail?.gender || '—'}
+                              ? `${vDetail.age} / ${vDetail.gender.charAt(0).toUpperCase()}` 
+                              : vDetail?.age || vDetail?.gender || '-'}
                           </td>
-                          <td className="px-6 py-4 text-zinc-650 dark:text-zinc-350 capitalize">
-                            {vDetail?.village || '—'}
+                          <td className="px-4 py-2 text-zinc-650 dark:text-zinc-350 capitalize truncate max-w-[130px]">
+                            {vDetail?.village || '-'}
                           </td>
-                          <td className="px-6 py-4">
-                            <div>
-                              <span className="font-semibold text-zinc-800 dark:text-zinc-200 capitalize truncate max-w-[120px] block">
-                                {s.surveyTitle || 'General Survey'}
-                              </span>
-                              <span className="text-[9px] text-zinc-450 uppercase tracking-wider block">
-                                {s.surveyId ? `ID: ${s.surveyId.substring(0, 8)}` : 'Manual Record'}
-                              </span>
-                            </div>
+                          <td className="px-4 py-2">
+                            <span className="font-semibold text-zinc-800 dark:text-zinc-200 capitalize truncate max-w-[140px] block" title={s.surveyTitle || 'General Survey'}>
+                              {s.surveyTitle || 'General Survey'}
+                            </span>
                           </td>
-                          <td className="px-6 py-4 text-zinc-600 dark:text-zinc-455 font-medium">
-                            {s.electionYear ? `${s.electionYear} Cycle` : '—'}
+                          <td className="px-4 py-2 text-zinc-600 dark:text-zinc-455 font-medium">
+                            {s.electionYear ? `${s.electionYear} Cycle` : '-'}
                           </td>
 
                           {/* Dynamic Custom Template answers versus standard sentiment scores */}
@@ -2471,9 +2468,9 @@ export default function VoterSurvey() {
                               const val = s.customAnswers?.[f.id];
                               const answerStr = Array.isArray(val)
                                 ? val.join(', ')
-                                : (typeof val === 'boolean' ? (val ? 'Yes' : 'No') : (val !== undefined && val !== null ? String(val) : '—'));
+                                : (typeof val === 'boolean' ? (val ? 'Yes' : 'No') : (val !== undefined && val !== null ? String(val) : '-'));
                               return (
-                                <td key={f.id} className="px-6 py-4 font-semibold text-zinc-700 dark:text-zinc-300">
+                                <td key={f.id} className="px-4 py-2 font-semibold text-zinc-700 dark:text-zinc-300">
                                   {answerStr}
                                 </td>
                               );
@@ -2481,19 +2478,19 @@ export default function VoterSurvey() {
                           ) : (
                             <>
                               {/* Sentiment Score Badge */}
-                              <td className="px-6 py-4">
-                                <div className="flex flex-col sm:flex-row sm:items-center gap-1.5">
-                                  <span className={`text-[10px] font-black px-2 py-0.5 rounded-full inline-block ${
+                              <td className="px-4 py-2">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full inline-block ${
                                     s.sentimentScore >= 4 ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-400' :
                                     s.sentimentScore <= 2 ? 'bg-red-100 text-red-800 dark:bg-red-950/40 dark:text-red-400' :
                                     'bg-yellow-100 text-yellow-850 dark:bg-yellow-950/40 dark:text-yellow-450'
                                   }`}>
-                                    Score: {s.sentimentScore * 20}%
+                                    {s.sentimentScore * 20}%
                                   </span>
-                                  <span className="text-[11px] text-zinc-500 font-medium">
-                                    {s.sentimentScore === 1 ? 'Strongly Opposed' :
-                                     s.sentimentScore === 2 ? 'Slightly Opposed' :
-                                     s.sentimentScore === 3 ? 'Neutral/Lean' :
+                                  <span className="text-[10px] text-zinc-500 font-medium">
+                                    {s.sentimentScore === 1 ? 'Opposed' :
+                                     s.sentimentScore === 2 ? 'Lean Oppose' :
+                                     s.sentimentScore === 3 ? 'Neutral' :
                                      s.sentimentScore === 4 ? 'Supporting' :
                                      'Strong Support'}
                                   </span>
@@ -2501,29 +2498,23 @@ export default function VoterSurvey() {
                               </td>
 
                               {/* Supporting Party */}
-                              <td className="px-6 py-4">
-                                <span className={`text-xs font-bold px-2.5 py-1 rounded-lg inline-block border ${
-                                  s.favoredPartyId === 'none' 
-                                    ? 'bg-zinc-50 text-zinc-500 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700' 
-                                    : s.favoredPartyId === 'others'
-                                      ? 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/20 dark:text-amber-400 dark:border-amber-900/30'
-                                      : 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/20 dark:text-blue-400 dark:border-blue-900/30'
-                                }`}>
-                                  {s.favoredPartyName}
+                              <td className="px-4 py-2">
+                                <span className="text-xs font-bold px-2 py-0.5 rounded-md inline-block border bg-zinc-50 text-zinc-700 border-zinc-200 dark:bg-zinc-800 dark:text-zinc-300 dark:border-zinc-700">
+                                  {s.favoredPartyId === 'none' ? '-' : s.favoredPartyId || '-'}
                                 </span>
                               </td>
 
                               {/* Key Concerns */}
-                              <td className="px-6 py-4">
-                                <div className="flex flex-wrap gap-1 max-w-[220px]">
+                              <td className="px-4 py-2">
+                                <div className="flex items-center gap-1 overflow-hidden max-w-[220px]">
                                   {s.keyConcerns && s.keyConcerns.length > 0 ? (
                                     s.keyConcerns.map(cn => (
-                                      <span key={cn} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-2 py-0.5 rounded font-medium">
+                                      <span key={cn} className="text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 px-1.5 py-0.5 rounded font-medium whitespace-nowrap">
                                         {cn}
                                       </span>
                                     ))
                                   ) : (
-                                    <span className="text-[10px] text-zinc-400">No issues reported</span>
+                                    <span className="text-[10px] text-zinc-400">-</span>
                                   )}
                                 </div>
                               </td>
@@ -2531,36 +2522,38 @@ export default function VoterSurvey() {
                           )}
 
                           {/* Recorded By */}
-                          <td className="px-6 py-4 text-zinc-700 dark:text-zinc-350 font-medium">
+                          <td className="px-4 py-2 text-zinc-700 dark:text-zinc-350 font-medium whitespace-nowrap">
                             {s.recordedByName || 'Staff'}
                           </td>
 
                           {/* Date */}
-                          <td className="px-6 py-4 text-zinc-500 dark:text-zinc-400 font-mono">
+                          <td className="px-4 py-2 text-zinc-500 dark:text-zinc-400 font-mono whitespace-nowrap">
                             {formatSurveyDate(s.createdAt)}
                           </td>
 
                           {/* Actions */}
-                          <td className="px-6 py-4 text-right">
-                            <div className="flex items-center justify-end gap-1">
+                          <td className="px-4 py-2 text-right whitespace-nowrap">
+                            <div className="flex items-center justify-end gap-1.5">
                               {canEdit(s) && (
                                 <button
                                   type="button"
                                   onClick={() => handleStartEdit(s)}
-                                  className="p-1.5 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950/20 rounded-lg transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                   title="Edit survey response"
                                 >
-                                  <Edit size={15} />
+                                  <Edit size={12} />
+                                  <span>Edit</span>
                                 </button>
                               )}
                               {canDelete(s) && (
                                 <button
                                   type="button"
                                   onClick={() => setSentimentToDelete(s)}
-                                  className="p-1.5 text-zinc-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                   title="Delete survey entry"
                                 >
-                                  <Trash2 size={15} />
+                                  <Trash2 size={12} />
+                                  <span>Delete</span>
                                 </button>
                               )}
                               {!canEdit(s) && !canDelete(s) && (

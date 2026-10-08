@@ -1348,15 +1348,15 @@ export default function FinanceTracker() {
 
         {/* Transaction Table */}
         <div className="overflow-x-auto custom-scrollbar rounded-xl border border-zinc-150 dark:border-zinc-800">
-          <table className="w-full text-left border-collapse min-w-[750px]">
+          <table className="w-full text-left border-collapse min-w-[750px] whitespace-nowrap">
             <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-800/50 text-[11px] font-bold uppercase tracking-wider text-zinc-500 dark:text-zinc-400 border-b border-zinc-150 dark:border-zinc-800">
-                <th className="py-3 px-4">Title / Ledger</th>
-                <th className="py-3 px-4">Date</th>
-                <th className="py-3 px-4">Category</th>
-                <th className="py-3 px-4">Method</th>
-                <th className="py-3 px-4 text-right">Amount</th>
-                <th className="py-3 px-4 text-center">Actions</th>
+              <tr className="bg-zinc-50/70 dark:bg-zinc-800/50 text-[10px] font-black uppercase tracking-wider text-zinc-400 border-b border-zinc-150 dark:border-zinc-800">
+                <th className="py-2 px-3">Title / Ledger</th>
+                <th className="py-2 px-3">Date</th>
+                <th className="py-2 px-3">Category</th>
+                <th className="py-2 px-3">Method</th>
+                <th className="py-2 px-3 text-right">Amount</th>
+                <th className="py-2 px-3 text-center">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-150 dark:divide-zinc-800 text-xs">
@@ -1371,23 +1371,21 @@ export default function FinanceTracker() {
                   const isExpense = tx.type === 'expense';
                   return (
                     <tr key={tx.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/10 transition-colors">
-                      <td className="py-3 px-4 max-w-xs md:max-w-md">
-                        <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5">
+                      <td className="py-2 px-3 max-w-xs md:max-w-sm">
+                        <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-1.5 truncate" title={tx.title}>
                           {isExpense ? (
-                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full" />
+                            <span className="w-1.5 h-1.5 bg-amber-500 rounded-full shrink-0" />
                           ) : (
-                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+                            <span className="w-1.5 h-1.5 bg-emerald-500 rounded-full shrink-0" />
                           )}
-                          {tx.title}
+                          <span className="truncate">{tx.title}</span>
                         </div>
-                        {tx.notes && <p className="text-[10px] text-zinc-400 truncate mt-0.5">{tx.notes}</p>}
-                        {tx.donorName && <p className="text-[10px] text-blue-600 dark:text-blue-400 font-medium mt-0.5">Source: {tx.donorName}</p>}
                       </td>
-                      <td className="py-3 px-4 text-zinc-500 whitespace-nowrap">
+                      <td className="py-2 px-3 text-zinc-500 whitespace-nowrap">
                         {tx.date}
                       </td>
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium ${
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <span className={`px-2 py-0.2 rounded-full text-[10px] font-medium ${
                           tx.category === 'Income' 
                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400' 
                             : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300'
@@ -1395,32 +1393,34 @@ export default function FinanceTracker() {
                           {tx.category}
                         </span>
                       </td>
-                      <td className="py-3 px-4 text-zinc-500 whitespace-nowrap">
+                      <td className="py-2 px-3 text-zinc-500 whitespace-nowrap">
                         {tx.paymentMethod}
                       </td>
-                      <td className={`py-3 px-4 text-right font-bold whitespace-nowrap ${
+                      <td className={`py-2 px-3 text-right font-bold whitespace-nowrap ${
                         isExpense ? 'text-zinc-900 dark:text-white' : 'text-emerald-600 dark:text-emerald-400'
                       }`}>
                         {isExpense ? `-${formatCurrency(tx.amount)}` : `+${formatCurrency(tx.amount)}`}
                       </td>
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
+                      <td className="py-2 px-3 text-center whitespace-nowrap">
                         <div className="flex items-center justify-center gap-1.5">
                           {hasRight('finance', 'u') && (
                             <button
                               onClick={() => handleEditClick(tx)}
-                              className="p-1 text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded transition-all cursor-pointer"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors cursor-pointer"
                               title="Edit record"
                             >
-                              <Edit2 className="w-3.5 h-3.5" />
+                              <Edit2 size={12} />
+                              <span>Edit</span>
                             </button>
                           )}
                           {hasRight('finance', 'd') && (
                             <button
                               onClick={() => handleDeleteTx(tx.id)}
-                              className="p-1 text-red-500 hover:bg-red-500/10 rounded transition-all cursor-pointer"
-                              title="Delete record"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors cursor-pointer"
+                              title="Delete transaction"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 size={12} />
+                              <span>Delete</span>
                             </button>
                           )}
                         </div>

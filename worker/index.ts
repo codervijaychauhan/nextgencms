@@ -175,7 +175,8 @@ async function getEffectiveAdminContext(request: Request, env: Env): Promise<Adm
     }
   }
 
-  const isSuperAdmin = email === OWNER_EMAIL || authUser.role === 'super_admin' || userRow?.role === 'super_admin';
+  const userRole = (userRow?.role || authUser.role || '').toLowerCase();
+  const isSuperAdmin = email === OWNER_EMAIL || userRole === 'super_admin' || userRole === 'admin' || userRole === 'manager';
   const requestedAdminId = url.searchParams.get('adminId') || request.headers.get('x-admin-id') || '';
 
   let effectiveAdminId = uid;
@@ -270,12 +271,18 @@ function formatUserProfile(u: any) {
     voter_doc_id: u.voter_doc_id || '',
     permissions: parsedRights,
     rights: parsedRights,
-    state_id: u.state_id || '',
-    district_id: u.district_id || '',
-    constituency_id: u.constituency_id || '',
-    stateId: u.state_id || '',
-    districtId: u.district_id || '',
-    constituencyId: u.constituency_id || '',
+    state_id: u.state_id || (electionSettingsObj as any).state_id || '',
+    district_id: u.district_id || (electionSettingsObj as any).district_id || '',
+    constituency_id: u.constituency_id || (electionSettingsObj as any).constituency_id || '',
+    mandal_id: u.mandal_id || (electionSettingsObj as any).mandal_id || '',
+    panchayat_id: u.panchayat_id || (electionSettingsObj as any).panchayat_id || '',
+    ward_id: u.ward_id || (electionSettingsObj as any).ward_id || '',
+    stateId: u.state_id || (electionSettingsObj as any).state_id || '',
+    districtId: u.district_id || (electionSettingsObj as any).district_id || '',
+    constituencyId: u.constituency_id || (electionSettingsObj as any).constituency_id || '',
+    mandalId: u.mandal_id || (electionSettingsObj as any).mandal_id || '',
+    panchayatId: u.panchayat_id || (electionSettingsObj as any).panchayat_id || '',
+    wardId: u.ward_id || (electionSettingsObj as any).ward_id || '',
     boothId: cleanBoothId,
     assigned_booths: assignedBooths,
     election_settings: electionSettingsObj,
@@ -638,6 +645,18 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const rawConst = b.constituency_id !== undefined ? b.constituency_id : b.constituencyId;
         const constVal = isConstProvided ? (rawConst ? String(rawConst).trim() : null) : (existing ? existing.constituency_id : null);
 
+        const isMandalProvided = b.mandal_id !== undefined || b.mandalId !== undefined;
+        const rawMandal = b.mandal_id !== undefined ? b.mandal_id : b.mandalId;
+        const mandalVal = isMandalProvided ? (rawMandal ? String(rawMandal).trim() : null) : (existing ? existing.mandal_id : null);
+
+        const isPanchayatProvided = b.panchayat_id !== undefined || b.panchayatId !== undefined;
+        const rawPanchayat = b.panchayat_id !== undefined ? b.panchayat_id : b.panchayatId;
+        const panchayatVal = isPanchayatProvided ? (rawPanchayat ? String(rawPanchayat).trim() : null) : (existing ? existing.panchayat_id : null);
+
+        const isWardProvided = b.ward_id !== undefined || b.wardId !== undefined;
+        const rawWard = b.ward_id !== undefined ? b.ward_id : b.wardId;
+        const wardVal = isWardProvided ? (rawWard ? String(rawWard).trim() : null) : (existing ? existing.ward_id : null);
+
         const isBoothProvided = b.booth_id !== undefined || b.boothId !== undefined || b.assigned_booths !== undefined;
         let boothVal = existing ? existing.booth_id : null;
         let boothsJsonVal = existing ? (existing.assigned_booths || '[]') : '[]';
@@ -668,8 +687,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           const role = b.role || 'volunteer';
 
           await env.DB.prepare(`
-            INSERT INTO users (id, email, password_hash, name, role, rights, assigned_booths, state_id, district_id, constituency_id, booth_id, parent_admin_id, parent_manager_id, voter_id, voter_doc_id, disabled)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO users (id, email, password_hash, name, role, rights, assigned_booths, state_id, district_id, constituency_id, mandal_id, panchayat_id, ward_id, booth_id, parent_admin_id, parent_manager_id, voter_id, voter_doc_id, disabled)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           `).bind(
             newUserId,
             cleanEmail || `${newUserId}@user.local`,
@@ -681,6 +700,9 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             stateVal,
             districtVal,
             constVal,
+            mandalVal,
+            panchayatVal,
+            wardVal,
             boothVal,
             parentAdmin,
             parentManager,
@@ -696,6 +718,9 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           state_id: stateVal,
           district_id: districtVal,
           constituency_id: constVal,
+          mandal_id: mandalVal,
+          panchayat_id: panchayatVal,
+          ward_id: wardVal,
           booth_id: boothVal,
           assigned_booths: boothVal ? String(boothVal).split(',').map((s: string) => s.trim()).filter(Boolean) : []
         };
@@ -711,6 +736,9 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
               state_id = ?,
               district_id = ?,
               constituency_id = ?,
+              mandal_id = ?,
+              panchayat_id = ?,
+              ward_id = ?,
               parent_admin_id = ?,
               parent_manager_id = ?,
               voter_id = ?,
@@ -727,6 +755,9 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           stateVal,
           districtVal,
           constVal,
+          mandalVal,
+          panchayatVal,
+          wardVal,
           parentAdmin,
           parentManager,
           voterId,
@@ -1024,35 +1055,48 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const cacheKey = 'master_states';
         const cached = getCached<any[]>(cacheKey);
         if (cached) {
-          return jsonResponse(cached, 200, 60);
+          return jsonResponse(cached, 200, 120);
         }
-        const { results } = await env.DB.prepare('SELECT * FROM states ORDER BY name ASC').all();
-        setCached(cacheKey, results, 120_000);
-        return jsonResponse(results, 200, 60);
+        const { results } = await env.DB.prepare(`
+          SELECT s.*
+          FROM states s 
+          ORDER BY s.name ASC
+        `).all().catch(() => ({ results: [] }));
+        setCached(cacheKey, results || [], 600_000);
+        return jsonResponse(results || [], 200, 120);
       }
       if (pathname === '/api/states' && method === 'POST') {
         invalidateCache('master_');
         const b: any = await request.json();
         const id = b.id || `st_${Date.now()}`;
+        const name = (b.name || '').trim();
+        const code = (b.code || '').trim().toUpperCase();
         await env.DB.prepare(`
           INSERT INTO states (id, name, code) VALUES (?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             code = excluded.code
-        `).bind(id, b.name, b.code || '').run();
-        return jsonResponse({ id, name: b.name, code: b.code });
+        `).bind(id, name, code).run();
+        return jsonResponse({ id, name, code });
       }
       if (pathname.startsWith('/api/states/') && method === 'PUT') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/states/'.length));
         const b: any = await request.json();
-        await env.DB.prepare('UPDATE states SET name = COALESCE(?, name), code = COALESCE(?, code) WHERE id = ?').bind(b.name || null, b.code || null, id).run();
+        await env.DB.prepare('UPDATE states SET name = COALESCE(?, name), code = COALESCE(?, code) WHERE id = ? OR CAST(id AS TEXT) = ?').bind(b.name || null, b.code || null, id, String(id)).run();
         return jsonResponse({ success: true, id });
       }
       if (pathname.startsWith('/api/states/') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/states/'.length));
-        await env.DB.prepare('DELETE FROM states WHERE id = ?').bind(id).run();
+        await env.DB.prepare('UPDATE districts SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE constituencies SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE mandals SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE panchayats SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE wards SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE users SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE voters SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM states WHERE id = ? OR CAST(id AS TEXT) = ?').bind(id, id).run();
         return jsonResponse({ success: true });
       }
 
@@ -1065,63 +1109,114 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const cacheKey = `master_districts_${stateId}_${stateIds}_${districtIds}`;
         const cached = getCached<any[]>(cacheKey);
         if (cached) {
-          return jsonResponse(cached, 200, 60);
+          return jsonResponse(cached, 200, 120);
         }
 
-        let query = 'SELECT * FROM districts';
+        let query = `
+          SELECT d.*, s.name as state_name
+          FROM districts d
+          LEFT JOIN states s ON (d.state_id = s.id OR CAST(d.state_id AS TEXT) = CAST(s.id AS TEXT))
+        `;
         const binds: any[] = [];
         const whereParts: string[] = [];
 
         if (stateId && stateId !== 'all') {
-          whereParts.push('state_id = ?');
-          binds.push(stateId);
+          whereParts.push('(d.state_id = ? OR CAST(d.state_id AS TEXT) = ?)');
+          binds.push(stateId, String(stateId));
         } else if (stateIds) {
           const sList = stateIds.split(',').map(s => s.trim()).filter(Boolean);
           if (sList.length > 0) {
-            whereParts.push(`state_id IN (${sList.map(() => '?').join(',')})`);
-            binds.push(...sList);
+            whereParts.push(`(d.state_id IN (${sList.map(() => '?').join(',')}) OR CAST(d.state_id AS TEXT) IN (${sList.map(() => '?').join(',')}))`);
+            binds.push(...sList, ...sList);
           }
         }
 
         if (districtIds) {
           const dList = districtIds.split(',').map(s => s.trim()).filter(Boolean);
           if (dList.length > 0) {
-            whereParts.push(`id IN (${dList.map(() => '?').join(',')})`);
-            binds.push(...dList);
+            whereParts.push(`(d.id IN (${dList.map(() => '?').join(',')}) OR CAST(d.id AS TEXT) IN (${dList.map(() => '?').join(',')}))`);
+            binds.push(...dList, ...dList);
           }
         }
 
         if (whereParts.length > 0) {
           query += ` WHERE ${whereParts.join(' AND ')}`;
         }
-        query += ' ORDER BY name ASC';
-        const { results } = await env.DB.prepare(query).bind(...binds).all();
-        setCached(cacheKey, results, 120_000);
-        return jsonResponse(results, 200, 60);
+        query += ' ORDER BY d.name ASC';
+        const { results } = await env.DB.prepare(query).bind(...binds).all().catch(() => ({ results: [] }));
+        setCached(cacheKey, results || [], 600_000);
+        return jsonResponse(results || [], 200, 120);
       }
       if (pathname === '/api/districts' && method === 'POST') {
-        invalidateCache('master_districts');
+        invalidateCache('master_');
         const b: any = await request.json();
         const id = b.id || `dst_${Date.now()}`;
+        const name = (b.name || '').trim();
+        const rawStateId = b.stateId || b.state_id;
+        let resolvedStateId = rawStateId ? String(rawStateId).trim() : null;
+
+        if (resolvedStateId) {
+          const stateRow = await env.DB.prepare(`
+            SELECT id FROM states 
+            WHERE id = ? OR CAST(id AS TEXT) = ? OR name = ? COLLATE NOCASE 
+            LIMIT 1
+          `).bind(resolvedStateId, resolvedStateId, resolvedStateId).first<any>().catch(() => null);
+
+          if (stateRow) {
+            resolvedStateId = String(stateRow.id);
+          } else {
+            await env.DB.prepare('INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)').bind(resolvedStateId, `State ${resolvedStateId}`, '').run().catch(() => {});
+          }
+        }
+
         await env.DB.prepare(`
           INSERT INTO districts (id, name, state_id) VALUES (?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             name = excluded.name,
             state_id = excluded.state_id
-        `).bind(id, b.name, b.stateId || b.state_id).run();
-        return jsonResponse({ id, name: b.name, stateId: b.stateId || b.state_id });
+        `).bind(id, name, resolvedStateId || '').run();
+        return jsonResponse({ id, name, state_id: resolvedStateId, stateId: resolvedStateId });
       }
       if (pathname.startsWith('/api/districts/') && method === 'PUT') {
-        invalidateCache('master_districts');
+        invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/districts/'.length));
         const b: any = await request.json();
-        await env.DB.prepare('UPDATE districts SET name = COALESCE(?, name), state_id = COALESCE(?, state_id) WHERE id = ?').bind(b.name || null, b.stateId || b.state_id || null, id).run();
-        return jsonResponse({ success: true, id });
+
+        const existing = await env.DB.prepare('SELECT * FROM districts WHERE id = ? OR CAST(id AS TEXT) = ? LIMIT 1').bind(id, id).first<any>().catch(() => null);
+        const targetId = existing ? existing.id : id;
+        const name = b.name !== undefined ? String(b.name).trim() : (existing ? existing.name : '');
+        let resolvedStateId = existing ? existing.state_id : null;
+        const rawStateId = b.stateId !== undefined ? b.stateId : (b.state_id !== undefined ? b.state_id : null);
+
+        if (rawStateId !== null && rawStateId !== undefined && String(rawStateId).trim() !== '') {
+          const checkState = String(rawStateId).trim();
+          const stateRow = await env.DB.prepare(`
+            SELECT id FROM states 
+            WHERE id = ? OR CAST(id AS TEXT) = ? OR name = ? COLLATE NOCASE 
+            LIMIT 1
+          `).bind(checkState, checkState, checkState).first<any>().catch(() => null);
+
+          if (stateRow) {
+            resolvedStateId = String(stateRow.id);
+          } else {
+            await env.DB.prepare('INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)').bind(checkState, `State ${checkState}`, '').run().catch(() => {});
+            resolvedStateId = checkState;
+          }
+        }
+
+        await env.DB.prepare('UPDATE districts SET name = ?, state_id = ? WHERE id = ? OR CAST(id AS TEXT) = ?').bind(name, resolvedStateId || '', targetId, String(targetId)).run();
+        return jsonResponse({ success: true, id: targetId, name, state_id: resolvedStateId });
       }
       if (pathname.startsWith('/api/districts/') && method === 'DELETE') {
-        invalidateCache('master_districts');
+        invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/districts/'.length));
-        await env.DB.prepare('DELETE FROM districts WHERE id = ?').bind(id).run();
+        await env.DB.prepare('UPDATE constituencies SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE mandals SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE panchayats SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE wards SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE users SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE voters SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM districts WHERE id = ? OR CAST(id AS TEXT) = ?').bind(id, id).run();
         return jsonResponse({ success: true });
       }
 
@@ -1139,52 +1234,109 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           return jsonResponse(cached, 200, 60);
         }
 
-        let query = 'SELECT * FROM constituencies';
+        let query = `
+          SELECT c.*, 
+                 d.name as district_name, 
+                 s.name as state_name
+          FROM constituencies c
+          LEFT JOIN districts d ON (c.district_id = d.id OR CAST(c.district_id AS TEXT) = CAST(d.id AS TEXT))
+          LEFT JOIN states s ON (c.state_id = s.id OR d.state_id = s.id OR CAST(c.state_id AS TEXT) = CAST(s.id AS TEXT) OR CAST(d.state_id AS TEXT) = CAST(s.id AS TEXT))
+        `;
         const binds: any[] = [];
         const whereParts: string[] = [];
 
         if (districtId && districtId !== 'all') {
-          whereParts.push('district_id = ?');
-          binds.push(districtId);
+          whereParts.push('(c.district_id = ? OR CAST(c.district_id AS TEXT) = ?)');
+          binds.push(districtId, String(districtId));
         } else if (districtIds) {
           const dList = districtIds.split(',').map(s => s.trim()).filter(Boolean);
           if (dList.length > 0) {
-            whereParts.push(`district_id IN (${dList.map(() => '?').join(',')})`);
-            binds.push(...dList);
+            whereParts.push(`(c.district_id IN (${dList.map(() => '?').join(',')}) OR CAST(c.district_id AS TEXT) IN (${dList.map(() => '?').join(',')}))`);
+            binds.push(...dList, ...dList);
           }
         }
 
         if (stateId && stateId !== 'all') {
-          whereParts.push('state_id = ?');
-          binds.push(stateId);
+          whereParts.push('(c.state_id = ? OR d.state_id = ? OR CAST(c.state_id AS TEXT) = ? OR CAST(d.state_id AS TEXT) = ?)');
+          binds.push(stateId, stateId, String(stateId), String(stateId));
         } else if (stateIds) {
           const sList = stateIds.split(',').map(s => s.trim()).filter(Boolean);
           if (sList.length > 0) {
-            whereParts.push(`state_id IN (${sList.map(() => '?').join(',')})`);
-            binds.push(...sList);
+            whereParts.push(`(c.state_id IN (${sList.map(() => '?').join(',')}) OR d.state_id IN (${sList.map(() => '?').join(',')}))`);
+            binds.push(...sList, ...sList);
           }
         }
 
         if (constituencyIds) {
           const cList = constituencyIds.split(',').map(s => s.trim()).filter(Boolean);
           if (cList.length > 0) {
-            whereParts.push(`id IN (${cList.map(() => '?').join(',')})`);
-            binds.push(...cList);
+            whereParts.push(`(c.id IN (${cList.map(() => '?').join(',')}) OR CAST(c.id AS TEXT) IN (${cList.map(() => '?').join(',')}))`);
+            binds.push(...cList, ...cList);
           }
         }
 
         if (whereParts.length > 0) {
           query += ` WHERE ${whereParts.join(' AND ')}`;
         }
-        query += ' ORDER BY name ASC';
-        const { results } = await env.DB.prepare(query).bind(...binds).all();
-        setCached(cacheKey, results, 120_000);
-        return jsonResponse(results, 200, 60);
+        query += ' ORDER BY c.name ASC';
+        const { results } = await env.DB.prepare(query).bind(...binds).all().catch(async () => ({ results: [] }));
+        setCached(cacheKey, results || [], 600_000);
+        return jsonResponse(results || [], 200, 120);
       }
+
       if (pathname === '/api/constituencies' && method === 'POST') {
-        invalidateCache('master_constituencies');
+        invalidateCache('master_');
         const b: any = await request.json();
         const id = b.id || `con_${Date.now()}`;
+        const name = (b.name || '').trim();
+        const rawDistrictId = b.districtId || b.district_id;
+        const rawStateId = b.stateId || b.state_id;
+
+        // 1. Resolve exact parent district from districts table to guarantee foreign key integrity
+        let resolvedDistrictId = rawDistrictId ? String(rawDistrictId).trim() : null;
+        let resolvedStateId = rawStateId ? String(rawStateId).trim() : null;
+
+        if (resolvedDistrictId) {
+          const distRow = await env.DB.prepare(`
+            SELECT id, state_id FROM districts 
+            WHERE id = ? OR CAST(id AS TEXT) = ? OR name = ? COLLATE NOCASE 
+            LIMIT 1
+          `).bind(resolvedDistrictId, resolvedDistrictId, resolvedDistrictId).first<any>().catch(() => null);
+
+          if (distRow) {
+            resolvedDistrictId = String(distRow.id);
+            if (!resolvedStateId && distRow.state_id) {
+              resolvedStateId = String(distRow.state_id);
+            }
+          } else {
+            // Parent district doesn't exist yet - create it if state exists or with fallback state
+            const fallbackDistId = resolvedDistrictId;
+            const fallbackStateId = resolvedStateId || '1';
+            await env.DB.prepare(`
+              INSERT OR IGNORE INTO districts (id, name, state_id) VALUES (?, ?, ?)
+            `).bind(fallbackDistId, `District ${fallbackDistId}`, fallbackStateId).run().catch(() => {});
+          }
+        }
+
+        // 2. Resolve state from states table if needed
+        if (resolvedStateId) {
+          const stateRow = await env.DB.prepare(`
+            SELECT id FROM states 
+            WHERE id = ? OR CAST(id AS TEXT) = ? OR name = ? COLLATE NOCASE 
+            LIMIT 1
+          `).bind(resolvedStateId, resolvedStateId, resolvedStateId).first<any>().catch(() => null);
+
+          if (stateRow) {
+            resolvedStateId = String(stateRow.id);
+          } else {
+            await env.DB.prepare(`
+              INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)
+            `).bind(resolvedStateId, `State ${resolvedStateId}`, '').run().catch(() => {});
+          }
+        }
+
+        const category = b.category || 'General';
+
         await env.DB.prepare(`
           INSERT INTO constituencies (id, name, district_id, state_id, category) VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
@@ -1192,27 +1344,810 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             district_id = excluded.district_id,
             state_id = excluded.state_id,
             category = excluded.category
-        `).bind(id, b.name, b.districtId || b.district_id, b.stateId || b.state_id || '', b.category || 'General').run();
-        return jsonResponse({ id, name: b.name });
+        `).bind(id, name, resolvedDistrictId || '', resolvedStateId || '', category).run();
+
+        return jsonResponse({ id, name, district_id: resolvedDistrictId, state_id: resolvedStateId, category });
       }
+
       if (pathname.startsWith('/api/constituencies/') && method === 'PUT') {
-        invalidateCache('master_constituencies');
+        invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/constituencies/'.length));
         const b: any = await request.json();
+
+        // 1. Fetch existing constituency to preserve primary key and existing links
+        const existing = await env.DB.prepare(`
+          SELECT * FROM constituencies 
+          WHERE id = ? OR CAST(id AS TEXT) = ? 
+          LIMIT 1
+        `).bind(id, id).first<any>().catch(() => null);
+
+        const targetId = existing ? existing.id : id;
+        const name = b.name !== undefined ? String(b.name).trim() : (existing ? existing.name : '');
+        const category = b.category !== undefined ? b.category : (existing ? existing.category : 'General');
+        
+        let resolvedDistrictId = existing ? existing.district_id : null;
+        let resolvedStateId = existing ? existing.state_id : null;
+
+        const rawDistrictId = b.districtId !== undefined ? b.districtId : (b.district_id !== undefined ? b.district_id : null);
+        const rawStateId = b.stateId !== undefined ? b.stateId : (b.state_id !== undefined ? b.state_id : null);
+
+        if (rawDistrictId !== null && rawDistrictId !== undefined && String(rawDistrictId).trim() !== '') {
+          const checkDist = String(rawDistrictId).trim();
+          const distRow = await env.DB.prepare(`
+            SELECT id, state_id FROM districts 
+            WHERE id = ? OR CAST(id AS TEXT) = ? OR name = ? COLLATE NOCASE 
+            LIMIT 1
+          `).bind(checkDist, checkDist, checkDist).first<any>().catch(() => null);
+
+          if (distRow) {
+            resolvedDistrictId = String(distRow.id);
+            if (!rawStateId && distRow.state_id) {
+              resolvedStateId = String(distRow.state_id);
+            }
+          } else {
+            const fallbackStateId = rawStateId ? String(rawStateId).trim() : (resolvedStateId || '1');
+            await env.DB.prepare(`
+              INSERT OR IGNORE INTO districts (id, name, state_id) VALUES (?, ?, ?)
+            `).bind(checkDist, `District ${checkDist}`, fallbackStateId).run().catch(() => {});
+            resolvedDistrictId = checkDist;
+          }
+        }
+
+        if (rawStateId !== null && rawStateId !== undefined && String(rawStateId).trim() !== '') {
+          const checkState = String(rawStateId).trim();
+          const stateRow = await env.DB.prepare(`
+            SELECT id FROM states 
+            WHERE id = ? OR CAST(id AS TEXT) = ? OR name = ? COLLATE NOCASE 
+            LIMIT 1
+          `).bind(checkState, checkState, checkState).first<any>().catch(() => null);
+
+          if (stateRow) {
+            resolvedStateId = String(stateRow.id);
+          } else {
+            await env.DB.prepare(`
+              INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)
+            `).bind(checkState, `State ${checkState}`, '').run().catch(() => {});
+            resolvedStateId = checkState;
+          }
+        }
+
         await env.DB.prepare(`
           UPDATE constituencies 
-          SET name = COALESCE(?, name), 
-              district_id = COALESCE(?, district_id), 
-              state_id = COALESCE(?, state_id), 
-              category = COALESCE(?, category) 
+          SET name = ?, 
+              district_id = ?, 
+              state_id = ?, 
+              category = ? 
+          WHERE id = ? OR CAST(id AS TEXT) = ?
+        `).bind(name, resolvedDistrictId || '', resolvedStateId || '', category, targetId, String(targetId)).run();
+
+        return jsonResponse({ success: true, id: targetId, name, district_id: resolvedDistrictId, state_id: resolvedStateId, category });
+      }
+
+      if (pathname.startsWith('/api/constituencies/') && method === 'DELETE') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/constituencies/'.length));
+
+        // Safely unlink or cascade child references so foreign keys never block deletion
+        await env.DB.prepare('UPDATE mandals SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE panchayats SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE wards SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE booths SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE users SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE voters SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+
+        await env.DB.prepare('DELETE FROM constituencies WHERE id = ? OR CAST(id AS TEXT) = ?').bind(id, id).run();
+        return jsonResponse({ success: true });
+      }
+
+      // ------------------------------------------------------------------------
+      // Mandals / Blocks / Areas Master
+      // ------------------------------------------------------------------------
+      if (pathname === '/api/mandals' && method === 'GET') {
+        const constituencyId = url.searchParams.get('constituencyId') || url.searchParams.get('constituency_id') || '';
+        const constituencyIds = url.searchParams.get('constituencyIds') || '';
+        const districtId = url.searchParams.get('districtId') || url.searchParams.get('district_id') || '';
+        const districtIds = url.searchParams.get('districtIds') || '';
+        const stateId = url.searchParams.get('stateId') || url.searchParams.get('state_id') || '';
+        const stateIds = url.searchParams.get('stateIds') || '';
+
+        const cacheKey = `master_mandals_${constituencyId}_${constituencyIds}_${districtId}_${districtIds}_${stateId}_${stateIds}`;
+        const cached = getCached<any[]>(cacheKey);
+        if (cached) {
+          return jsonResponse(cached, 200, 120);
+        }
+
+        let query = `
+          SELECT m.*, 
+                 c.name as constituency_name, 
+                 d.name as district_name, 
+                 s.name as state_name
+          FROM mandals m 
+          LEFT JOIN constituencies c ON m.constituency_id = c.id
+          LEFT JOIN districts d ON (m.district_id = d.id OR c.district_id = d.id)
+          LEFT JOIN states s ON (m.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id)
+        `;
+        const binds: any[] = [];
+        const whereParts: string[] = [];
+
+        if (constituencyId && constituencyId !== 'all') {
+          whereParts.push('m.constituency_id = ?');
+          binds.push(constituencyId);
+        } else if (constituencyIds) {
+          const cList = constituencyIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (cList.length > 0) {
+            whereParts.push(`m.constituency_id IN (${cList.map(() => '?').join(',')})`);
+            binds.push(...cList);
+          }
+        }
+
+        if (districtId && districtId !== 'all') {
+          whereParts.push('(m.district_id = ? OR c.district_id = ?)');
+          binds.push(districtId, districtId);
+        } else if (districtIds) {
+          const dList = districtIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (dList.length > 0) {
+            whereParts.push(`(m.district_id IN (${dList.map(() => '?').join(',')}) OR c.district_id IN (${dList.map(() => '?').join(',')}))`);
+            binds.push(...dList, ...dList);
+          }
+        }
+
+        if (stateId && stateId !== 'all') {
+          whereParts.push('(m.state_id = ? OR d.state_id = ? OR c.state_id = ?)');
+          binds.push(stateId, stateId, stateId);
+        } else if (stateIds) {
+          const sList = stateIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (sList.length > 0) {
+            whereParts.push(`(m.state_id IN (${sList.map(() => '?').join(',')}) OR d.state_id IN (${sList.map(() => '?').join(',')}))`);
+            binds.push(...sList, ...sList);
+          }
+        }
+
+        if (whereParts.length > 0) {
+          query += ` WHERE ${whereParts.join(' AND ')}`;
+        }
+        query += ' ORDER BY m.name ASC';
+
+        const rows = await env.DB.prepare(query).bind(...binds).all<any>().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS mandals (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              mandal_code TEXT,
+              president_name TEXT,
+              president_phone TEXT,
+              voter_count INTEGER DEFAULT 0,
+              population INTEGER DEFAULT 0,
+              state_id TEXT,
+              district_id TEXT,
+              constituency_id TEXT,
+              admin_id TEXT,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          return { results: [] };
+        });
+        setCached(cacheKey, rows?.results || [], 600_000);
+        return jsonResponse(rows?.results || [], 200, 120);
+      }
+
+      if (pathname === '/api/mandals' && method === 'POST') {
+        invalidateCache('master_');
+        const b: any = await request.json();
+        const id = b.id || `man_${Date.now()}`;
+        const code = (b.mandal_code || b.mandalCode || b.code || `MAN-${Date.now().toString().slice(-4)}`).trim().toUpperCase();
+        await env.DB.prepare(`
+          INSERT INTO mandals (id, name, mandal_code, president_name, president_phone, voter_count, population, state_id, district_id, constituency_id, admin_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            mandal_code = excluded.mandal_code,
+            president_name = excluded.president_name,
+            president_phone = excluded.president_phone,
+            voter_count = excluded.voter_count,
+            population = excluded.population,
+            state_id = excluded.state_id,
+            district_id = excluded.district_id,
+            constituency_id = excluded.constituency_id
+        `).bind(
+          id,
+          b.name,
+          code,
+          b.president_name || b.presidentName || '',
+          b.president_phone || b.presidentPhone || '',
+          b.voter_count !== undefined ? b.voter_count : (b.voterCount || 0),
+          b.population || 0,
+          b.state_id || b.stateId || null,
+          b.district_id || b.districtId || null,
+          b.constituency_id || b.constituencyId || null,
+          b.admin_id || b.adminId || null
+        ).run().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS mandals (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              mandal_code TEXT,
+              president_name TEXT,
+              president_phone TEXT,
+              voter_count INTEGER DEFAULT 0,
+              population INTEGER DEFAULT 0,
+              state_id TEXT,
+              district_id TEXT,
+              constituency_id TEXT,
+              admin_id TEXT,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO mandals (id, name, mandal_code, president_name, president_phone, voter_count, population, state_id, district_id, constituency_id, admin_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            b.name,
+            code,
+            b.president_name || b.presidentName || '',
+            b.president_phone || b.presidentPhone || '',
+            b.voter_count !== undefined ? b.voter_count : (b.voterCount || 0),
+            b.population || 0,
+            b.state_id || b.stateId || null,
+            b.district_id || b.districtId || null,
+            b.constituency_id || b.constituencyId || null,
+            b.admin_id || b.adminId || null
+          ).run();
+        });
+        return jsonResponse({ id, ...b, mandal_code: code });
+      }
+
+      if (pathname.startsWith('/api/mandals/') && !pathname.includes('/members') && method === 'PUT') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/mandals/'.length));
+        const b: any = await request.json();
+        const code = (b.mandal_code || b.mandalCode || b.code) ? String(b.mandal_code || b.mandalCode || b.code).trim().toUpperCase() : null;
+        await env.DB.prepare(`
+          UPDATE mandals
+          SET name = COALESCE(?, name),
+              mandal_code = COALESCE(?, mandal_code),
+              president_name = COALESCE(?, president_name),
+              president_phone = COALESCE(?, president_phone),
+              voter_count = COALESCE(?, voter_count),
+              population = COALESCE(?, population),
+              state_id = COALESCE(?, state_id),
+              district_id = COALESCE(?, district_id),
+              constituency_id = COALESCE(?, constituency_id)
           WHERE id = ?
-        `).bind(b.name || null, b.districtId || b.district_id || null, b.stateId || b.state_id || null, b.category || null, id).run();
+        `).bind(
+          b.name || null,
+          code,
+          b.president_name !== undefined ? b.president_name : (b.presidentName !== undefined ? b.presidentName : null),
+          b.president_phone !== undefined ? b.president_phone : (b.presidentPhone !== undefined ? b.presidentPhone : null),
+          b.voter_count !== undefined ? b.voter_count : (b.voterCount !== undefined ? b.voterCount : null),
+          b.population !== undefined ? b.population : null,
+          b.state_id || b.stateId || null,
+          b.district_id || b.districtId || null,
+          b.constituency_id || b.constituencyId || null,
+          id
+        ).run();
         return jsonResponse({ success: true, id });
       }
-      if (pathname.startsWith('/api/constituencies/') && method === 'DELETE') {
-        invalidateCache('master_constituencies');
-        const id = decodeURIComponent(pathname.substring('/api/constituencies/'.length));
-        await env.DB.prepare('DELETE FROM constituencies WHERE id = ?').bind(id).run();
+
+      if (pathname.startsWith('/api/mandals/') && !pathname.includes('/members') && method === 'DELETE') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/mandals/'.length));
+        await env.DB.prepare('DELETE FROM mandal_members WHERE mandal_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE booths SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE panchayats SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE wards SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM mandals WHERE id = ?').bind(id).run();
+        return jsonResponse({ success: true });
+      }
+
+      // Mandal Members
+      if (pathname.match(/^\/api\/mandals\/[^/]+\/members$/) && method === 'GET') {
+        const mandalId = decodeURIComponent(pathname.split('/')[3]);
+        const rows = await env.DB.prepare('SELECT * FROM mandal_members WHERE mandal_id = ? ORDER BY created_at ASC').bind(mandalId).all<any>().catch(() => ({ results: [] }));
+        return jsonResponse(rows?.results || [], 200);
+      }
+
+      if (pathname.match(/^\/api\/mandals\/[^/]+\/members$/) && method === 'POST') {
+        const mandalId = decodeURIComponent(pathname.split('/')[3]);
+        const b: any = await request.json();
+        const id = b.id || `mm_${Date.now()}`;
+        await env.DB.prepare(`
+          INSERT INTO mandal_members (id, mandal_id, name, phone, voter_id, designation, category_key, admin_id)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(id, mandalId, b.name, b.phone || '', b.voter_id || b.voterId || '', b.designation || '', b.category_key || b.categoryKey || 'core', b.admin_id || b.adminId || '').run().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS mandal_members (
+              id TEXT PRIMARY KEY,
+              mandal_id TEXT NOT NULL,
+              name TEXT NOT NULL,
+              phone TEXT,
+              voter_id TEXT,
+              designation TEXT,
+              category_key TEXT NOT NULL,
+              admin_id TEXT,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO mandal_members (id, mandal_id, name, phone, voter_id, designation, category_key, admin_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(id, mandalId, b.name, b.phone || '', b.voter_id || b.voterId || '', b.designation || '', b.category_key || b.categoryKey || 'core', b.admin_id || b.adminId || '').run();
+        });
+        return jsonResponse({ id, ...b, mandal_id: mandalId });
+      }
+
+      if (pathname.startsWith('/api/mandals/members/') && method === 'DELETE') {
+        const memberId = decodeURIComponent(pathname.substring('/api/mandals/members/'.length));
+        await env.DB.prepare('DELETE FROM mandal_members WHERE id = ?').bind(memberId).run();
+        return jsonResponse({ success: true });
+      }
+
+      // ------------------------------------------------------------------------
+      // Panchayats / MC / ULBs (Local Bodies)
+      // ------------------------------------------------------------------------
+      if (pathname === '/api/panchayats' && method === 'GET') {
+        const mandalId = url.searchParams.get('mandalId') || url.searchParams.get('mandal_id') || '';
+        const mandalIds = url.searchParams.get('mandalIds') || '';
+        const constituencyId = url.searchParams.get('constituencyId') || url.searchParams.get('constituency_id') || '';
+        const constituencyIds = url.searchParams.get('constituencyIds') || '';
+        const districtId = url.searchParams.get('districtId') || url.searchParams.get('district_id') || '';
+        const districtIds = url.searchParams.get('districtIds') || '';
+        const stateId = url.searchParams.get('stateId') || url.searchParams.get('state_id') || '';
+        const stateIds = url.searchParams.get('stateIds') || '';
+
+        const cacheKey = `master_panchayats_${mandalId}_${mandalIds}_${constituencyId}_${constituencyIds}_${districtId}_${districtIds}_${stateId}_${stateIds}`;
+        const cached = getCached<any[]>(cacheKey);
+        if (cached) {
+          return jsonResponse(cached, 200, 120);
+        }
+
+        let query = `
+          SELECT p.*,
+                 m.name as mandal_name,
+                 m.mandal_code as mandal_code,
+                 c.name as constituency_name,
+                 d.name as district_name,
+                 s.name as state_name,
+                 COALESCE(p.constituency_id, m.constituency_id) as constituency_id,
+                 COALESCE(p.district_id, c.district_id, m.district_id) as district_id,
+                 COALESCE(p.state_id, d.state_id, c.state_id, m.state_id) as state_id
+          FROM panchayats p
+          LEFT JOIN mandals m ON p.mandal_id = m.id
+          LEFT JOIN constituencies c ON (p.constituency_id = c.id OR m.constituency_id = c.id)
+          LEFT JOIN districts d ON (p.district_id = d.id OR c.district_id = d.id OR m.district_id = d.id)
+          LEFT JOIN states s ON (p.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id OR m.state_id = s.id)
+        `;
+        const binds: any[] = [];
+        const whereParts: string[] = [];
+
+        if (mandalId && mandalId !== 'all') {
+          whereParts.push('p.mandal_id = ?');
+          binds.push(mandalId);
+        } else if (mandalIds) {
+          const mList = mandalIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (mList.length > 0) {
+            whereParts.push(`p.mandal_id IN (${mList.map(() => '?').join(',')})`);
+            binds.push(...mList);
+          }
+        }
+
+        if (constituencyId && constituencyId !== 'all') {
+          whereParts.push('(p.constituency_id = ? OR m.constituency_id = ?)');
+          binds.push(constituencyId, constituencyId);
+        } else if (constituencyIds) {
+          const cList = constituencyIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (cList.length > 0) {
+            whereParts.push(`(p.constituency_id IN (${cList.map(() => '?').join(',')}) OR m.constituency_id IN (${cList.map(() => '?').join(',')}))`);
+            binds.push(...cList, ...cList);
+          }
+        }
+
+        if (districtId && districtId !== 'all') {
+          whereParts.push('(p.district_id = ? OR c.district_id = ? OR m.district_id = ?)');
+          binds.push(districtId, districtId, districtId);
+        } else if (districtIds) {
+          const dList = districtIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (dList.length > 0) {
+            whereParts.push(`(p.district_id IN (${dList.map(() => '?').join(',')}) OR c.district_id IN (${dList.map(() => '?').join(',')}) OR m.district_id IN (${dList.map(() => '?').join(',')}))`);
+            binds.push(...dList, ...dList, ...dList);
+          }
+        }
+
+        if (stateId && stateId !== 'all') {
+          whereParts.push('(p.state_id = ? OR d.state_id = ? OR c.state_id = ? OR m.state_id = ?)');
+          binds.push(stateId, stateId, stateId, stateId);
+        } else if (stateIds) {
+          const sList = stateIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (sList.length > 0) {
+            whereParts.push(`(p.state_id IN (${sList.map(() => '?').join(',')}) OR d.state_id IN (${sList.map(() => '?').join(',')}))`);
+            binds.push(...sList, ...sList);
+          }
+        }
+
+        if (whereParts.length > 0) {
+          query += ` WHERE ${whereParts.join(' AND ')}`;
+        }
+        query += ' ORDER BY p.name ASC';
+
+        const rows = await env.DB.prepare(query).bind(...binds).all<any>().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS panchayats (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              code TEXT,
+              type TEXT DEFAULT 'Gram Panchayat',
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          return { results: [] };
+        });
+        setCached(cacheKey, rows?.results || [], 600_000);
+        return jsonResponse(rows?.results || [], 200, 120);
+      }
+
+      if (pathname === '/api/panchayats' && method === 'POST') {
+        invalidateCache('master_');
+        const b: any = await request.json();
+        const id = b.id || `pan_${Date.now()}`;
+        const code = (b.code || b.panchayat_code || `GP-${Date.now().toString().slice(-4)}`).trim().toUpperCase();
+        const pType = b.type || b.panchayat_type || 'Gram Panchayat';
+
+        let mandalId = b.mandal_id || b.mandalId || null;
+        let constituencyId = b.constituency_id || b.constituencyId || null;
+        let districtId = b.district_id || b.districtId || null;
+        let stateId = b.state_id || b.stateId || null;
+
+        if (mandalId && (!constituencyId || !districtId || !stateId)) {
+          const mandalRow: any = await env.DB.prepare(`
+            SELECT m.constituency_id, m.district_id, m.state_id,
+                   c.district_id as c_district_id, c.state_id as c_state_id,
+                   d.state_id as d_state_id
+            FROM mandals m
+            LEFT JOIN constituencies c ON m.constituency_id = c.id
+            LEFT JOIN districts d ON (m.district_id = d.id OR c.district_id = d.id)
+            WHERE m.id = ?
+          `).bind(mandalId).first().catch(() => null);
+
+          if (mandalRow) {
+            constituencyId = constituencyId || mandalRow.constituency_id || null;
+            districtId = districtId || mandalRow.district_id || mandalRow.c_district_id || null;
+            stateId = stateId || mandalRow.state_id || mandalRow.c_state_id || mandalRow.d_state_id || null;
+          }
+        }
+
+        await env.DB.prepare(`
+          INSERT INTO panchayats (id, name, code, type, mandal_id, constituency_id, district_id, state_id, population)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            code = excluded.code,
+            type = excluded.type,
+            mandal_id = excluded.mandal_id,
+            constituency_id = excluded.constituency_id,
+            district_id = excluded.district_id,
+            state_id = excluded.state_id,
+            population = excluded.population
+        `).bind(
+          id,
+          b.name,
+          code,
+          pType,
+          mandalId,
+          constituencyId,
+          districtId,
+          stateId,
+          b.population || 0
+        ).run().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS panchayats (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              code TEXT,
+              type TEXT DEFAULT 'Gram Panchayat',
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO panchayats (id, name, code, type, mandal_id, constituency_id, district_id, state_id, population)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            b.name,
+            code,
+            pType,
+            mandalId,
+            constituencyId,
+            districtId,
+            stateId,
+            b.population || 0
+          ).run();
+        });
+        return jsonResponse({ id, ...b, code, type: pType, mandal_id: mandalId, constituency_id: constituencyId, district_id: districtId, state_id: stateId });
+      }
+
+      if (pathname.startsWith('/api/panchayats/') && method === 'PUT') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/panchayats/'.length));
+        const b: any = await request.json();
+        const code = (b.code || b.panchayat_code) ? String(b.code || b.panchayat_code).trim().toUpperCase() : null;
+        const pType = b.type || b.panchayat_type || null;
+
+        let mandalId = b.mandal_id !== undefined ? b.mandal_id : (b.mandalId !== undefined ? b.mandalId : null);
+        let constituencyId = b.constituency_id !== undefined ? b.constituency_id : (b.constituencyId !== undefined ? b.constituencyId : null);
+        let districtId = b.district_id !== undefined ? b.district_id : (b.districtId !== undefined ? b.districtId : null);
+        let stateId = b.state_id !== undefined ? b.state_id : (b.stateId !== undefined ? b.stateId : null);
+
+        if (mandalId && (!constituencyId || !districtId || !stateId)) {
+          const mandalRow: any = await env.DB.prepare(`
+            SELECT m.constituency_id, m.district_id, m.state_id,
+                   c.district_id as c_district_id, c.state_id as c_state_id,
+                   d.state_id as d_state_id
+            FROM mandals m
+            LEFT JOIN constituencies c ON m.constituency_id = c.id
+            LEFT JOIN districts d ON (m.district_id = d.id OR c.district_id = d.id)
+            WHERE m.id = ?
+          `).bind(mandalId).first().catch(() => null);
+
+          if (mandalRow) {
+            constituencyId = constituencyId || mandalRow.constituency_id || null;
+            districtId = districtId || mandalRow.district_id || mandalRow.c_district_id || null;
+            stateId = stateId || mandalRow.state_id || mandalRow.c_state_id || mandalRow.d_state_id || null;
+          }
+        }
+
+        await env.DB.prepare(`
+          UPDATE panchayats
+          SET name = COALESCE(?, name),
+              code = COALESCE(?, code),
+              type = COALESCE(?, type),
+              mandal_id = COALESCE(?, mandal_id),
+              constituency_id = COALESCE(?, constituency_id),
+              district_id = COALESCE(?, district_id),
+              state_id = COALESCE(?, state_id),
+              population = COALESCE(?, population)
+          WHERE id = ?
+        `).bind(
+          b.name || null,
+          code,
+          pType,
+          mandalId,
+          constituencyId,
+          districtId,
+          stateId,
+          b.population !== undefined ? b.population : null,
+          id
+        ).run();
+        return jsonResponse({ success: true, id });
+      }
+
+      if (pathname.startsWith('/api/panchayats/') && method === 'DELETE') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/panchayats/'.length));
+        await env.DB.prepare('UPDATE booths SET panchayat_id = NULL WHERE panchayat_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM wards WHERE panchayat_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM panchayats WHERE id = ?').bind(id).run();
+        return jsonResponse({ success: true });
+      }
+
+      // ------------------------------------------------------------------------
+      // Wards / Villages Master
+      // ------------------------------------------------------------------------
+      if (pathname === '/api/wards' && method === 'GET') {
+        const panchayatId = url.searchParams.get('panchayatId') || url.searchParams.get('panchayat_id') || '';
+        const panchayatIds = url.searchParams.get('panchayatIds') || '';
+        const mandalId = url.searchParams.get('mandalId') || url.searchParams.get('mandal_id') || '';
+        const mandalIds = url.searchParams.get('mandalIds') || '';
+        const constituencyId = url.searchParams.get('constituencyId') || url.searchParams.get('constituency_id') || '';
+        const constituencyIds = url.searchParams.get('constituencyIds') || '';
+        const districtId = url.searchParams.get('districtId') || url.searchParams.get('district_id') || '';
+        const districtIds = url.searchParams.get('districtIds') || '';
+        const stateId = url.searchParams.get('stateId') || url.searchParams.get('state_id') || '';
+        const stateIds = url.searchParams.get('stateIds') || '';
+
+        const cacheKey = `master_wards_${panchayatId}_${panchayatIds}_${mandalId}_${mandalIds}_${constituencyId}_${constituencyIds}_${districtId}_${districtIds}_${stateId}_${stateIds}`;
+        const cached = getCached<any[]>(cacheKey);
+        if (cached) {
+          return jsonResponse(cached, 200, 120);
+        }
+
+        let query = `
+          SELECT w.*,
+                 p.name as panchayat_name,
+                 p.type as panchayat_type,
+                 m.name as mandal_name,
+                 c.name as constituency_name,
+                 d.name as district_name,
+                 s.name as state_name
+          FROM wards w
+          LEFT JOIN panchayats p ON w.panchayat_id = p.id
+          LEFT JOIN mandals m ON (w.mandal_id = m.id OR p.mandal_id = m.id)
+          LEFT JOIN constituencies c ON (w.constituency_id = c.id OR p.constituency_id = c.id OR m.constituency_id = c.id)
+          LEFT JOIN districts d ON (w.district_id = d.id OR p.district_id = d.id OR c.district_id = d.id OR m.district_id = d.id)
+          LEFT JOIN states s ON (w.state_id = s.id OR p.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id)
+        `;
+        const binds: any[] = [];
+        const whereParts: string[] = [];
+
+        if (panchayatId && panchayatId !== 'all') {
+          whereParts.push('w.panchayat_id = ?');
+          binds.push(panchayatId);
+        } else if (panchayatIds) {
+          const pList = panchayatIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (pList.length > 0) {
+            whereParts.push(`w.panchayat_id IN (${pList.map(() => '?').join(',')})`);
+            binds.push(...pList);
+          }
+        }
+
+        if (mandalId && mandalId !== 'all') {
+          whereParts.push('(w.mandal_id = ? OR p.mandal_id = ?)');
+          binds.push(mandalId, mandalId);
+        } else if (mandalIds) {
+          const mList = mandalIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (mList.length > 0) {
+            whereParts.push(`(w.mandal_id IN (${mList.map(() => '?').join(',')}) OR p.mandal_id IN (${mList.map(() => '?').join(',')}))`);
+            binds.push(...mList, ...mList);
+          }
+        }
+
+        if (constituencyId && constituencyId !== 'all') {
+          whereParts.push('(w.constituency_id = ? OR p.constituency_id = ?)');
+          binds.push(constituencyId, constituencyId);
+        } else if (constituencyIds) {
+          const cList = constituencyIds.split(',').map(s => s.trim()).filter(Boolean);
+          if (cList.length > 0) {
+            whereParts.push(`(w.constituency_id IN (${cList.map(() => '?').join(',')}) OR p.constituency_id IN (${cList.map(() => '?').join(',')}))`);
+            binds.push(...cList, ...cList);
+          }
+        }
+
+        if (whereParts.length > 0) {
+          query += ` WHERE ${whereParts.join(' AND ')}`;
+        }
+        query += ' ORDER BY w.ward_number ASC, w.name ASC';
+
+        const rows = await env.DB.prepare(query).bind(...binds).all<any>().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS wards (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              ward_number TEXT,
+              type TEXT DEFAULT 'Ward',
+              panchayat_id TEXT,
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              total_voters INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          return { results: [] };
+        });
+        setCached(cacheKey, rows?.results || [], 600_000);
+        return jsonResponse(rows?.results || [], 200, 120);
+      }
+
+      if (pathname === '/api/wards' && method === 'POST') {
+        invalidateCache('master_');
+        const b: any = await request.json();
+        const id = b.id || `wrd_${Date.now()}`;
+        const wNum = (b.ward_number || b.wardNumber || '').trim();
+        const wType = b.type || b.ward_type || 'Ward';
+        await env.DB.prepare(`
+          INSERT INTO wards (id, name, ward_number, type, panchayat_id, mandal_id, constituency_id, district_id, state_id, population, total_voters)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            ward_number = excluded.ward_number,
+            type = excluded.type,
+            panchayat_id = excluded.panchayat_id,
+            mandal_id = excluded.mandal_id,
+            constituency_id = excluded.constituency_id,
+            district_id = excluded.district_id,
+            state_id = excluded.state_id,
+            population = excluded.population,
+            total_voters = excluded.total_voters
+        `).bind(
+          id,
+          b.name,
+          wNum,
+          wType,
+          b.panchayat_id || b.panchayatId || null,
+          b.mandal_id || b.mandalId || null,
+          b.constituency_id || b.constituencyId || null,
+          b.district_id || b.districtId || null,
+          b.state_id || b.stateId || null,
+          b.population || 0,
+          b.total_voters || b.totalVoters || 0
+        ).run().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS wards (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              ward_number TEXT,
+              type TEXT DEFAULT 'Ward',
+              panchayat_id TEXT,
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              total_voters INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO wards (id, name, ward_number, type, panchayat_id, mandal_id, constituency_id, district_id, state_id, population, total_voters)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            b.name,
+            wNum,
+            wType,
+            b.panchayat_id || b.panchayatId || null,
+            b.mandal_id || b.mandalId || null,
+            b.constituency_id || b.constituencyId || null,
+            b.district_id || b.districtId || null,
+            b.state_id || b.stateId || null,
+            b.population || 0,
+            b.total_voters || b.totalVoters || 0
+          ).run();
+        });
+        return jsonResponse({ id, ...b, ward_number: wNum, type: wType });
+      }
+
+      if (pathname.startsWith('/api/wards/') && method === 'PUT') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/wards/'.length));
+        const b: any = await request.json();
+        const wNum = (b.ward_number !== undefined || b.wardNumber !== undefined) ? String(b.ward_number || b.wardNumber || '').trim() : null;
+        const wType = b.type || b.ward_type || null;
+        await env.DB.prepare(`
+          UPDATE wards
+          SET name = COALESCE(?, name),
+              ward_number = COALESCE(?, ward_number),
+              type = COALESCE(?, type),
+              panchayat_id = COALESCE(?, panchayat_id),
+              mandal_id = COALESCE(?, mandal_id),
+              constituency_id = COALESCE(?, constituency_id),
+              district_id = COALESCE(?, district_id),
+              state_id = COALESCE(?, state_id),
+              population = COALESCE(?, population),
+              total_voters = COALESCE(?, total_voters)
+          WHERE id = ?
+        `).bind(
+          b.name || null,
+          wNum,
+          wType,
+          b.panchayat_id || b.panchayatId || null,
+          b.mandal_id || b.mandalId || null,
+          b.constituency_id || b.constituencyId || null,
+          b.district_id || b.districtId || null,
+          b.state_id || b.stateId || null,
+          b.population !== undefined ? b.population : null,
+          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : null),
+          id
+        ).run();
+        return jsonResponse({ success: true, id });
+      }
+
+      if (pathname.startsWith('/api/wards/') && method === 'DELETE') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/wards/'.length));
+        await env.DB.prepare('UPDATE booths SET ward_id = NULL WHERE ward_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM wards WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
 
@@ -1241,7 +2176,12 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
                  c.district_id, 
                  COALESCE(c.state_id, d.state_id) as state_id,
                  d.name as district_name,
-                 s.name as state_name
+                 s.name as state_name,
+                 COALESCE(
+                   (SELECT COUNT(1) FROM voters v WHERE v.booth_id = b.id OR v.booth_id = b.booth_number),
+                   b.total_voters,
+                   0
+                 ) as voter_count
           FROM booths b
           LEFT JOIN constituencies c ON b.constituency_id = c.id
           LEFT JOIN districts d ON c.district_id = d.id
@@ -1316,24 +2256,47 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const b: any = await request.json();
         const id = b.id || `bth_${Date.now()}`;
         await env.DB.prepare(`
-          INSERT INTO booths (id, booth_number, name, constituency_id, mandal_id, total_voters, address)
-          VALUES (?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO booths (id, booth_number, booth_label, name, constituency_id, mandal_id, panchayat_id, ward_id, total_voters, address)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             booth_number = excluded.booth_number,
+            booth_label = excluded.booth_label,
             name = excluded.name,
             constituency_id = excluded.constituency_id,
             mandal_id = excluded.mandal_id,
+            panchayat_id = excluded.panchayat_id,
+            ward_id = excluded.ward_id,
             total_voters = excluded.total_voters,
             address = excluded.address
         `).bind(
           id,
           b.booth_number || b.boothNumber || '1',
+          b.booth_label || b.boothLabel || '',
           b.name,
           b.constituency_id || b.constituencyId,
           b.mandal_id || b.mandalId || null,
-          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : 0),
+          b.panchayat_id || b.panchayatId || null,
+          b.ward_id || b.wardId || null,
+          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : (b.population || 0)),
           b.address || ''
-        ).run();
+        ).run().catch(async () => {
+          // Fallback if columns missing in old sqlite table
+          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN booth_label TEXT`).run().catch(() => {});
+          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN panchayat_id TEXT`).run().catch(() => {});
+          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN ward_id TEXT`).run().catch(() => {});
+          await env.DB.prepare(`
+            INSERT INTO booths (id, booth_number, name, constituency_id, mandal_id, total_voters, address)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            b.booth_number || b.boothNumber || '1',
+            b.name,
+            b.constituency_id || b.constituencyId,
+            b.mandal_id || b.mandalId || null,
+            b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : 0),
+            b.address || ''
+          ).run();
+        });
         return jsonResponse({ id, ...b });
       }
       if (pathname.startsWith('/api/booths/') && !pathname.includes('/agents') && method === 'PUT') {
@@ -1344,20 +2307,29 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           UPDATE booths 
           SET name = COALESCE(?, name),
               booth_number = COALESCE(?, booth_number),
+              booth_label = COALESCE(?, booth_label),
               constituency_id = COALESCE(?, constituency_id),
               mandal_id = COALESCE(?, mandal_id),
+              panchayat_id = COALESCE(?, panchayat_id),
+              ward_id = COALESCE(?, ward_id),
               total_voters = COALESCE(?, total_voters),
               address = COALESCE(?, address)
           WHERE id = ?
         `).bind(
           b.name || null, 
           b.booth_number || b.boothNumber || null, 
+          b.booth_label !== undefined ? b.booth_label : (b.boothLabel !== undefined ? b.boothLabel : null),
           b.constituency_id || b.constituencyId || null,
           b.mandal_id || b.mandalId || null,
-          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : null), 
+          b.panchayat_id || b.panchayatId || null,
+          b.ward_id || b.wardId || null,
+          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : (b.population !== undefined ? b.population : null)), 
           b.address !== undefined ? b.address : null, 
           id
-        ).run();
+        ).run().catch(async () => {
+          await env.DB.prepare('UPDATE booths SET name = COALESCE(?, name), booth_number = COALESCE(?, booth_number), address = COALESCE(?, address) WHERE id = ?')
+            .bind(b.name || null, b.booth_number || b.boothNumber || null, b.address || null, id).run();
+        });
         return jsonResponse({ success: true, id });
       }
       if (pathname.startsWith('/api/booths/') && !pathname.includes('/agents') && method === 'DELETE') {
@@ -1366,6 +2338,355 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         await env.DB.prepare('DELETE FROM booth_agents WHERE booth_id = ?').bind(id).run().catch(() => {});
         await env.DB.prepare('UPDATE volunteers SET assigned_booth_id = NULL, assigned_booth_name = NULL WHERE assigned_booth_id = ?').bind(id).run().catch(() => {});
         await env.DB.prepare('DELETE FROM booths WHERE id = ?').bind(id).run();
+        return jsonResponse({ success: true });
+      }
+
+      // ------------------------------------------------------------------------
+      // 3.5 PANCHAYATS & WARDS (Local Bodies & Villages)
+      // ------------------------------------------------------------------------
+      if (pathname === '/api/panchayats' && method === 'GET') {
+        const mandalId = url.searchParams.get('mandalId') || url.searchParams.get('mandal_id') || '';
+        const constituencyId = url.searchParams.get('constituencyId') || url.searchParams.get('constituency_id') || '';
+        const districtId = url.searchParams.get('districtId') || url.searchParams.get('district_id') || '';
+        const stateId = url.searchParams.get('stateId') || url.searchParams.get('state_id') || '';
+
+        let query = `
+          SELECT p.*,
+                 m.name as mandal_name,
+                 m.mandal_code as mandal_code,
+                 c.name as constituency_name,
+                 d.name as district_name,
+                 s.name as state_name,
+                 (SELECT COUNT(1) FROM wards w WHERE w.panchayat_id = p.id) as wardCount,
+                 (SELECT COUNT(1) FROM booths b WHERE b.panchayat_id = p.id) as boothCount
+          FROM panchayats p
+          LEFT JOIN mandals m ON p.mandal_id = m.id
+          LEFT JOIN constituencies c ON (p.constituency_id = c.id OR m.constituency_id = c.id)
+          LEFT JOIN districts d ON (p.district_id = d.id OR c.district_id = d.id OR m.district_id = d.id)
+          LEFT JOIN states s ON (p.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id)
+        `;
+        const binds: any[] = [];
+        const whereParts: string[] = [];
+
+        if (mandalId && mandalId !== 'all') {
+          whereParts.push('p.mandal_id = ?');
+          binds.push(mandalId);
+        }
+        if (constituencyId && constituencyId !== 'all') {
+          whereParts.push('(p.constituency_id = ? OR m.constituency_id = ?)');
+          binds.push(constituencyId, constituencyId);
+        }
+        if (districtId && districtId !== 'all') {
+          whereParts.push('(p.district_id = ? OR c.district_id = ?)');
+          binds.push(districtId, districtId);
+        }
+        if (stateId && stateId !== 'all') {
+          whereParts.push('(p.state_id = ? OR d.state_id = ?)');
+          binds.push(stateId, stateId);
+        }
+
+        if (whereParts.length > 0) {
+          query += ` WHERE ${whereParts.join(' AND ')}`;
+        }
+        query += ' ORDER BY p.name ASC';
+
+        const rows = await env.DB.prepare(query).bind(...binds).all<any>().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS panchayats (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              code TEXT,
+              type TEXT DEFAULT 'Gram Panchayat',
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          return { results: [] };
+        });
+        return jsonResponse(rows?.results || [], 200, 60);
+      }
+
+      if (pathname === '/api/panchayats' && method === 'POST') {
+        invalidateCache('master_');
+        const b: any = await request.json();
+        const id = b.id || `pan_${Date.now()}`;
+        await env.DB.prepare(`
+          INSERT INTO panchayats (id, name, code, type, mandal_id, constituency_id, district_id, state_id, population)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            code = excluded.code,
+            type = excluded.type,
+            mandal_id = excluded.mandal_id,
+            constituency_id = excluded.constituency_id,
+            district_id = excluded.district_id,
+            state_id = excluded.state_id,
+            population = excluded.population
+        `).bind(
+          id,
+          b.name,
+          b.code || '',
+          b.type || 'Gram Panchayat',
+          b.mandal_id || b.mandalId || null,
+          b.constituency_id || b.constituencyId || null,
+          b.district_id || b.districtId || null,
+          b.state_id || b.stateId || null,
+          b.population || 0
+        ).run().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS panchayats (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              code TEXT,
+              type TEXT DEFAULT 'Gram Panchayat',
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO panchayats (id, name, code, type, mandal_id, constituency_id, district_id, state_id, population)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            b.name,
+            b.code || '',
+            b.type || 'Gram Panchayat',
+            b.mandal_id || b.mandalId || null,
+            b.constituency_id || b.constituencyId || null,
+            b.district_id || b.districtId || null,
+            b.state_id || b.stateId || null,
+            b.population || 0
+          ).run();
+        });
+        return jsonResponse({ id, ...b });
+      }
+
+      if (pathname.startsWith('/api/panchayats/') && method === 'PUT') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/panchayats/'.length));
+        const b: any = await request.json();
+        await env.DB.prepare(`
+          UPDATE panchayats
+          SET name = COALESCE(?, name),
+              code = COALESCE(?, code),
+              type = COALESCE(?, type),
+              mandal_id = COALESCE(?, mandal_id),
+              constituency_id = COALESCE(?, constituency_id),
+              district_id = COALESCE(?, district_id),
+              state_id = COALESCE(?, state_id),
+              population = COALESCE(?, population)
+          WHERE id = ?
+        `).bind(
+          b.name || null,
+          b.code !== undefined ? b.code : null,
+          b.type || null,
+          b.mandal_id || b.mandalId || null,
+          b.constituency_id || b.constituencyId || null,
+          b.district_id || b.districtId || null,
+          b.state_id || b.stateId || null,
+          b.population !== undefined ? b.population : null,
+          id
+        ).run();
+        return jsonResponse({ success: true, id });
+      }
+
+      if (pathname.startsWith('/api/panchayats/') && method === 'DELETE') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/panchayats/'.length));
+        await env.DB.prepare('UPDATE booths SET panchayat_id = NULL WHERE panchayat_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM wards WHERE panchayat_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM panchayats WHERE id = ?').bind(id).run();
+        return jsonResponse({ success: true });
+      }
+
+      // Wards
+      if (pathname === '/api/wards' && method === 'GET') {
+        const panchayatId = url.searchParams.get('panchayatId') || url.searchParams.get('panchayat_id') || '';
+        const mandalId = url.searchParams.get('mandalId') || url.searchParams.get('mandal_id') || '';
+        const constituencyId = url.searchParams.get('constituencyId') || url.searchParams.get('constituency_id') || '';
+        const districtId = url.searchParams.get('districtId') || url.searchParams.get('district_id') || '';
+        const stateId = url.searchParams.get('stateId') || url.searchParams.get('state_id') || '';
+
+        let query = `
+          SELECT w.*,
+                 p.name as panchayat_name,
+                 p.type as panchayat_type,
+                 m.name as mandal_name,
+                 c.name as constituency_name,
+                 d.name as district_name,
+                 s.name as state_name,
+                 (SELECT COUNT(1) FROM booths b WHERE b.ward_id = w.id) as boothCount
+          FROM wards w
+          LEFT JOIN panchayats p ON w.panchayat_id = p.id
+          LEFT JOIN mandals m ON (w.mandal_id = m.id OR p.mandal_id = m.id)
+          LEFT JOIN constituencies c ON (w.constituency_id = c.id OR p.constituency_id = c.id)
+          LEFT JOIN districts d ON (w.district_id = d.id OR p.district_id = d.id)
+          LEFT JOIN states s ON (w.state_id = s.id OR p.state_id = s.id)
+        `;
+        const binds: any[] = [];
+        const whereParts: string[] = [];
+
+        if (panchayatId && panchayatId !== 'all') {
+          whereParts.push('w.panchayat_id = ?');
+          binds.push(panchayatId);
+        }
+        if (mandalId && mandalId !== 'all') {
+          whereParts.push('w.mandal_id = ?');
+          binds.push(mandalId);
+        }
+        if (constituencyId && constituencyId !== 'all') {
+          whereParts.push('w.constituency_id = ?');
+          binds.push(constituencyId);
+        }
+        if (districtId && districtId !== 'all') {
+          whereParts.push('w.district_id = ?');
+          binds.push(districtId);
+        }
+        if (stateId && stateId !== 'all') {
+          whereParts.push('w.state_id = ?');
+          binds.push(stateId);
+        }
+
+        if (whereParts.length > 0) {
+          query += ` WHERE ${whereParts.join(' AND ')}`;
+        }
+        query += ' ORDER BY w.ward_number ASC, w.name ASC';
+
+        const rows = await env.DB.prepare(query).bind(...binds).all<any>().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS wards (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              ward_number TEXT,
+              type TEXT DEFAULT 'Ward',
+              panchayat_id TEXT,
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              total_voters INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          return { results: [] };
+        });
+        return jsonResponse(rows?.results || [], 200, 60);
+      }
+
+      if (pathname === '/api/wards' && method === 'POST') {
+        invalidateCache('master_');
+        const b: any = await request.json();
+        const id = b.id || `wrd_${Date.now()}`;
+        await env.DB.prepare(`
+          INSERT INTO wards (id, name, ward_number, type, panchayat_id, mandal_id, constituency_id, district_id, state_id, population, total_voters)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(id) DO UPDATE SET
+            name = excluded.name,
+            ward_number = excluded.ward_number,
+            type = excluded.type,
+            panchayat_id = excluded.panchayat_id,
+            mandal_id = excluded.mandal_id,
+            constituency_id = excluded.constituency_id,
+            district_id = excluded.district_id,
+            state_id = excluded.state_id,
+            population = excluded.population,
+            total_voters = excluded.total_voters
+        `).bind(
+          id,
+          b.name,
+          b.ward_number || b.wardNumber || '',
+          b.type || 'Ward',
+          b.panchayat_id || b.panchayatId || null,
+          b.mandal_id || b.mandalId || null,
+          b.constituency_id || b.constituencyId || null,
+          b.district_id || b.districtId || null,
+          b.state_id || b.stateId || null,
+          b.population || 0,
+          b.total_voters !== undefined ? b.total_voters : (b.totalVoters || 0)
+        ).run().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS wards (
+              id TEXT PRIMARY KEY,
+              name TEXT NOT NULL,
+              ward_number TEXT,
+              type TEXT DEFAULT 'Ward',
+              panchayat_id TEXT,
+              mandal_id TEXT,
+              constituency_id TEXT,
+              district_id TEXT,
+              state_id TEXT,
+              population INTEGER DEFAULT 0,
+              total_voters INTEGER DEFAULT 0,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO wards (id, name, ward_number, type, panchayat_id, mandal_id, constituency_id, district_id, state_id, population, total_voters)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            b.name,
+            b.ward_number || b.wardNumber || '',
+            b.type || 'Ward',
+            b.panchayat_id || b.panchayatId || null,
+            b.mandal_id || b.mandalId || null,
+            b.constituency_id || b.constituencyId || null,
+            b.district_id || b.districtId || null,
+            b.state_id || b.stateId || null,
+            b.population || 0,
+            b.total_voters !== undefined ? b.total_voters : (b.totalVoters || 0)
+          ).run();
+        });
+        return jsonResponse({ id, ...b });
+      }
+
+      if (pathname.startsWith('/api/wards/') && method === 'PUT') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/wards/'.length));
+        const b: any = await request.json();
+        await env.DB.prepare(`
+          UPDATE wards
+          SET name = COALESCE(?, name),
+              ward_number = COALESCE(?, ward_number),
+              type = COALESCE(?, type),
+              panchayat_id = COALESCE(?, panchayat_id),
+              mandal_id = COALESCE(?, mandal_id),
+              constituency_id = COALESCE(?, constituency_id),
+              district_id = COALESCE(?, district_id),
+              state_id = COALESCE(?, state_id),
+              population = COALESCE(?, population),
+              total_voters = COALESCE(?, total_voters)
+          WHERE id = ?
+        `).bind(
+          b.name || null,
+          b.ward_number !== undefined ? b.ward_number : (b.wardNumber !== undefined ? b.wardNumber : null),
+          b.type || null,
+          b.panchayat_id || b.panchayatId || null,
+          b.mandal_id || b.mandalId || null,
+          b.constituency_id || b.constituencyId || null,
+          b.district_id || b.districtId || null,
+          b.state_id || b.stateId || null,
+          b.population !== undefined ? b.population : null,
+          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : null),
+          id
+        ).run();
+        return jsonResponse({ success: true, id });
+      }
+
+      if (pathname.startsWith('/api/wards/') && method === 'DELETE') {
+        invalidateCache('master_');
+        const id = decodeURIComponent(pathname.substring('/api/wards/'.length));
+        await env.DB.prepare('UPDATE booths SET ward_id = NULL WHERE ward_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM wards WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
 
@@ -2315,36 +3636,49 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           return jsonResponse(cached, 200, 60);
         }
         const { results } = await env.DB.prepare('SELECT * FROM political_parties ORDER BY name ASC').all();
-        setCached(cacheKey, results, 120_000);
-        return jsonResponse(results, 200, 60);
+        const formatted = (results || []).map((p: any) => ({
+          id: p.id,
+          name: p.name,
+          abbreviation: p.abbreviation,
+          logoUrl: p.logo_url || p.logoUrl || '',
+          logo_url: p.logo_url || p.logoUrl || '',
+          color: p.color || '#3b82f6',
+          symbol: p.symbol || '',
+          createdAt: p.created_at
+        }));
+        setCached(cacheKey, formatted, 120_000);
+        return jsonResponse(formatted, 200, 60);
       }
       if (pathname === '/api/parties' && method === 'POST') {
         invalidateCache('master_parties');
         const p: any = await request.json();
         const id = p.id || `party_${Date.now()}`;
-        await env.DB.prepare('INSERT INTO political_parties (id, name, abbreviation, color, symbol) VALUES (?, ?, ?, ?, ?)')
-          .bind(id, p.name, p.abbreviation || p.name.substring(0, 3).toUpperCase(), p.color || '#3b82f6', p.symbol || '').run();
-        return jsonResponse({ id, ...p });
+        const logoUrl = p.logoUrl || p.logo_url || '';
+        await env.DB.prepare('INSERT INTO political_parties (id, name, abbreviation, color, logo_url, symbol) VALUES (?, ?, ?, ?, ?, ?)')
+          .bind(id, p.name, p.abbreviation || (p.name ? p.name.substring(0, 3).toUpperCase() : 'PTY'), p.color || '#3b82f6', logoUrl, p.symbol || '').run();
+        return jsonResponse({ id, ...p, logoUrl, logo_url: logoUrl });
       }
       if (pathname.startsWith('/api/parties/') && method === 'PUT') {
         invalidateCache('master_parties');
         const id = pathname.substring('/api/parties/'.length);
         const p: any = await request.json();
+        const logoUrl = p.logoUrl !== undefined ? p.logoUrl : (p.logo_url !== undefined ? p.logo_url : '');
         await env.DB.prepare(`
           UPDATE political_parties 
           SET name = COALESCE(?, name),
               abbreviation = COALESCE(?, abbreviation),
               color = COALESCE(?, color),
+              logo_url = COALESCE(?, logo_url),
               symbol = COALESCE(?, symbol)
           WHERE id = ?
-        `).bind(p.name || null, p.abbreviation || null, p.color || null, p.symbol || null, id).run();
-        return jsonResponse({ success: true });
+        `).bind(p.name || null, p.abbreviation || null, p.color || null, logoUrl, p.symbol || null, id).run();
+        return jsonResponse({ success: true, id, ...p });
       }
       if (pathname.startsWith('/api/parties/') && method === 'DELETE') {
         invalidateCache('master_parties');
         const id = pathname.substring('/api/parties/'.length);
         await env.DB.prepare('DELETE FROM political_parties WHERE id = ?').bind(id).run();
-        return jsonResponse({ success: true });
+        return jsonResponse({ success: true, id });
       }
 
       if (pathname === '/api/elections' && method === 'GET') {
@@ -2354,21 +3688,34 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           return jsonResponse(cached, 200, 60);
         }
         const { results } = await env.DB.prepare('SELECT * FROM elections ORDER BY year DESC').all();
-        setCached(cacheKey, results, 120_000);
-        return jsonResponse(results, 200, 60);
+        const formatted = (results || []).map((e: any) => ({
+          id: String(e.id),
+          year: Number(e.year),
+          title: e.title || `${e.year} Election`,
+          description: e.description || '',
+          status: e.status || 'Upcoming',
+          createdAt: e.created_at
+        }));
+        setCached(cacheKey, formatted, 120_000);
+        return jsonResponse(formatted, 200, 60);
       }
       if (pathname === '/api/elections' && method === 'POST') {
         invalidateCache('master_elections');
         const e: any = await request.json();
         const id = e.id || `elec_${Date.now()}`;
+        const year = parseInt(e.year, 10) || new Date().getFullYear();
+        const title = e.title || `${year} Election`;
+        const description = e.description || '';
+        const status = e.status || 'Upcoming';
         await env.DB.prepare('INSERT INTO elections (id, year, title, description, status) VALUES (?, ?, ?, ?, ?)')
-          .bind(id, parseInt(e.year) || 2026, e.title, e.description || '', e.status || 'Active').run();
-        return jsonResponse({ id, ...e });
+          .bind(id, year, title, description, status).run();
+        return jsonResponse({ id, year, title, description, status });
       }
       if (pathname.startsWith('/api/elections/') && method === 'PUT') {
         invalidateCache('master_elections');
         const id = pathname.substring('/api/elections/'.length);
         const e: any = await request.json();
+        const year = e.year ? parseInt(e.year, 10) : null;
         await env.DB.prepare(`
           UPDATE elections 
           SET year = COALESCE(?, year),
@@ -2376,14 +3723,14 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
               description = COALESCE(?, description),
               status = COALESCE(?, status)
           WHERE id = ?
-        `).bind(e.year ? parseInt(e.year) : null, e.title || null, e.description || null, e.status || null, id).run();
-        return jsonResponse({ success: true });
+        `).bind(year, e.title || null, e.description !== undefined ? e.description : null, e.status || null, id).run();
+        return jsonResponse({ success: true, id, ...e });
       }
       if (pathname.startsWith('/api/elections/') && method === 'DELETE') {
         invalidateCache('master_elections');
         const id = pathname.substring('/api/elections/'.length);
         await env.DB.prepare('DELETE FROM elections WHERE id = ?').bind(id).run();
-        return jsonResponse({ success: true });
+        return jsonResponse({ success: true, id });
       }
 
       // ------------------------------------------------------------------------
@@ -2561,6 +3908,12 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             COALESCE(v.gender, 'Male') AS voter_gender,
             COALESCE(v.age, 35) AS voter_age,
             COALESCE(v.caste, '') AS voter_caste,
+            v.voter_id AS voter_epic,
+            v.mobile AS voter_mobile,
+            v.email AS voter_email,
+            v.village AS voter_village,
+            v.guardian_name AS voter_guardian_name,
+            v.house_no AS voter_house_no,
             COALESCE(s.booth_id, v.booth_id) AS effective_booth_id,
             COALESCE(s.constituency_id, v.constituency_id) AS effective_constituency_id,
             b.name AS booth_name,
@@ -2720,22 +4073,28 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         
         const boothId = url.searchParams.get('boothId') || url.searchParams.get('booth_id') || '';
         let boothIds = url.searchParams.get('boothIds') || '';
+        const wardId = url.searchParams.get('wardId') || url.searchParams.get('ward_id') || '';
+        let wardIds = url.searchParams.get('wardIds') || '';
+        const panchayatId = url.searchParams.get('panchayatId') || url.searchParams.get('panchayat_id') || '';
+        let panchayatIds = url.searchParams.get('panchayatIds') || '';
+        const mandalId = url.searchParams.get('mandalId') || url.searchParams.get('mandal_id') || '';
+        let mandalIds = url.searchParams.get('mandalIds') || '';
         const constituencyId = url.searchParams.get('constituencyId') || url.searchParams.get('constituency_id') || '';
         let constituencyIds = url.searchParams.get('constituencyIds') || '';
         const districtId = url.searchParams.get('districtId') || url.searchParams.get('district_id') || '';
         let districtIds = url.searchParams.get('districtIds') || '';
         const stateId = url.searchParams.get('stateId') || url.searchParams.get('state_id') || '';
         let stateIds = url.searchParams.get('stateIds') || '';
-        const mandalId = url.searchParams.get('mandalId') || url.searchParams.get('mandal_id') || '';
         const gender = url.searchParams.get('gender') || '';
         const caste = url.searchParams.get('caste') || '';
         const votingStatus = url.searchParams.get('voting_status') || url.searchParams.get('votingStatus') || '';
 
         const targetAdmin = url.searchParams.get('adminId') || adminCtx.adminId;
 
-        // Regional scope enforcement for non-Super Admins:
-        // If a non-Super Admin has not been assigned any election scope by Super Admin, return empty list!
-        if (!adminCtx.isSuperAdmin) {
+        // Regional scope enforcement only for volunteer/karyakarta users with explicit assigned boundaries
+        const rawRole = (adminCtx.user?.role || '').toLowerCase();
+        const isVolunteer = (rawRole === 'volunteer' || rawRole === 'karyakarta') && !adminCtx.isSuperAdmin;
+        if (isVolunteer) {
           const userRow = adminCtx.user;
           const uState = (userRow?.state_id || userRow?.stateId || '').trim();
           const uDist = (userRow?.district_id || userRow?.districtId || '').trim();
@@ -2750,26 +4109,6 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
               uAssignedBooths = userRow.assigned_booths.map(String).filter(s => s && s !== '[]' && s !== 'null');
             }
           } catch {}
-
-          const hasAssignedElectionScope = Boolean(
-            (uState && uState !== 'null' && uState !== 'undefined') ||
-            (uDist && uDist !== 'null' && uDist !== 'undefined') ||
-            (uConst && uConst !== 'null' && uConst !== 'undefined') ||
-            (uBooth && uBooth !== 'null' && uBooth !== 'undefined' && uBooth !== '[]') ||
-            uAssignedBooths.length > 0
-          );
-
-          if (!hasAssignedElectionScope) {
-            return jsonResponse({
-              data: [],
-              total: 0,
-              totalPages: 0,
-              page,
-              limit,
-              adminId: targetAdmin,
-              message: 'No regional scope assigned by Super Admin.'
-            });
-          }
 
           if (!stateId && !stateIds && uState && uState !== 'null') {
             stateIds = uState;
@@ -2789,46 +4128,93 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const binds: any[] = [];
 
         if (search) {
-          whereClauses.push('(v.name LIKE ? OR v.voter_id LIKE ? OR v.mobile LIKE ? OR v.house_no LIKE ? OR v.village LIKE ?)');
-          binds.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+          whereClauses.push('(v.name LIKE ? OR v.voter_id LIKE ? OR v.mobile LIKE ? OR v.house_no LIKE ? OR v.village LIKE ? OR v.address LIKE ?)');
+          binds.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
         }
 
         // Booth filtering
-        const allBoothIds = (boothIds ? boothIds.split(',') : (boothId && boothId !== 'all' ? [boothId] : [])).map(s => s.trim()).filter(Boolean);
+        const allBoothIds = (boothIds ? boothIds.split(',') : (boothId && boothId !== 'all' ? [boothId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allBoothIds.length > 0) {
           const placeholders = allBoothIds.map(() => '?').join(',');
-          whereClauses.push(`(v.booth_id IN (${placeholders}) OR b.id IN (${placeholders}))`);
-          binds.push(...allBoothIds, ...allBoothIds);
+          whereClauses.push(`(v.booth_id IN (${placeholders}) OR b.id IN (${placeholders}) OR b.booth_number IN (${placeholders}))`);
+          binds.push(...allBoothIds, ...allBoothIds, ...allBoothIds);
+        }
+
+        // Ward filtering
+        const allWardIds = (wardIds ? wardIds.split(',') : (wardId && wardId !== 'all' ? [wardId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
+        if (allWardIds.length > 0) {
+          const placeholders = allWardIds.map(() => '?').join(',');
+          whereClauses.push(`(v.ward_id IN (${placeholders}) OR b.ward_id IN (${placeholders}) OR w.id IN (${placeholders}) OR w.name IN (${placeholders}))`);
+          binds.push(...allWardIds, ...allWardIds, ...allWardIds, ...allWardIds);
+        }
+
+        // Panchayat filtering
+        const allPanchayatIds = (panchayatIds ? panchayatIds.split(',') : (panchayatId && panchayatId !== 'all' ? [panchayatId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
+        if (allPanchayatIds.length > 0) {
+          const placeholders = allPanchayatIds.map(() => '?').join(',');
+          whereClauses.push(`(v.panchayat_id IN (${placeholders}) OR w.panchayat_id IN (${placeholders}) OR b.panchayat_id IN (${placeholders}) OR p.id IN (${placeholders}) OR p.name IN (${placeholders}))`);
+          binds.push(...allPanchayatIds, ...allPanchayatIds, ...allPanchayatIds, ...allPanchayatIds, ...allPanchayatIds);
+        }
+
+        // Mandal (Block/Area) filtering
+        const allMandalIds = (mandalIds ? mandalIds.split(',') : (mandalId && mandalId !== 'all' ? [mandalId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
+        if (allMandalIds.length > 0) {
+          const placeholders = allMandalIds.map(() => '?').join(',');
+          whereClauses.push(`(v.mandal_id IN (${placeholders}) OR p.mandal_id IN (${placeholders}) OR w.mandal_id IN (${placeholders}) OR b.mandal_id IN (${placeholders}) OR m.id IN (${placeholders}) OR m.name IN (${placeholders}))`);
+          binds.push(...allMandalIds, ...allMandalIds, ...allMandalIds, ...allMandalIds, ...allMandalIds, ...allMandalIds);
         }
 
         // Constituency filtering
-        const allConstIds = (constituencyIds ? constituencyIds.split(',') : (constituencyId && constituencyId !== 'all' ? [constituencyId] : [])).map(s => s.trim()).filter(Boolean);
+        const allConstIds = (constituencyIds ? constituencyIds.split(',') : (constituencyId && constituencyId !== 'all' ? [constituencyId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allConstIds.length > 0) {
           const placeholders = allConstIds.map(() => '?').join(',');
-          whereClauses.push(`(v.constituency_id IN (${placeholders}) OR b.constituency_id IN (${placeholders}) OR c.id IN (${placeholders}))`);
-          binds.push(...allConstIds, ...allConstIds, ...allConstIds);
+          whereClauses.push(`(
+            v.constituency_id IN (${placeholders}) 
+            OR REPLACE(v.constituency_id, '.0', '') IN (${placeholders}) 
+            OR b.constituency_id IN (${placeholders}) 
+            OR REPLACE(b.constituency_id, '.0', '') IN (${placeholders}) 
+            OR c.id IN (${placeholders}) 
+            OR REPLACE(c.id, '.0', '') IN (${placeholders}) 
+            OR c.name IN (${placeholders})
+          )`);
+          binds.push(...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds);
         }
 
         // District filtering
-        const allDistIds = (districtIds ? districtIds.split(',') : (districtId && districtId !== 'all' ? [districtId] : [])).map(s => s.trim()).filter(Boolean);
+        const allDistIds = (districtIds ? districtIds.split(',') : (districtId && districtId !== 'all' ? [districtId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allDistIds.length > 0) {
           const placeholders = allDistIds.map(() => '?').join(',');
-          whereClauses.push(`(v.district_id IN (${placeholders}) OR c.district_id IN (${placeholders}) OR d.id IN (${placeholders}))`);
-          binds.push(...allDistIds, ...allDistIds, ...allDistIds);
+          whereClauses.push(`(
+            v.district_id IN (${placeholders}) 
+            OR REPLACE(v.district_id, '.0', '') IN (${placeholders}) 
+            OR c.district_id IN (${placeholders}) 
+            OR REPLACE(c.district_id, '.0', '') IN (${placeholders}) 
+            OR d.id IN (${placeholders}) 
+            OR REPLACE(d.id, '.0', '') IN (${placeholders}) 
+            OR d.name IN (${placeholders})
+          )`);
+          binds.push(...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds);
         }
 
         // State filtering
-        const allStateIds = (stateIds ? stateIds.split(',') : (stateId && stateId !== 'all' ? [stateId] : [])).map(s => s.trim()).filter(Boolean);
+        const allStateIds = (stateIds ? stateIds.split(',') : (stateId && stateId !== 'all' ? [stateId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allStateIds.length > 0) {
           const placeholders = allStateIds.map(() => '?').join(',');
-          whereClauses.push(`(v.state_id IN (${placeholders}) OR c.state_id IN (${placeholders}) OR d.state_id IN (${placeholders}) OR s.id IN (${placeholders}))`);
-          binds.push(...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds);
+          whereClauses.push(`(
+            v.state_id IN (${placeholders}) 
+            OR REPLACE(v.state_id, '.0', '') IN (${placeholders}) 
+            OR c.state_id IN (${placeholders}) 
+            OR REPLACE(c.state_id, '.0', '') IN (${placeholders}) 
+            OR d.state_id IN (${placeholders}) 
+            OR REPLACE(d.state_id, '.0', '') IN (${placeholders}) 
+            OR s.id IN (${placeholders}) 
+            OR REPLACE(s.id, '.0', '') IN (${placeholders}) 
+            OR s.name IN (${placeholders}) 
+            OR s.code IN (${placeholders})
+          )`);
+          binds.push(...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds);
         }
 
-        if (mandalId && mandalId !== 'all') {
-          whereClauses.push('v.mandal_id = ?');
-          binds.push(mandalId);
-        }
         if (gender && gender !== 'all') {
           whereClauses.push('v.gender = ?');
           binds.push(gender);
@@ -2847,12 +4233,20 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const selectSql = `
           SELECT 
             v.*,
-            COALESCE(v.booth_id, b.id) AS effective_booth_id,
-            COALESCE(v.constituency_id, b.constituency_id, c.id) AS effective_constituency_id,
-            COALESCE(v.district_id, c.district_id, d.id) AS effective_district_id,
-            COALESCE(v.state_id, d.state_id, c.state_id, s.id) AS effective_state_id,
+            COALESCE(v.vital_status, 'Active') AS vital_status,
+            COALESCE(b.id, v.booth_id) AS effective_booth_id,
+            COALESCE(w.id, v.ward_id, b.ward_id) AS effective_ward_id,
+            COALESCE(p.id, v.panchayat_id, w.panchayat_id, b.panchayat_id) AS effective_panchayat_id,
+            COALESCE(m.id, v.mandal_id, p.mandal_id, w.mandal_id, b.mandal_id) AS effective_mandal_id,
+            COALESCE(c.id, v.constituency_id, m.constituency_id, p.constituency_id, b.constituency_id) AS effective_constituency_id,
+            COALESCE(d.id, v.district_id, c.district_id, m.district_id) AS effective_district_id,
+            COALESCE(s.id, v.state_id, d.state_id, c.state_id, m.state_id) AS effective_state_id,
             b.name AS booth_name,
             b.booth_number,
+            w.name AS ward_name,
+            w.ward_number,
+            p.name AS panchayat_name,
+            m.name AS mandal_name,
             c.name AS constituency_name,
             d.name AS district_name,
             s.name AS state_name,
@@ -2870,13 +4264,34 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             va.is_karyakarta AS admin_is_karyakarta,
             va.voted AS admin_voted
           FROM voters v
-          LEFT JOIN booths b ON v.booth_id = b.id
-          LEFT JOIN constituencies c ON (v.constituency_id = c.id OR b.constituency_id = c.id)
-          LEFT JOIN districts d ON (v.district_id = d.id OR c.district_id = d.id)
-          LEFT JOIN states s ON (v.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id)
+          LEFT JOIN booths b ON (v.booth_id = b.id OR v.booth_id = b.booth_number OR (v.part_no IS NOT NULL AND v.part_no <> '' AND v.part_no = b.booth_number))
+          LEFT JOIN wards w ON (v.ward_id = w.id OR b.ward_id = w.id OR (v.village IS NOT NULL AND v.village <> '' AND w.name = v.village))
+          LEFT JOIN panchayats p ON (v.panchayat_id = p.id OR w.panchayat_id = p.id OR b.panchayat_id = p.id)
+          LEFT JOIN mandals m ON (v.mandal_id = m.id OR p.mandal_id = m.id OR w.mandal_id = m.id OR b.mandal_id = m.id)
+          LEFT JOIN constituencies c ON (
+            v.constituency_id = c.id 
+            OR REPLACE(v.constituency_id, '.0', '') = REPLACE(c.id, '.0', '') 
+            OR m.constituency_id = c.id 
+            OR b.constituency_id = c.id
+            OR REPLACE(b.constituency_id, '.0', '') = REPLACE(c.id, '.0', '')
+          )
+          LEFT JOIN districts d ON (
+            v.district_id = d.id 
+            OR REPLACE(v.district_id, '.0', '') = REPLACE(d.id, '.0', '')
+            OR c.district_id = d.id 
+            OR REPLACE(c.district_id, '.0', '') = REPLACE(d.id, '.0', '')
+            OR m.district_id = d.id
+          )
+          LEFT JOIN states s ON (
+            v.state_id = s.id 
+            OR REPLACE(v.state_id, '.0', '') = REPLACE(s.id, '.0', '')
+            OR d.state_id = s.id 
+            OR REPLACE(d.state_id, '.0', '') = REPLACE(s.id, '.0', '')
+            OR c.state_id = s.id 
+            OR m.state_id = s.id
+          )
           LEFT JOIN voter_assessments va ON va.id = (? || '_' || v.id)
           WHERE ${whereSql}
-          GROUP BY v.id
           ORDER BY v.created_at DESC
           LIMIT ? OFFSET ?
         `;
@@ -2884,10 +4299,32 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const countSql = `
           SELECT COUNT(*) as total 
           FROM voters v
-          LEFT JOIN booths b ON v.booth_id = b.id
-          LEFT JOIN constituencies c ON (v.constituency_id = c.id OR b.constituency_id = c.id)
-          LEFT JOIN districts d ON (v.district_id = d.id OR c.district_id = d.id)
-          LEFT JOIN states s ON (v.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id)
+          LEFT JOIN booths b ON (v.booth_id = b.id OR v.booth_id = b.booth_number OR (v.part_no IS NOT NULL AND v.part_no <> '' AND v.part_no = b.booth_number))
+          LEFT JOIN wards w ON (v.ward_id = w.id OR b.ward_id = w.id OR (v.village IS NOT NULL AND v.village <> '' AND w.name = v.village))
+          LEFT JOIN panchayats p ON (v.panchayat_id = p.id OR w.panchayat_id = p.id OR b.panchayat_id = p.id)
+          LEFT JOIN mandals m ON (v.mandal_id = m.id OR p.mandal_id = m.id OR w.mandal_id = m.id OR b.mandal_id = m.id)
+          LEFT JOIN constituencies c ON (
+            v.constituency_id = c.id 
+            OR REPLACE(v.constituency_id, '.0', '') = REPLACE(c.id, '.0', '') 
+            OR m.constituency_id = c.id 
+            OR b.constituency_id = c.id
+            OR REPLACE(b.constituency_id, '.0', '') = REPLACE(c.id, '.0', '')
+          )
+          LEFT JOIN districts d ON (
+            v.district_id = d.id 
+            OR REPLACE(v.district_id, '.0', '') = REPLACE(d.id, '.0', '')
+            OR c.district_id = d.id 
+            OR REPLACE(c.district_id, '.0', '') = REPLACE(d.id, '.0', '')
+            OR m.district_id = d.id
+          )
+          LEFT JOIN states s ON (
+            v.state_id = s.id 
+            OR REPLACE(v.state_id, '.0', '') = REPLACE(s.id, '.0', '')
+            OR d.state_id = s.id 
+            OR REPLACE(d.state_id, '.0', '') = REPLACE(s.id, '.0', '')
+            OR c.state_id = s.id 
+            OR m.state_id = s.id
+          )
           WHERE ${whereSql}
         `;
 
@@ -2966,8 +4403,18 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             booth_name: v.booth_name || '',
             boothNumber: v.booth_number || '',
             booth_number: v.booth_number || '',
-            mandalId: String(v.mandal_id || ''),
-            mandal_id: String(v.mandal_id || ''),
+            wardId: String(v.effective_ward_id || v.ward_id || ''),
+            ward_id: String(v.effective_ward_id || v.ward_id || ''),
+            wardName: v.ward_name || '',
+            ward_name: v.ward_name || '',
+            panchayatId: String(v.effective_panchayat_id || v.panchayat_id || ''),
+            panchayat_id: String(v.effective_panchayat_id || v.panchayat_id || ''),
+            panchayatName: v.panchayat_name || '',
+            panchayat_name: v.panchayat_name || '',
+            mandalId: String(v.effective_mandal_id || v.mandal_id || ''),
+            mandal_id: String(v.effective_mandal_id || v.mandal_id || ''),
+            mandalName: v.mandal_name || '',
+            mandal_name: v.mandal_name || '',
             constituencyId: String(v.effective_constituency_id || v.constituency_id || ''),
             constituency_id: String(v.effective_constituency_id || v.constituency_id || ''),
             constituencyName: v.constituency_name || '',
@@ -3074,36 +4521,133 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         const v: any = await request.json();
         const id = v.id || `vtr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        const voterEpic = v.voter_id || v.voterId || `EPIC${Date.now()}`;
+        const voterEpic = (v.voter_id || v.voterId || v.epic_number || v.epicNumber || '').toString().trim() || (`EPIC${Date.now()}${Math.random().toString(36).substring(2, 6).toUpperCase()}`);
 
         await env.DB.prepare(`
           INSERT INTO voters (
-            id, voter_id, name, relation_name, relation_type, gender, age, 
-            mobile, email, address, house_no, village, caste, occupation, voting_status, party_inclination, 
-            booth_id, constituency_id, mandal_id, is_karyakarta
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, voter_id, name, relation_name, relation_type, aadhar_number, gender, age, dob,
+            part_no, sr_no, mobile, additional_mobile, email, address, new_address, house_no, village, 
+            caste, occupation, education, voting_status, party_inclination, 
+            booth_id, constituency_id, mandal_id, state_id, district_id, is_karyakarta,
+            vital_status, death_date, death_notes, physical_profile, disability_category, disability_percent,
+            eci_assistance_needed, economic_category, income_range, land_ownership, ration_card_type, ration_card_no, housing_type
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(voter_id) DO UPDATE SET
+            name = excluded.name,
+            relation_name = excluded.relation_name,
+            relation_type = excluded.relation_type,
+            aadhar_number = excluded.aadhar_number,
+            gender = excluded.gender,
+            age = excluded.age,
+            dob = excluded.dob,
+            part_no = excluded.part_no,
+            sr_no = excluded.sr_no,
+            mobile = excluded.mobile,
+            additional_mobile = excluded.additional_mobile,
+            email = excluded.email,
+            address = excluded.address,
+            new_address = excluded.new_address,
+            house_no = excluded.house_no,
+            village = excluded.village,
+            caste = excluded.caste,
+            occupation = excluded.occupation,
+            education = excluded.education,
+            voting_status = excluded.voting_status,
+            party_inclination = excluded.party_inclination,
+            booth_id = excluded.booth_id,
+            constituency_id = excluded.constituency_id,
+            mandal_id = excluded.mandal_id,
+            state_id = excluded.state_id,
+            district_id = excluded.district_id,
+            is_karyakarta = excluded.is_karyakarta,
+            vital_status = excluded.vital_status,
+            death_date = excluded.death_date,
+            death_notes = excluded.death_notes,
+            physical_profile = excluded.physical_profile,
+            disability_category = excluded.disability_category,
+            disability_percent = excluded.disability_percent,
+            eci_assistance_needed = excluded.eci_assistance_needed,
+            economic_category = excluded.economic_category,
+            income_range = excluded.income_range,
+            land_ownership = excluded.land_ownership,
+            ration_card_type = excluded.ration_card_type,
+            ration_card_no = excluded.ration_card_no,
+            housing_type = excluded.housing_type,
+            updated_at = CURRENT_TIMESTAMP
         `).bind(
           id,
           voterEpic,
           v.name || '',
           v.relation_name || v.relationName || '',
           v.relation_type || v.relationType || '',
+          v.aadhar_number || v.aadharNumber || null,
           v.gender || 'Male',
           parseInt(v.age) || 30,
+          v.dob || null,
+          v.part_no || v.partNo || '',
+          v.sr_no || v.srNo || '',
           v.mobile || '',
+          v.additional_mobile || v.additionalMobile || null,
           v.email || '',
           v.address || '',
+          v.new_address || v.newAddress || null,
           v.house_no || v.houseNo || '',
           v.village || '',
           v.caste || '',
           v.occupation || '',
+          v.education || 'Unspecified',
           v.voting_status || v.votingStatus || 'unvoted',
           v.party_inclination || v.partyInclination || '',
           v.booth_id || v.boothId || '',
           v.constituency_id || v.constituencyId || '',
           v.mandal_id || v.mandalId || null,
-          v.is_karyakarta || v.isKaryakarta ? 1 : 0
+          v.state_id || v.stateId || null,
+          v.district_id || v.districtId || null,
+          v.is_karyakarta || v.isKaryakarta ? 1 : 0,
+          v.vitalStatus || v.vital_status || 'Active',
+          v.deathDate || v.death_date || null,
+          v.deathNotes || v.death_notes || null,
+          v.physicalProfile || v.physical_profile || 'General',
+          v.disabilityCategory || v.disability_category || 'None',
+          v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : 0,
+          v.eciAssistanceNeeded ? 1 : 0,
+          v.economicCategory || v.economic_category || 'APL',
+          v.incomeRange || v.income_range || '₹15,000 - ₹30,000',
+          v.landOwnership || v.land_ownership || 'Small Farmer',
+          v.rationCardType || v.ration_card_type || null,
+          v.rationCardNo || v.ration_card_no || null,
+          v.housingType || v.housing_type || null
         ).run();
+
+        // Insert into dedicated voter_health_economy table
+        await env.DB.prepare(`
+          INSERT INTO voter_health_economy (
+            id, voter_doc_id, voter_epic, aadhar_number, vital_status, death_date, death_notes,
+            physical_profile, disability_category, disability_percent, eci_assistance_needed,
+            economic_category, income_range, land_ownership, ration_card_type, ration_card_no, housing_type,
+            recorded_by, recorded_by_name
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          `vhe_${id}`,
+          id,
+          voterEpic,
+          v.aadhar_number || v.aadharNumber || null,
+          v.vitalStatus || v.vital_status || 'Active',
+          v.deathDate || v.death_date || null,
+          v.deathNotes || v.death_notes || null,
+          v.physicalProfile || v.physical_profile || 'General',
+          v.disabilityCategory || v.disability_category || 'None',
+          v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : 0,
+          v.eciAssistanceNeeded ? 1 : 0,
+          v.economicCategory || v.economic_category || 'APL',
+          v.incomeRange || v.income_range || '₹15,000 - ₹30,000',
+          v.landOwnership || v.land_ownership || 'Small Farmer',
+          v.rationCardType || v.ration_card_type || null,
+          v.rationCardNo || v.ration_card_no || null,
+          v.housingType || v.housing_type || null,
+          adminCtx.userId,
+          adminCtx.user?.name || adminCtx.user?.username || 'Staff'
+        ).run().catch(() => {});
 
         // Upsert admin assessment overlay
         const assessmentId = `${adminCtx.adminId}_${id}`;
@@ -3160,6 +4704,16 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const voterList: any[] = b.voters || [];
         let count = 0;
 
+        // Ensure columns exist in voters table
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN panchayat_id TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN ward_id TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN mandal_id TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN constituency_id TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN district_id TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN state_id TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN part_no TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN sr_no TEXT`).run().catch(() => {});
+
         for (const v of voterList) {
           const epic = (v.voter_id || v.voterId || v.epic || '').trim().toUpperCase();
           if (!epic) continue;
@@ -3169,14 +4723,33 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             INSERT INTO voters (
               id, voter_id, name, relation_name, relation_type, gender, age, 
               mobile, email, address, house_no, village, caste, occupation, voting_status, party_inclination, 
-              booth_id, constituency_id, mandal_id, is_karyakarta
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              booth_id, constituency_id, mandal_id, panchayat_id, ward_id, state_id, district_id, part_no, sr_no, is_karyakarta
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(voter_id) DO UPDATE SET
               name = excluded.name,
+              relation_name = excluded.relation_name,
+              relation_type = excluded.relation_type,
+              gender = excluded.gender,
+              age = excluded.age,
               mobile = excluded.mobile,
+              email = excluded.email,
+              address = excluded.address,
+              house_no = excluded.house_no,
+              village = excluded.village,
               caste = excluded.caste,
+              occupation = excluded.occupation,
+              voting_status = excluded.voting_status,
+              party_inclination = excluded.party_inclination,
               booth_id = excluded.booth_id,
-              constituency_id = excluded.constituency_id
+              constituency_id = excluded.constituency_id,
+              mandal_id = excluded.mandal_id,
+              panchayat_id = excluded.panchayat_id,
+              ward_id = excluded.ward_id,
+              state_id = excluded.state_id,
+              district_id = excluded.district_id,
+              part_no = excluded.part_no,
+              sr_no = excluded.sr_no,
+              is_karyakarta = excluded.is_karyakarta
           `).bind(
             id,
             epic,
@@ -3189,7 +4762,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             v.email || '',
             v.address || '',
             v.house_no || v.houseNo || '',
-            v.village || '',
+            v.village || v.ward_name || '',
             v.caste || '',
             v.occupation || '',
             v.voting_status || v.votingStatus || 'unvoted',
@@ -3197,6 +4770,12 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             v.booth_id || v.boothId || '',
             v.constituency_id || v.constituencyId || '',
             v.mandal_id || v.mandalId || null,
+            v.panchayat_id || v.panchayatId || null,
+            v.ward_id || v.wardId || null,
+            v.state_id || v.stateId || null,
+            v.district_id || v.districtId || null,
+            v.part_no || v.partNo || '',
+            v.sr_no || v.srNo || '',
             v.is_karyakarta || v.isKaryakarta ? 1 : 0
           ).run();
           count++;
@@ -3218,37 +4797,120 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             SET name = COALESCE(?, name),
                 relation_name = COALESCE(?, relation_name),
                 relation_type = COALESCE(?, relation_type),
+                aadhar_number = COALESCE(?, aadhar_number),
                 gender = COALESCE(?, gender),
                 age = COALESCE(?, age),
+                dob = COALESCE(?, dob),
                 mobile = COALESCE(?, mobile),
+                additional_mobile = COALESCE(?, additional_mobile),
                 email = COALESCE(?, email),
                 address = COALESCE(?, address),
+                new_address = COALESCE(?, new_address),
                 house_no = COALESCE(?, house_no),
                 village = COALESCE(?, village),
                 caste = COALESCE(?, caste),
                 occupation = COALESCE(?, occupation),
+                education = COALESCE(?, education),
                 booth_id = COALESCE(?, booth_id),
                 constituency_id = COALESCE(?, constituency_id),
+                vital_status = COALESCE(?, vital_status),
+                death_date = COALESCE(?, death_date),
+                death_notes = COALESCE(?, death_notes),
+                physical_profile = COALESCE(?, physical_profile),
+                disability_category = COALESCE(?, disability_category),
+                disability_percent = COALESCE(?, disability_percent),
+                eci_assistance_needed = COALESCE(?, eci_assistance_needed),
+                economic_category = COALESCE(?, economic_category),
+                income_range = COALESCE(?, income_range),
+                land_ownership = COALESCE(?, land_ownership),
+                ration_card_type = COALESCE(?, ration_card_type),
+                ration_card_no = COALESCE(?, ration_card_no),
+                housing_type = COALESCE(?, housing_type),
                 updated_at = CURRENT_TIMESTAMP
             WHERE id = ? OR voter_id = ?
           `).bind(
             v.name !== undefined ? v.name : null,
             v.relation_name !== undefined ? v.relation_name : (v.relationName !== undefined ? v.relationName : null),
             v.relation_type !== undefined ? v.relation_type : (v.relationType !== undefined ? v.relationType : null),
+            v.aadhar_number !== undefined ? v.aadhar_number : (v.aadharNumber !== undefined ? v.aadharNumber : null),
             v.gender !== undefined ? v.gender : null,
             v.age !== undefined ? parseInt(v.age) : null,
+            v.dob !== undefined ? v.dob : null,
             v.mobile !== undefined ? v.mobile : null,
+            v.additional_mobile !== undefined ? v.additional_mobile : (v.additionalMobile !== undefined ? v.additionalMobile : null),
             v.email !== undefined ? v.email : null,
             v.address !== undefined ? v.address : null,
+            v.new_address !== undefined ? v.new_address : (v.newAddress !== undefined ? v.newAddress : null),
             v.house_no !== undefined ? v.house_no : (v.houseNo !== undefined ? v.houseNo : null),
             v.village !== undefined ? v.village : null,
             v.caste !== undefined ? v.caste : null,
             v.occupation !== undefined ? v.occupation : null,
+            v.education !== undefined ? v.education : null,
             v.booth_id !== undefined ? v.booth_id : (v.boothId !== undefined ? v.boothId : null),
             v.constituency_id !== undefined ? v.constituency_id : (v.constituencyId !== undefined ? v.constituencyId : null),
+            v.vital_status !== undefined ? v.vital_status : (v.vitalStatus !== undefined ? v.vitalStatus : null),
+            v.death_date !== undefined ? v.death_date : (v.deathDate !== undefined ? v.deathDate : null),
+            v.death_notes !== undefined ? v.death_notes : (v.deathNotes !== undefined ? v.deathNotes : null),
+            v.physical_profile !== undefined ? v.physical_profile : (v.physicalProfile !== undefined ? v.physicalProfile : null),
+            v.disability_category !== undefined ? v.disability_category : (v.disabilityCategory !== undefined ? v.disabilityCategory : null),
+            v.disability_percent !== undefined ? Number(v.disability_percent) : (v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : null),
+            v.eci_assistance_needed !== undefined ? (v.eci_assistance_needed ? 1 : 0) : (v.eciAssistanceNeeded !== undefined ? (v.eciAssistanceNeeded ? 1 : 0) : null),
+            v.economic_category !== undefined ? v.economic_category : (v.economicCategory !== undefined ? v.economicCategory : null),
+            v.income_range !== undefined ? v.income_range : (v.incomeRange !== undefined ? v.incomeRange : null),
+            v.land_ownership !== undefined ? v.land_ownership : (v.landOwnership !== undefined ? v.landOwnership : null),
+            v.ration_card_type !== undefined ? v.ration_card_type : (v.rationCardType !== undefined ? v.rationCardType : null),
+            v.ration_card_no !== undefined ? v.ration_card_no : (v.rationCardNo !== undefined ? v.rationCardNo : null),
+            v.housing_type !== undefined ? v.housing_type : (v.housingType !== undefined ? v.housingType : null),
             id,
             id
           ).run();
+
+          // Upsert into dedicated voter_health_economy table
+          await env.DB.prepare(`
+            INSERT INTO voter_health_economy (
+              id, voter_doc_id, voter_epic, aadhar_number, vital_status, death_date, death_notes,
+              physical_profile, disability_category, disability_percent, eci_assistance_needed,
+              economic_category, income_range, land_ownership, ration_card_type, ration_card_no, housing_type,
+              recorded_by, recorded_by_name
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              vital_status = COALESCE(excluded.vital_status, vital_status),
+              death_date = COALESCE(excluded.death_date, death_date),
+              death_notes = COALESCE(excluded.death_notes, death_notes),
+              physical_profile = COALESCE(excluded.physical_profile, physical_profile),
+              disability_category = COALESCE(excluded.disability_category, disability_category),
+              disability_percent = COALESCE(excluded.disability_percent, disability_percent),
+              eci_assistance_needed = COALESCE(excluded.eci_assistance_needed, eci_assistance_needed),
+              economic_category = COALESCE(excluded.economic_category, economic_category),
+              income_range = COALESCE(excluded.income_range, income_range),
+              land_ownership = COALESCE(excluded.land_ownership, land_ownership),
+              ration_card_type = COALESCE(excluded.ration_card_type, ration_card_type),
+              ration_card_no = COALESCE(excluded.ration_card_no, ration_card_no),
+              housing_type = COALESCE(excluded.housing_type, housing_type),
+              recorded_by = excluded.recorded_by,
+              recorded_by_name = excluded.recorded_by_name,
+              updated_at = CURRENT_TIMESTAMP
+          `).bind(
+            `vhe_${id}`,
+            id,
+            v.voter_id || v.voterId || id,
+            v.aadhar_number || v.aadharNumber || null,
+            v.vitalStatus || v.vital_status || 'Active',
+            v.deathDate || v.death_date || null,
+            v.deathNotes || v.death_notes || null,
+            v.physicalProfile || v.physical_profile || 'General',
+            v.disabilityCategory || v.disability_category || 'None',
+            v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : 0,
+            v.eciAssistanceNeeded !== undefined ? (v.eciAssistanceNeeded ? 1 : 0) : null,
+            v.economicCategory || v.economic_category || 'APL',
+            v.incomeRange || v.income_range || '₹15,000 - ₹30,000',
+            v.landOwnership || v.land_ownership || 'Small Farmer',
+            v.rationCardType || v.ration_card_type || null,
+            v.rationCardNo || v.ration_card_no || null,
+            v.housingType || v.housing_type || null,
+            adminCtx.userId,
+            adminCtx.user?.name || adminCtx.user?.username || 'Staff'
+          ).run().catch(() => {});
         }
 
         // Upsert admin private assessment overlay (health, economy, sentiment, notes)
@@ -3319,6 +4981,181 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         await env.DB.prepare('DELETE FROM voters WHERE id = ? OR voter_id = ?').bind(id, id).run();
         await env.DB.prepare('DELETE FROM voter_assessments WHERE voter_id = ? OR id LIKE ?').bind(id, `%_${id}`).run().catch(() => {});
         return jsonResponse({ success: true, id });
+      }
+
+      // ------------------------------------------------------------------------
+      // 13.5 BROADCAST FEED LINKS (WhatsApp Extension Live Feed)
+      // ------------------------------------------------------------------------
+
+      if (pathname === '/api/broadcast-links' && method === 'POST') {
+        const b: any = await request.json();
+        const id = `bfl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const token = `wa_${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 8)}`;
+        const expHours = parseInt(b.expiryHours || 24);
+        const expiresAt = expHours > 0 ? new Date(Date.now() + expHours * 3600000).toISOString() : null;
+
+        await env.DB.prepare(`
+          INSERT INTO broadcast_feed_links (id, token, title, filter_criteria, columns, expiry_hours, expires_at, created_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          id,
+          token,
+          b.title || 'WhatsApp Voter Broadcast',
+          typeof b.filterCriteria === 'string' ? b.filterCriteria : JSON.stringify(b.filterCriteria || {}),
+          typeof b.columns === 'string' ? b.columns : JSON.stringify(b.columns || ['phone', 'name', 'relation_name', 'relation_type', 'epic_no', 'house_no', 'ward_name']),
+          expHours,
+          expiresAt,
+          adminCtx.userId
+        ).run().catch(async () => {
+          await env.DB.prepare(`
+            CREATE TABLE IF NOT EXISTS broadcast_feed_links (
+              id TEXT PRIMARY KEY,
+              token TEXT UNIQUE NOT NULL,
+              title TEXT NOT NULL,
+              filter_criteria TEXT NOT NULL,
+              columns TEXT NOT NULL,
+              expiry_hours INTEGER DEFAULT 24,
+              expires_at TEXT,
+              created_by TEXT,
+              created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+          `).run();
+          await env.DB.prepare(`
+            INSERT INTO broadcast_feed_links (id, token, title, filter_criteria, columns, expiry_hours, expires_at, created_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          `).bind(
+            id,
+            token,
+            b.title || 'WhatsApp Voter Broadcast',
+            typeof b.filterCriteria === 'string' ? b.filterCriteria : JSON.stringify(b.filterCriteria || {}),
+            typeof b.columns === 'string' ? b.columns : JSON.stringify(b.columns || ['phone', 'name', 'relation_name', 'relation_type', 'epic_no', 'house_no', 'ward_name']),
+            expHours,
+            expiresAt,
+            adminCtx.userId
+          ).run();
+        });
+
+        return jsonResponse({
+          success: true,
+          id,
+          token,
+          title: b.title || 'WhatsApp Voter Broadcast',
+          expiresAt,
+          url: `/broadcast-feed/${token}`
+        });
+      }
+
+      if (pathname === '/api/broadcast-links' && method === 'GET') {
+        const rows = await env.DB.prepare(`
+          SELECT * FROM broadcast_feed_links ORDER BY created_at DESC
+        `).all<any>().catch(() => ({ results: [] }));
+
+        const activeLinks = (rows?.results || []).map((l: any) => ({
+          id: l.id,
+          token: l.token,
+          title: l.title,
+          filterCriteria: typeof l.filter_criteria === 'string' ? JSON.parse(l.filter_criteria || '{}') : l.filter_criteria,
+          columns: typeof l.columns === 'string' ? JSON.parse(l.columns || '[]') : l.columns,
+          expiryHours: l.expiry_hours,
+          expiresAt: l.expires_at,
+          isExpired: l.expires_at ? new Date(l.expires_at).getTime() < Date.now() : false,
+          createdAt: l.created_at,
+          createdBy: l.created_by
+        }));
+
+        return jsonResponse(activeLinks);
+      }
+
+      if (pathname.startsWith('/api/broadcast-links/') && method === 'DELETE') {
+        const idOrToken = pathname.substring('/api/broadcast-links/'.length);
+        await env.DB.prepare(`
+          DELETE FROM broadcast_feed_links WHERE id = ? OR token = ?
+        `).bind(idOrToken, idOrToken).run().catch(() => {});
+        return jsonResponse({ success: true, message: 'Broadcast link revoked.' });
+      }
+
+      if (pathname.startsWith('/api/broadcast-feed/') && method === 'GET') {
+        const token = pathname.substring('/api/broadcast-feed/'.length);
+        const link = await env.DB.prepare(`
+          SELECT * FROM broadcast_feed_links WHERE token = ?
+        `).bind(token).first<any>();
+
+        if (!link) {
+          return jsonResponse({ error: 'Broadcast feed link not found or expired.' }, 404);
+        }
+
+        if (link.expires_at && new Date(link.expires_at).getTime() < Date.now()) {
+          return jsonResponse({ error: 'This broadcast feed link has expired.' }, 410);
+        }
+
+        const filters = typeof link.filter_criteria === 'string' ? JSON.parse(link.filter_criteria || '{}') : (link.filter_criteria || {});
+        const selectedColumns = typeof link.columns === 'string' ? JSON.parse(link.columns || '[]') : (link.columns || []);
+
+        let sql = `SELECT v.*, b.name as booth_name, b.boothNumber as booth_number FROM voters v LEFT JOIN booths b ON v.booth_id = b.id WHERE (v.mobile IS NOT NULL AND LENGTH(v.mobile) >= 8)`;
+        const binds: any[] = [];
+
+        if (filters.boothIds && filters.boothIds.length > 0) {
+          sql += ` AND v.booth_id IN (${filters.boothIds.map(() => '?').join(',')})`;
+          binds.push(...filters.boothIds);
+        }
+        if (filters.constituencyIds && filters.constituencyIds.length > 0) {
+          sql += ` AND v.constituency_id IN (${filters.constituencyIds.map(() => '?').join(',')})`;
+          binds.push(...filters.constituencyIds);
+        }
+        if (filters.gender && filters.gender !== 'all') {
+          sql += ` AND LOWER(v.gender) = LOWER(?)`;
+          binds.push(filters.gender);
+        }
+        if (filters.caste && filters.caste !== 'all') {
+          sql += ` AND LOWER(v.caste) = LOWER(?)`;
+          binds.push(filters.caste);
+        }
+        if (filters.search && String(filters.search).trim()) {
+          sql += ` AND (v.name LIKE ? OR v.voter_id LIKE ? OR v.mobile LIKE ?)`;
+          const s = `%${String(filters.search).trim()}%`;
+          binds.push(s, s, s);
+        }
+
+        sql += ` ORDER BY v.name ASC`;
+        const res = await env.DB.prepare(sql).bind(...binds).all<any>();
+        const voters = res?.results || [];
+
+        const recipients = voters.map((v: any) => {
+          let cleanPhone = String(v.mobile || '').replace(/\D/g, '');
+          if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+          else if (cleanPhone.length > 10 && cleanPhone.startsWith('0')) cleanPhone = `91${cleanPhone.substring(1)}`;
+
+          return {
+            phone: cleanPhone,
+            name: v.name || '',
+            relation_name: v.relation_name || '',
+            relation_type: v.relation_type || 'Father',
+            epic_no: v.voter_id || '',
+            house_no: v.house_no || '',
+            ward_name: v.ward_name || v.village || '',
+            booth_name: v.booth_name ? `${v.booth_number ? `#${v.booth_number} ` : ''}${v.booth_name}` : '',
+            age: v.age || '',
+            gender: v.gender || '',
+            caste: v.caste || '',
+            part_no: v.part_no || '',
+            sr_no: v.sr_no || '',
+            occupation: v.occupation || '',
+            voting_status: v.voting_status || 'unvoted',
+            party_inclination: v.party_inclination || 'Neutral',
+            is_karyakarta: v.is_karyakarta === 1 ? 'Yes' : 'No'
+          };
+        }).filter((r: any) => r.phone && r.phone.length >= 10);
+
+        return jsonResponse({
+          success: true,
+          title: link.title,
+          token,
+          totalCount: recipients.length,
+          columns: selectedColumns.length > 0 ? selectedColumns : ['phone', 'name', 'relation_name', 'relation_type', 'epic_no', 'house_no', 'ward_name'],
+          expiresAt: link.expires_at,
+          createdAt: link.created_at,
+          recipients
+        });
       }
 
       // ------------------------------------------------------------------------

@@ -69,18 +69,58 @@ CREATE INDEX IF NOT EXISTS idx_mandal_members_mandal_cat ON mandal_members(manda
 CREATE INDEX IF NOT EXISTS idx_mandal_members_admin ON mandal_members(admin_id);
 CREATE INDEX IF NOT EXISTS idx_mandal_members_mandal ON mandal_members(mandal_id);
 
+CREATE TABLE IF NOT EXISTS panchayats (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    code TEXT,
+    type TEXT DEFAULT 'Gram Panchayat',
+    mandal_id TEXT,
+    constituency_id TEXT,
+    district_id TEXT,
+    state_id TEXT,
+    population INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_panchayats_mandal ON panchayats(mandal_id);
+CREATE INDEX IF NOT EXISTS idx_panchayats_constituency ON panchayats(constituency_id);
+CREATE INDEX IF NOT EXISTS idx_panchayats_district ON panchayats(district_id);
+CREATE INDEX IF NOT EXISTS idx_panchayats_state ON panchayats(state_id);
+
+CREATE TABLE IF NOT EXISTS wards (
+    id TEXT NOT NULL PRIMARY KEY,
+    name TEXT NOT NULL,
+    ward_number TEXT,
+    type TEXT DEFAULT 'Ward',
+    panchayat_id TEXT,
+    mandal_id TEXT,
+    constituency_id TEXT,
+    district_id TEXT,
+    state_id TEXT,
+    population INTEGER DEFAULT 0,
+    total_voters INTEGER DEFAULT 0,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_wards_panchayat ON wards(panchayat_id);
+CREATE INDEX IF NOT EXISTS idx_wards_mandal ON wards(mandal_id);
+CREATE INDEX IF NOT EXISTS idx_wards_constituency ON wards(constituency_id);
+
 CREATE TABLE IF NOT EXISTS booths (
     id TEXT NOT NULL PRIMARY KEY,
     booth_number TEXT NOT NULL,
+    booth_label TEXT,
     name TEXT NOT NULL,
     constituency_id TEXT NOT NULL,
     mandal_id TEXT,
+    panchayat_id TEXT,
+    ward_id TEXT,
     total_voters INTEGER DEFAULT 0,
     address TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_booths_constituency ON booths(constituency_id);
 CREATE INDEX IF NOT EXISTS idx_booths_mandal ON booths(mandal_id);
+CREATE INDEX IF NOT EXISTS idx_booths_panchayat ON booths(panchayat_id);
+CREATE INDEX IF NOT EXISTS idx_booths_ward ON booths(ward_id);
 CREATE INDEX IF NOT EXISTS idx_booths_number ON booths(booth_number);
 CREATE INDEX IF NOT EXISTS idx_booths_const_num ON booths(constituency_id, booth_number);
 
@@ -118,17 +158,22 @@ CREATE TABLE IF NOT EXISTS voters (
     name TEXT NOT NULL,
     relation_name TEXT,
     relation_type TEXT,
+    aadhar_number TEXT,
     gender TEXT,
     age INTEGER,
+    dob TEXT,
     part_no TEXT,
     sr_no TEXT,
     mobile TEXT,
+    additional_mobile TEXT,
     email TEXT,
     address TEXT,
+    new_address TEXT,
     house_no TEXT,
     village TEXT,
     caste TEXT,
     occupation TEXT,
+    education TEXT,
     is_karyakarta INTEGER NOT NULL DEFAULT 0,
     voting_status TEXT DEFAULT 'unvoted',
     party_inclination TEXT,
@@ -137,10 +182,24 @@ CREATE TABLE IF NOT EXISTS voters (
     constituency_id TEXT NOT NULL,
     state_id TEXT,
     district_id TEXT,
+    vital_status TEXT DEFAULT 'Active',
+    death_date TEXT,
+    death_notes TEXT,
+    physical_profile TEXT DEFAULT 'General',
+    disability_category TEXT DEFAULT 'None',
+    disability_percent INTEGER DEFAULT 0,
+    eci_assistance_needed INTEGER DEFAULT 0,
+    economic_category TEXT DEFAULT 'APL',
+    income_range TEXT DEFAULT '₹15,000 - ₹30,000',
+    land_ownership TEXT DEFAULT 'Small Farmer',
+    ration_card_type TEXT,
+    ration_card_no TEXT,
+    housing_type TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME
 );
 CREATE INDEX IF NOT EXISTS idx_voters_epic ON voters(voter_id);
+CREATE INDEX IF NOT EXISTS idx_voters_aadhar ON voters(aadhar_number);
 CREATE INDEX IF NOT EXISTS idx_voters_constituency ON voters(constituency_id);
 CREATE INDEX IF NOT EXISTS idx_voters_booth ON voters(booth_id);
 CREATE INDEX IF NOT EXISTS idx_voters_district ON voters(district_id);
@@ -150,9 +209,41 @@ CREATE INDEX IF NOT EXISTS idx_voters_mobile ON voters(mobile);
 CREATE INDEX IF NOT EXISTS idx_voters_gender ON voters(gender);
 CREATE INDEX IF NOT EXISTS idx_voters_caste ON voters(caste);
 CREATE INDEX IF NOT EXISTS idx_voters_status ON voters(voting_status);
+CREATE INDEX IF NOT EXISTS idx_voters_vital ON voters(vital_status);
 CREATE INDEX IF NOT EXISTS idx_voters_karyakarta ON voters(is_karyakarta);
 CREATE INDEX IF NOT EXISTS idx_voters_created ON voters(created_at);
 CREATE INDEX IF NOT EXISTS idx_voters_const_booth ON voters(constituency_id, booth_id);
+
+-- Dedicated Health & Economic Intelligence Table
+CREATE TABLE IF NOT EXISTS voter_health_economy (
+    id TEXT NOT NULL PRIMARY KEY,
+    voter_doc_id TEXT NOT NULL,
+    voter_epic TEXT NOT NULL,
+    aadhar_number TEXT,
+    vital_status TEXT DEFAULT 'Active',
+    death_date TEXT,
+    death_notes TEXT,
+    physical_profile TEXT DEFAULT 'General',
+    disability_category TEXT DEFAULT 'None',
+    disability_percent INTEGER DEFAULT 0,
+    eci_assistance_needed INTEGER DEFAULT 0,
+    health_notes TEXT,
+    economic_category TEXT DEFAULT 'APL',
+    income_range TEXT DEFAULT '₹15,000 - ₹30,000',
+    land_ownership TEXT DEFAULT 'Small Farmer',
+    ration_card_type TEXT,
+    ration_card_no TEXT,
+    housing_type TEXT,
+    occupation_detail TEXT,
+    recorded_by TEXT,
+    recorded_by_name TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_voter_health_econ_doc ON voter_health_economy(voter_doc_id);
+CREATE INDEX IF NOT EXISTS idx_voter_health_econ_epic ON voter_health_economy(voter_epic);
+CREATE INDEX IF NOT EXISTS idx_voter_health_econ_aadhar ON voter_health_economy(aadhar_number);
+
 
 -- 4. Election Cycles & Political Parties
 CREATE TABLE IF NOT EXISTS elections (
@@ -396,6 +487,20 @@ CREATE TABLE IF NOT EXISTS whatsapp_broadcast_logs (
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_wa_broadcast_admin ON whatsapp_broadcast_logs(admin_id);
+
+CREATE TABLE IF NOT EXISTS broadcast_feed_links (
+    id TEXT NOT NULL PRIMARY KEY,
+    token TEXT UNIQUE NOT NULL,
+    title TEXT NOT NULL,
+    filter_criteria TEXT NOT NULL,
+    columns TEXT NOT NULL,
+    expiry_hours INTEGER DEFAULT 24,
+    expires_at DATETIME,
+    created_by TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_broadcast_token ON broadcast_feed_links(token);
+CREATE INDEX IF NOT EXISTS idx_broadcast_created_by ON broadcast_feed_links(created_by);
 
 -- ============================================================================
 -- 10. Seed Initial Data (Owner Super Admin & Defaults)

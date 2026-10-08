@@ -25,7 +25,9 @@ import {
   UserCheck,
   Star,
   Network,
-  Building2
+  Building2,
+  LayoutGrid,
+  List
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
@@ -200,6 +202,7 @@ export default function MandalManagement() {
   const [filterState, setFilterState] = useState('all');
   const [filterDistrict, setFilterDistrict] = useState('all');
   const [filterConstituency, setFilterConstituency] = useState('all');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
 
   // Modal / Form state
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -914,22 +917,24 @@ export default function MandalManagement() {
 
                             {/* Remove button */}
                             {canUpdate && (
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center gap-1.5">
                                 <button
                                   id={`edit-member-btn-${member.id}`}
                                   onClick={() => openMemberModal(activeCat.key, member)}
-                                  className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 rounded-lg transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                   title="Edit member designation/phone"
                                 >
-                                  <Edit2 className="h-3.5 w-3.5" />
+                                  <Edit2 className="h-3 w-3" />
+                                  <span>Edit</span>
                                 </button>
                                 <button
                                   id={`remove-member-btn-${member.id}`}
                                   onClick={() => handleDeleteMember(member.id)}
-                                  className="p-1.5 hover:bg-rose-50 dark:hover:bg-rose-950/20 text-zinc-400 hover:text-rose-600 dark:hover:text-rose-400 rounded-lg transition-colors"
+                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                   title="Remove from list"
                                 >
-                                  <X className="h-3.5 w-3.5" />
+                                  <Trash2 className="h-3 w-3" />
+                                  <span>Delete</span>
                                 </button>
                               </div>
                             )}
@@ -1198,29 +1203,29 @@ export default function MandalManagement() {
       </div>
 
       {/* Filter Section */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3 rounded-xl shadow-xs flex flex-col md:flex-row gap-3">
-        <div className="relative flex-1">
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-3 rounded-xl shadow-xs flex flex-col md:flex-row gap-3 items-center justify-between">
+        <div className="relative flex-1 w-full">
           <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
           <input
             id="search-input"
             type="text"
-            placeholder="Search mandals..."
+            placeholder="Search mandals by name, code, president..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-8 pr-3 py-1.5 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-xs text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-1 focus:ring-zinc-400"
           />
         </div>
-        <div className="flex flex-wrap gap-3 items-center">
+        <div className="flex flex-wrap gap-2.5 items-center w-full md:w-auto">
           {/* Super Admin: Admin Selector */}
           {isSuperAdmin && (
             <select
               id="admin-filter"
               value={adminFilter}
               onChange={(e) => setAdminFilter(e.target.value)}
-              className="px-3 py-2 border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/40 rounded-lg text-sm font-bold text-blue-700 dark:text-blue-300 focus:outline-none max-w-[220px] truncate"
+              className="px-3 py-1.5 border border-blue-200 dark:border-blue-900/60 bg-blue-50/50 dark:bg-blue-950/40 rounded-lg text-xs font-bold text-blue-700 dark:text-blue-300 focus:outline-none max-w-[200px] truncate"
               title="Filter Mandals by Admin Scope"
             >
-              <option value="All">👑 All Admins (Global Mandals)</option>
+              <option value="All">👑 All Admins</option>
               {admins.map(a => (
                 <option key={a.id || a.uid} value={String(a.id || a.uid)}>
                   Admin: {a.name || a.username || a.email}
@@ -1233,7 +1238,7 @@ export default function MandalManagement() {
             id="state-filter"
             value={filterState}
             onChange={(e) => { setFilterState(e.target.value); setFilterDistrict('all'); setFilterConstituency('all'); }}
-            className="px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none"
+            className="px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none"
           >
             <option value="all">All States</option>
             {states.map(s => (
@@ -1245,7 +1250,7 @@ export default function MandalManagement() {
             id="district-filter"
             value={filterDistrict}
             onChange={(e) => { setFilterDistrict(e.target.value); setFilterConstituency('all'); }}
-            className="px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none"
+            className="px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none"
             disabled={filterState === 'all'}
           >
             <option value="all">All Districts</option>
@@ -1258,7 +1263,7 @@ export default function MandalManagement() {
             id="constituency-filter"
             value={filterConstituency}
             onChange={(e) => setFilterConstituency(e.target.value)}
-            className="px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-sm text-zinc-700 dark:text-zinc-300 focus:outline-none"
+            className="px-3 py-1.5 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 rounded-lg text-xs text-zinc-700 dark:text-zinc-300 focus:outline-none"
             disabled={filterDistrict === 'all'}
           >
             <option value="all">All Constituencies</option>
@@ -1266,10 +1271,30 @@ export default function MandalManagement() {
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
+
+          {/* View Mode Toggle: Table Rows vs Cards */}
+          <div className="flex bg-zinc-100 dark:bg-zinc-800 p-0.5 rounded-lg border border-zinc-200 dark:border-zinc-700 shrink-0">
+            <button
+              type="button"
+              onClick={() => setViewMode('table')}
+              className={`p-1.5 rounded-md transition-all cursor-pointer ${viewMode === 'table' ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-xs' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+              title="Row / Table View"
+            >
+              <List className="h-4 w-4" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('cards')}
+              className={`p-1.5 rounded-md transition-all cursor-pointer ${viewMode === 'cards' ? 'bg-white dark:bg-zinc-700 text-blue-600 dark:text-blue-400 shadow-xs' : 'text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300'}`}
+              title="Card Grid View"
+            >
+              <LayoutGrid className="h-4 w-4" />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Mandal Roster Grid */}
+      {/* Mandal List Rendering */}
       {loading ? (
         <div className="flex justify-center items-center py-24">
           <Loader2 className="h-8 w-8 text-zinc-400 animate-spin" />
@@ -1280,7 +1305,151 @@ export default function MandalManagement() {
           <p className="text-zinc-600 dark:text-zinc-400 font-medium">No Mandals found</p>
           <p className="text-sm text-zinc-400 mt-1">Get started by creating your first administrative block (Mandal).</p>
         </div>
+      ) : viewMode === 'table' ? (
+        /* TABLE / ROW VIEW */
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-left min-w-[950px] whitespace-nowrap text-xs border-collapse">
+              <thead className="bg-zinc-50 dark:bg-zinc-800/50 text-[10px] font-black uppercase tracking-wider text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
+                <tr>
+                  <th className="py-3 px-4">Code & Mandal</th>
+                  <th className="py-3 px-4">Location (Constituency / District)</th>
+                  {isSuperAdmin && <th className="py-3 px-4">Supervising Leadership</th>}
+                  <th className="py-3 px-4">Mandal President</th>
+                  <th className="py-3 px-4 text-center">Voters / Pop</th>
+                  <th className="py-3 px-4 text-center">Committees</th>
+                  <th className="py-3 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 text-zinc-700 dark:text-zinc-300">
+                {filteredMandals.map(mandal => (
+                  <tr key={mandal.id} className="hover:bg-zinc-50/70 dark:hover:bg-zinc-800/40 transition-colors">
+                    {/* Code & Mandal */}
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-[11px] font-mono font-bold px-2 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded border border-zinc-200 dark:border-zinc-700">
+                          {mandal.mandalCode}
+                        </span>
+                        <div>
+                          <div className="font-bold text-zinc-900 dark:text-white text-xs sm:text-sm">
+                            {mandal.name}
+                          </div>
+                        </div>
+                      </div>
+                    </td>
+
+                    {/* Location */}
+                    <td className="py-3 px-4">
+                      <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
+                        <MapPin className="h-3.5 w-3.5 text-zinc-400 shrink-0" />
+                        <span className="font-semibold text-zinc-900 dark:text-zinc-200">
+                          {mandal.constituencyName || 'Constituency'}
+                        </span>
+                        <span className="text-zinc-400">&bull;</span>
+                        <span className="text-zinc-500">
+                          {mandal.districtName || 'District'}
+                        </span>
+                        <span className="text-zinc-400">&bull;</span>
+                        <span className="text-zinc-400 text-[11px]">
+                          {mandal.stateName || 'State'}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Leadership */}
+                    {isSuperAdmin && (
+                      <td className="py-3 px-4">
+                        {(mandal.adminName || mandal.adminId) ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800/40 rounded-md">
+                            <Network className="h-3 w-3 text-blue-600 dark:text-blue-400" />
+                            {getAdminName(mandal.adminId, mandal.adminName, mandal.adminEmail)}
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400 text-xs">-</span>
+                        )}
+                      </td>
+                    )}
+
+                    {/* President */}
+                    <td className="py-3 px-4">
+                      {mandal.presidentName ? (
+                        <div>
+                          <div className="font-bold text-zinc-900 dark:text-white text-xs flex items-center gap-1">
+                            <User className="h-3 w-3 text-zinc-400" />
+                            {mandal.presidentName}
+                          </div>
+                          {mandal.presidentPhone && (
+                            <div className="text-[11px] text-zinc-500 font-mono flex items-center gap-1 mt-0.5">
+                              <Phone className="h-2.5 w-2.5 text-zinc-400" />
+                              <a href={`tel:${mandal.presidentPhone}`} className="hover:text-blue-600 transition-colors">
+                                {mandal.presidentPhone}
+                              </a>
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-zinc-400 italic text-xs">Not Assigned</span>
+                      )}
+                    </td>
+
+                    {/* Voters / Population */}
+                    <td className="py-3 px-4 text-center">
+                      <div className="text-xs font-bold font-mono text-zinc-900 dark:text-white">
+                        {mandal.voterCount !== undefined && mandal.voterCount !== null ? mandal.voterCount.toLocaleString() : '-'}
+                      </div>
+                      <div className="text-[10px] text-zinc-400">
+                        Pop: {mandal.population !== undefined && mandal.population !== null ? mandal.population.toLocaleString() : '-'}
+                      </div>
+                    </td>
+
+                    {/* Committee Lists */}
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        id={`manage-lists-table-btn-${mandal.id}`}
+                        onClick={() => handleSelectMandalForMembers(mandal)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 hover:bg-blue-50 dark:bg-zinc-800 dark:hover:bg-blue-900/20 text-zinc-700 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] font-bold rounded-lg border border-zinc-200 dark:border-zinc-700 transition-colors cursor-pointer"
+                        title="Manage 8 Core Committee Lists"
+                      >
+                        <Layers className="h-3.5 w-3.5 text-blue-500" />
+                        <span>Manage 8 Lists</span>
+                      </button>
+                    </td>
+
+                    {/* Actions */}
+                    <td className="py-3 px-4 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {canUpdate && (
+                          <button
+                            id={`edit-mandal-row-btn-${mandal.id}`}
+                            onClick={() => openModal(mandal)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                            title="Edit Mandal Parameters"
+                          >
+                            <Edit2 className="h-3 w-3" />
+                            <span>Edit</span>
+                          </button>
+                        )}
+                        {canDelete && (
+                          <button
+                            id={`delete-mandal-row-btn-${mandal.id}`}
+                            onClick={() => setDeleteConfirmId(mandal.id)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                            title="Delete Mandal"
+                          >
+                            <Trash2 className="h-3 w-3" />
+                            <span>Delete</span>
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       ) : (
+        /* CARD GRID VIEW */
         <div id="mandals-grid" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {filteredMandals.map(mandal => (
             <motion.div
@@ -1310,25 +1479,27 @@ export default function MandalManagement() {
                   </div>
                   
                   {/* Actions */}
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5">
                     {canUpdate && (
                       <button
                         id={`edit-mandal-btn-${mandal.id}`}
                         onClick={() => openModal(mandal)}
-                        className="p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500 hover:text-zinc-800 dark:text-zinc-400 dark:hover:text-zinc-200 rounded-lg transition-colors"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                         title="Edit Mandal Parameters"
                       >
                         <Edit2 className="h-3.5 w-3.5" />
+                        <span>Edit</span>
                       </button>
                     )}
                     {canDelete && (
                       <button
                         id={`delete-mandal-btn-${mandal.id}`}
                         onClick={() => setDeleteConfirmId(mandal.id)}
-                        className="p-1.5 hover:bg-red-50 dark:hover:bg-red-950/20 text-zinc-500 hover:text-red-600 dark:text-zinc-400 dark:hover:text-red-400 rounded-lg transition-colors"
+                        className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                         title="Delete Mandal"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
+                        <span>Delete</span>
                       </button>
                     )}
                   </div>
@@ -1437,6 +1608,52 @@ export default function MandalManagement() {
           ))}
         </div>
       )}
+
+      {/* Delete Confirmation Modal (for Table view) */}
+      <AnimatePresence>
+        {deleteConfirmId && viewMode === 'table' && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setDeleteConfirmId('')}
+              className="absolute inset-0 bg-zinc-950/40 backdrop-blur-sm"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 20 }}
+              className="relative bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md overflow-hidden shadow-2xl p-6 text-center z-10"
+            >
+              <div className="w-12 h-12 bg-red-100 dark:bg-red-900/20 rounded-2xl flex items-center justify-center text-red-600 dark:text-red-400 mx-auto mb-4 border border-red-200 dark:border-red-800/40">
+                <AlertCircle className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-bold text-zinc-900 dark:text-white mb-1.5">Delete Mandal?</h3>
+              <p className="text-zinc-500 dark:text-zinc-400 text-xs sm:text-sm mb-6 leading-relaxed">
+                Are you sure you want to permanently remove this Mandal block? All associated committee assignments will also be affected.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmId('')}
+                  className="flex-1 px-4 py-2.5 bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 rounded-xl hover:bg-zinc-200 dark:hover:bg-zinc-700 font-semibold text-xs sm:text-sm transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(deleteConfirmId)}
+                  className="flex-1 px-4 py-2.5 bg-red-600 text-white rounded-xl hover:bg-red-700 font-semibold text-xs sm:text-sm shadow-md transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Delete
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* Mandal Create / Edit Modal */}
       <AnimatePresence>

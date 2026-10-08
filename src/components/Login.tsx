@@ -2,6 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   signInWithEmailAndPassword, 
   signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   setPersistence,
   browserLocalPersistence
 } from 'firebase/auth';
@@ -38,6 +40,24 @@ export default function Login() {
   const { refreshProfile } = useAuth();
 
   useEffect(() => {
+    // Process redirect result if returning from a mobile OAuth redirect
+    getRedirectResult(auth)
+      .then(async (result) => {
+        if (result && result.user) {
+          setSuccessMessage('Google authentication verified! Redirecting to workspace...');
+          await refreshProfile();
+          setTimeout(() => navigate('/dashboard'), 400);
+        }
+      })
+      .catch((err: any) => {
+        console.warn('Redirect auth evaluate notice:', err);
+        const errorCode = err?.code || '';
+        // Suppress benign missing initial state on regular page load/refresh
+        if (errorCode !== 'auth/missing-initial-state' && errorCode !== 'auth/null-user' && errorCode !== 'auth/popup-closed-by-user') {
+          setError(err?.message || 'Authentication notice occurred.');
+        }
+      });
+
     const emailParam = searchParams.get('email');
     if (emailParam) {
       setEmail(emailParam);
@@ -54,7 +74,18 @@ export default function Login() {
     } else if (reset) {
       setSuccessMessage('Password reset successfully! Please sign in with your new password.');
     }
-  }, [searchParams]);
+
+    // Android Native Google Auth Bridge Listener
+    (window as any).onNativeGoogleAuthSuccess = async (_data: any) => {
+      setSuccessMessage('Google authentication verified! Redirecting...');
+      await refreshProfile();
+      setTimeout(() => navigate('/dashboard'), 400);
+    };
+
+    return () => {
+      delete (window as any).onNativeGoogleAuthSuccess;
+    };
+  }, [searchParams, refreshProfile, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -101,13 +132,36 @@ export default function Login() {
     setError('');
     setSuccessMessage('');
 
+    // If running in Android App native WebView wrapper
+    if (typeof (window as any).AndroidBridge?.signInWithGoogle === 'function') {
+      try {
+        (window as any).AndroidBridge.signInWithGoogle();
+        setLoading(false);
+        return;
+      } catch (e) {
+        console.warn('Native Android sign in failed, falling back to web popup:', e);
+      }
+    }
+
     try {
       googleProvider.setCustomParameters({ prompt: 'select_account' });
       await setPersistence(auth, browserLocalPersistence);
-      await signInWithPopup(auth, googleProvider);
-      setSuccessMessage('Google authentication verified! Redirecting...');
-      await refreshProfile();
-      setTimeout(() => navigate('/dashboard'), 400);
+      
+      try {
+        await signInWithPopup(auth, googleProvider);
+        setSuccessMessage('Google authentication verified! Redirecting...');
+        await refreshProfile();
+        setTimeout(() => navigate('/dashboard'), 400);
+      } catch (popupErr: any) {
+        const popupCode = popupErr?.code || '';
+        // If popup blocked in mobile WebView, fallback to redirect
+        if (popupCode === 'auth/popup-blocked' || popupCode === 'auth/cancelled-popup-request' || popupCode === 'auth/operation-not-supported-in-this-environment') {
+          console.log('Popup blocked/unsupported in WebView, falling back to signInWithRedirect...');
+          await signInWithRedirect(auth, googleProvider);
+          return;
+        }
+        throw popupErr;
+      }
     } catch (err: unknown) {
       console.error('Google sign in error:', err);
       const errorCode = err && typeof err === 'object' && 'code' in err ? (err as { code?: string }).code : '';
@@ -123,7 +177,7 @@ export default function Login() {
         setError('Google Provider is not enabled in Firebase Console.');
       } else if (errorCode === 'auth/cancelled-popup-request') {
         setError('Only one popup request is allowed at a time.');
-      } else {
+      } else if (errorCode !== 'auth/missing-initial-state') {
         setError(errorMessage || 'Failed to sign in with Google. Please verify your connection.');
       }
     } finally {
@@ -152,7 +206,7 @@ export default function Login() {
             type="button"
             onClick={handleGoogleLogin}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 text-zinc-800 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-700/80 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-[0.99] disabled:opacity-60"
+            className="w-full flex items-center justify-center gap-2.5 py-2.5 px-4 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800/80 text-zinc-800 dark:text-zinc-200 border border-zinc-300 dark:border-zinc-700/80 rounded-xl text-xs font-bold transition-all shadow-xs active:scale-[0.99] disabled:opacity-60 cursor-pointer"
           >
             {/* Google Brand Colored SVG */}
             <svg width="17" height="17" viewBox="0 0 24 24" className="shrink-0">
@@ -189,7 +243,7 @@ export default function Login() {
                 <button 
                   type="button" 
                   onClick={() => setError('')} 
-                  className="text-red-500 hover:text-red-700 dark:hover:text-red-300 opacity-60 hover:opacity-100 transition-opacity p-0.5 shrink-0"
+                  className="text-red-500 hover:text-red-700 dark:hover:text-red-300 opacity-60 hover:opacity-100 transition-opacity p-0.5 shrink-0 cursor-pointer"
                   title="Dismiss"
                 >
                   <X size={13} />
@@ -212,7 +266,7 @@ export default function Login() {
                 <button 
                   type="button" 
                   onClick={() => setSuccessMessage('')} 
-                  className="text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300 opacity-60 hover:opacity-100 transition-opacity p-0.5 shrink-0"
+                  className="text-emerald-500 hover:text-emerald-700 dark:hover:text-emerald-300 opacity-60 hover:opacity-100 transition-opacity p-0.5 shrink-0 cursor-pointer"
                   title="Dismiss"
                 >
                   <X size={13} />
@@ -270,7 +324,7 @@ export default function Login() {
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors rounded-lg"
+                  className="absolute right-3 p-1 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors rounded-lg cursor-pointer"
                   title={showPassword ? "Hide password" : "Show password"}
                   aria-label={showPassword ? "Hide password" : "Show password"}
                   tabIndex={-1}
@@ -297,7 +351,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-zinc-900 hover:bg-zinc-800 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-sm hover:shadow active:scale-[0.99] transition-all disabled:opacity-50 mt-1"
+              className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-zinc-900 hover:bg-zinc-800 dark:bg-indigo-600 dark:hover:bg-indigo-500 text-white font-bold text-xs rounded-xl shadow-sm hover:shadow active:scale-[0.99] transition-all disabled:opacity-50 mt-1 cursor-pointer"
             >
               {loading ? (
                 <>
@@ -324,10 +378,27 @@ export default function Login() {
       </main>
 
       {/* Footer */}
-      <footer className="w-full max-w-[420px] text-center text-[11px] text-zinc-400 dark:text-zinc-500 space-y-1 z-10 pt-4 pb-2">
+      <footer className="w-full max-w-[420px] text-center text-[11px] text-zinc-400 dark:text-zinc-500 space-y-2.5 z-10 pt-4 pb-2">
         <div className="flex items-center justify-center gap-1.5 text-zinc-500 dark:text-zinc-400 font-medium text-[10px]">
           <ShieldCheck size={12} className="text-emerald-500" />
-          <span>Secure Sign In</span>
+          <span>Secure Enterprise Sign In</span>
+        </div>
+
+        {/* Public Legal Links */}
+        <div className="flex items-center justify-center gap-3 text-[11px] font-medium text-zinc-500 dark:text-zinc-400">
+          <Link 
+            to="/privacy" 
+            className="hover:text-zinc-900 dark:hover:text-white transition-colors underline-offset-2 hover:underline"
+          >
+            Privacy Policy
+          </Link>
+          <span>•</span>
+          <Link 
+            to="/terms" 
+            className="hover:text-zinc-900 dark:hover:text-white transition-colors underline-offset-2 hover:underline"
+          >
+            Terms of Service
+          </Link>
         </div>
       </footer>
 

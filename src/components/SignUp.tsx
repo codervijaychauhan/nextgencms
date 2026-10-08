@@ -247,6 +247,17 @@ export default function SignUp() {
             Sign in
           </Link>
         </p>
+
+        {/* Public Legal Links */}
+        <div className="flex items-center justify-center gap-3 text-[11px] font-medium text-zinc-400 dark:text-zinc-500 pt-2">
+          <Link to="/privacy" className="hover:text-zinc-900 dark:hover:text-white transition-colors underline-offset-2 hover:underline">
+            Privacy Policy
+          </Link>
+          <span>•</span>
+          <Link to="/terms" className="hover:text-zinc-900 dark:hover:text-white transition-colors underline-offset-2 hover:underline">
+            Terms of Service
+          </Link>
+        </div>
       </motion.div>
     </div>
   );

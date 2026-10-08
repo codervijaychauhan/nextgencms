@@ -39,12 +39,16 @@ import {
   Sparkles,
   ShieldCheck,
   Briefcase,
-  GraduationCap
+  GraduationCap,
+  Filter,
+  RotateCcw,
+  MessageCircle
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
 import { useAuth } from '../AuthProvider';
 import BulkImportModal from './BulkImportModal';
+import WhatsAppFeedModal from './WhatsAppFeedModal';
 import { useTableColumns, ColumnDef } from '../hooks/useTableColumns';
 import { TableColumnManager } from './common/TableColumnManager';
 
@@ -54,16 +58,26 @@ type VoterColumnKey =
   | 'aadharNumber'
   | 'name'
   | 'relationName'
+  | 'relationType'
   | 'gender'
   | 'age'
+  | 'vitalStatus'
   | 'caste'
+  | 'state'
+  | 'district'
+  | 'constituency'
+  | 'mandal'
+  | 'panchayat'
+  | 'ward'
+  | 'booth'
   | 'houseNo'
   | 'village'
-  | 'mandal'
-  | 'booth'
   | 'mobile'
   | 'additionalMobile'
   | 'email'
+  | 'education'
+  | 'economicCategory'
+  | 'physicalProfile'
   | 'sentiment'
   | 'favoredParty'
   | 'isVolunteer'
@@ -73,22 +87,34 @@ type VoterColumnKey =
 const DEFAULT_VOTER_COLUMNS: ColumnDef<VoterColumnKey>[] = [
   { id: 'voterId', label: 'EPIC / Voter ID', category: 'Identity', required: true, defaultVisible: true, minWidth: '130px' },
   { id: 'name', label: 'Voter Name', category: 'General', required: true, defaultVisible: true, minWidth: '160px' },
-  { id: 'relationName', label: 'Father / Relative', category: 'General', defaultVisible: true, minWidth: '150px' },
+  { id: 'relationName', label: 'Father / Husband Name', category: 'General', defaultVisible: true, minWidth: '160px' },
+  { id: 'relationType', label: 'Relation (F/H)', category: 'General', defaultVisible: false, minWidth: '110px' },
   { id: 'gender', label: 'Gender / Sex', category: 'Demographics', defaultVisible: true, minWidth: '70px' },
   { id: 'age', label: 'Age', category: 'Demographics', defaultVisible: true, minWidth: '70px' },
+  { id: 'vitalStatus', label: 'Vital Status (Live/Dead/Shifted)', category: 'Status', defaultVisible: true, minWidth: '130px' },
   { id: 'mobile', label: 'Primary Mobile', category: 'Contact', defaultVisible: true, minWidth: '120px' },
   { id: 'favoredParty', label: 'Favored Party', category: 'Intelligence', defaultVisible: true, minWidth: '140px' },
   { id: 'profileComplete', label: 'Profile Completion', category: 'Status', defaultVisible: true, minWidth: '130px' },
-  { id: 'actions', label: 'Actions', category: 'Controls', required: true, defaultVisible: true, minWidth: '100px' },
+  { id: 'actions', label: 'Actions', category: 'Controls', required: true, defaultVisible: true, minWidth: '110px' },
   
+  // Geographic / Demographic Hierarchy Fields
+  { id: 'state', label: 'State', category: 'Address', defaultVisible: false, minWidth: '110px' },
+  { id: 'district', label: 'District', category: 'Address', defaultVisible: false, minWidth: '120px' },
+  { id: 'constituency', label: 'Constituency', category: 'Address', defaultVisible: false, minWidth: '130px' },
+  { id: 'mandal', label: 'Block / Area', category: 'Address', defaultVisible: false, minWidth: '130px' },
+  { id: 'panchayat', label: 'Panchayat / MC / ULB', category: 'Address', defaultVisible: false, minWidth: '140px' },
+  { id: 'ward', label: 'Ward / Village', category: 'Address', defaultVisible: false, minWidth: '120px' },
+  { id: 'booth', label: 'Polling Station / Booth', category: 'Location', defaultVisible: false, minWidth: '150px' },
+
   // Additional database fields available to show/hide in the Column Customizer
   { id: 'slNo', label: 'Sl No', category: 'General', defaultVisible: false, minWidth: '60px' },
   { id: 'aadharNumber', label: 'Aadhaar Number', category: 'Identity', defaultVisible: false, minWidth: '130px' },
   { id: 'caste', label: 'Caste / Community', category: 'Demographics', defaultVisible: false, minWidth: '110px' },
+  { id: 'education', label: 'Education Qualification', category: 'Demographics', defaultVisible: false, minWidth: '130px' },
+  { id: 'economicCategory', label: 'Economic Category', category: 'Demographics', defaultVisible: false, minWidth: '110px' },
+  { id: 'physicalProfile', label: 'Physical / Health Profile', category: 'Demographics', defaultVisible: false, minWidth: '120px' },
   { id: 'houseNo', label: 'House Number', category: 'Address', defaultVisible: false, minWidth: '100px' },
   { id: 'village', label: 'Village / Street', category: 'Address', defaultVisible: false, minWidth: '130px' },
-  { id: 'mandal', label: 'Mandal / Block', category: 'Address', defaultVisible: false, minWidth: '120px' },
-  { id: 'booth', label: 'Polling Station / Booth', category: 'Location', defaultVisible: false, minWidth: '150px' },
   { id: 'additionalMobile', label: 'Alternate Mobile', category: 'Contact', defaultVisible: false, minWidth: '120px' },
   { id: 'email', label: 'Email Address', category: 'Contact', defaultVisible: false, minWidth: '150px' },
   { id: 'sentiment', label: 'Political Sentiment', category: 'Intelligence', defaultVisible: false, minWidth: '130px' },
@@ -140,6 +166,7 @@ interface Voter {
   voterId: string; // EPIC No
   name: string;
   relationName?: string; // Father / Husband Name
+  relationType?: string;
   aadharNumber?: string;
   gender: 'Male' | 'Female' | 'Other' | string;
   age: number;
@@ -153,22 +180,38 @@ interface Voter {
   village?: string;
   caste?: string;
   occupation?: string;
+  education?: string;
   isKaryakarta: boolean;
   voted: boolean;
   partNo?: string;
   srNo?: string;
   stateId: string;
+  stateName?: string;
   districtId: string;
+  districtName?: string;
   constituencyId: string;
+  constituencyName?: string;
+  mandalId?: string;
+  mandalName?: string;
+  panchayatId?: string;
+  panchayatName?: string;
+  wardId?: string;
+  wardName?: string;
   boothId: string;
-  vitalStatus?: 'Active' | 'Deceased' | 'Migrated/Shifted' | string;
+  boothName?: string;
+  vitalStatus?: 'Active' | 'Deceased' | 'Migrated/Shifted' | 'Duplicate/Review' | string;
+  deathDate?: string;
+  deathNotes?: string;
   physicalProfile?: 'General' | 'PwD' | 'Senior Citizen' | 'Chronic Illness' | string;
   disabilityCategory?: 'None' | 'Locomotor' | 'Visual' | 'Speech & Hearing' | 'Other' | string;
+  disabilityPercent?: number;
   eciAssistanceNeeded?: boolean;
-  economicCategory?: 'BPL' | 'APL' | 'EWS' | string;
+  economicCategory?: 'BPL' | 'APL' | 'EWS' | 'Antyodaya' | string;
   incomeRange?: 'Under ₹15,000' | '₹15,000 - ₹30,000' | '₹30,000 - ₹60,000' | 'Above ₹60,000' | string;
   landOwnership?: 'Landless' | 'Small Farmer' | 'Marginal Farmer' | 'Large Landowner' | 'Urban Commercial/Residential Only' | string;
-  education?: string;
+  rationCardType?: string;
+  rationCardNo?: string;
+  housingType?: string;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -201,6 +244,9 @@ const VoterManagement: React.FC = () => {
   const [states, setStates] = useState<IndiaState[]>([]);
   const [districts, setDistricts] = useState<IndiaDistrict[]>([]);
   const [constituencies, setConstituencies] = useState<IndiaConstituency[]>([]);
+  const [mandals, setMandals] = useState<any[]>([]);
+  const [panchayats, setPanchayats] = useState<any[]>([]);
+  const [wards, setWards] = useState<any[]>([]);
   const [booths, setBooths] = useState<IndiaBooth[]>([]);
   
   // Voter Data
@@ -235,6 +281,24 @@ const VoterManagement: React.FC = () => {
   const [isConstituencyDropdownOpen, setIsConstituencyDropdownOpen] = useState(false);
   const [constituencySearchText, setConstituencySearchText] = useState('');
 
+  const [selectedMandalId, setSelectedMandalId] = useState<string>('all');
+  const [selectedMandalIds, setSelectedMandalIds] = useState<string[]>([]);
+  const mandalDropdownRef = useRef<HTMLDivElement>(null);
+  const [isMandalDropdownOpen, setIsMandalDropdownOpen] = useState(false);
+  const [mandalSearchText, setMandalSearchText] = useState('');
+
+  const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>('all');
+  const [selectedPanchayatIds, setSelectedPanchayatIds] = useState<string[]>([]);
+  const panchayatDropdownRef = useRef<HTMLDivElement>(null);
+  const [isPanchayatDropdownOpen, setIsPanchayatDropdownOpen] = useState(false);
+  const [panchayatSearchText, setPanchayatSearchText] = useState('');
+
+  const [selectedWardId, setSelectedWardId] = useState<string>('all');
+  const [selectedWardIds, setSelectedWardIds] = useState<string[]>([]);
+  const wardDropdownRef = useRef<HTMLDivElement>(null);
+  const [isWardDropdownOpen, setIsWardDropdownOpen] = useState(false);
+  const [wardSearchText, setWardSearchText] = useState('');
+
   const [selectedBoothId, setSelectedBoothId] = useState<string>('all');
   const [selectedBoothIds, setSelectedBoothIds] = useState<string[]>([]);
   const boothDropdownRef = useRef<HTMLDivElement>(null);
@@ -256,10 +320,132 @@ const VoterManagement: React.FC = () => {
   const [filterIsKaryakarta, setFilterIsKaryakarta] = useState<string>('all');
   const [filterVitalStatus, setFilterVitalStatus] = useState<string>('Active');
   
+  // Filter Modal popup state
+  const [isFilterModalOpen, setIsFilterModalOpen] = useState(false);
+
+  // WhatsApp Extension Feed Modal state
+  const [isWhatsAppFeedModalOpen, setIsWhatsAppFeedModalOpen] = useState(false);
+
+  // Active Filter count
+  const activeFilterCount = useMemo(() => {
+    let count = 0;
+    if (selectedStateIds.length > 0) count++;
+    if (selectedDistrictIds.length > 0) count++;
+    if (selectedConstituencyIds.length > 0) count++;
+    if (selectedMandalIds.length > 0) count++;
+    if (selectedPanchayatIds.length > 0) count++;
+    if (selectedWardIds.length > 0) count++;
+    if (selectedBoothIds.length > 0) count++;
+    if (filterGender !== 'all') count++;
+    if (filterCaste !== 'all') count++;
+    if (filterAgeGroup !== 'all') count++;
+    if (filterEconomicCategory !== 'all') count++;
+    if (filterSentiment !== 'all') count++;
+    if (filterCompleteness !== 'all') count++;
+    if (filterIsKaryakarta !== 'all') count++;
+    if (filterVitalStatus !== 'Active') count++;
+    return count;
+  }, [
+    selectedStateIds,
+    selectedDistrictIds,
+    selectedConstituencyIds,
+    selectedMandalIds,
+    selectedPanchayatIds,
+    selectedWardIds,
+    selectedBoothIds,
+    filterGender,
+    filterCaste,
+    filterAgeGroup,
+    filterEconomicCategory,
+    filterSentiment,
+    filterCompleteness,
+    filterIsKaryakarta,
+    filterVitalStatus
+  ]);
+
+  const currentFeedFilterCriteria = useMemo(() => ({
+    stateIds: selectedStateIds,
+    districtIds: selectedDistrictIds,
+    constituencyIds: selectedConstituencyIds,
+    mandalIds: selectedMandalIds,
+    panchayatIds: selectedPanchayatIds,
+    wardIds: selectedWardIds,
+    boothIds: selectedBoothIds,
+    gender: filterGender,
+    caste: filterCaste,
+    ageGroup: filterAgeGroup,
+    economicCategory: filterEconomicCategory,
+    sentiment: filterSentiment,
+    completeness: filterCompleteness,
+    isKaryakarta: filterIsKaryakarta,
+    vitalStatus: filterVitalStatus,
+    search: searchTerm
+  }), [
+    selectedStateIds, selectedDistrictIds, selectedConstituencyIds, selectedMandalIds,
+    selectedPanchayatIds, selectedWardIds, selectedBoothIds, filterGender, filterCaste,
+    filterAgeGroup, filterEconomicCategory, filterSentiment, filterCompleteness,
+    filterIsKaryakarta, filterVitalStatus, searchTerm
+  ]);
+
+  const feedFilterSummary = useMemo(() => {
+    const parts: string[] = [];
+    if (selectedStateIds.length > 0) parts.push(`State (${selectedStateIds.length})`);
+    if (selectedDistrictIds.length > 0) parts.push(`District (${selectedDistrictIds.length})`);
+    if (selectedConstituencyIds.length > 0) parts.push(`Constituency (${selectedConstituencyIds.length})`);
+    if (selectedMandalIds.length > 0) parts.push(`Block (${selectedMandalIds.length})`);
+    if (selectedPanchayatIds.length > 0) parts.push(`Panchayat (${selectedPanchayatIds.length})`);
+    if (selectedWardIds.length > 0) parts.push(`Ward (${selectedWardIds.length})`);
+    if (selectedBoothIds.length > 0) parts.push(`Booth (${selectedBoothIds.length})`);
+    if (filterGender !== 'all') parts.push(`Gender: ${filterGender}`);
+    if (filterCaste !== 'all') parts.push(`Caste: ${filterCaste}`);
+    if (filterAgeGroup !== 'all') parts.push(`Age: ${filterAgeGroup}`);
+    if (filterSentiment !== 'all') parts.push(`Sentiment: ${filterSentiment}`);
+    if (filterIsKaryakarta !== 'all') parts.push(`Volunteer: ${filterIsKaryakarta === 'yes' ? 'Yes' : 'No'}`);
+    if (filterVitalStatus !== 'Active') parts.push(`Status: ${filterVitalStatus}`);
+    if (searchTerm) parts.push(`Search: "${searchTerm}"`);
+    return parts.length > 0 ? parts.join(' • ') : 'All Voters in Scope';
+  }, [
+    selectedStateIds, selectedDistrictIds, selectedConstituencyIds, selectedMandalIds,
+    selectedPanchayatIds, selectedWardIds, selectedBoothIds, filterGender, filterCaste,
+    filterAgeGroup, filterSentiment, filterIsKaryakarta, filterVitalStatus, searchTerm
+  ]);
+
+  const handleResetAllFilters = () => {
+    setSelectedStateIds([]);
+    setSelectedDistrictIds([]);
+    setSelectedConstituencyIds([]);
+    setSelectedMandalIds([]);
+    setSelectedPanchayatIds([]);
+    setSelectedWardIds([]);
+    setSelectedBoothIds([]);
+    setSelectedStateId('all');
+    setSelectedDistrictId('all');
+    setSelectedConstituencyId('all');
+    setSelectedMandalId('all');
+    setSelectedPanchayatId('all');
+    setSelectedWardId('all');
+    setSelectedBoothId('all');
+    setFilterGender('all');
+    setFilterCaste('all');
+    setFilterAgeGroup('all');
+    setFilterEconomicCategory('all');
+    setFilterSentiment('all');
+    setFilterCompleteness('all');
+    setFilterIsKaryakarta('all');
+    setFilterVitalStatus('Active');
+  };
+
   // Modal states
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState<'view' | 'edit'>('view');
   const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  // Modal cascading dropdown options
+  const [modalDistricts, setModalDistricts] = useState<IndiaDistrict[]>([]);
+  const [modalConstituencies, setModalConstituencies] = useState<IndiaConstituency[]>([]);
+  const [modalMandals, setModalMandals] = useState<any[]>([]);
+  const [modalPanchayats, setModalPanchayats] = useState<any[]>([]);
+  const [modalWards, setModalWards] = useState<any[]>([]);
 
   const handleCopy = (text: string, fieldName: string) => {
     if (!text) return;
@@ -271,6 +457,14 @@ const VoterManagement: React.FC = () => {
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
   const [activeFormTab, setActiveFormTab] = useState<'main' | 'contact' | 'health_economy' | 'political_sentiment'>('main');
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
+
+  // Quick Status Switcher State (1-click active/deceased/shifted popup)
+  const [quickStatusVoter, setQuickStatusVoter] = useState<Voter | null>(null);
+  const [quickStatusVal, setQuickStatusVal] = useState<string>('Active');
+  const [quickDeathDate, setQuickDeathDate] = useState<string>('');
+  const [quickDeathNotes, setQuickDeathNotes] = useState<string>('');
+  const [quickNewAddress, setQuickNewAddress] = useState<string>('');
+  const [statusSubmitting, setStatusSubmitting] = useState(false);
 
   // Multi-Admin Assessments (For Super Admin oversight & isolated Admin storage)
   const [voterAssessments, setVoterAssessments] = useState<any[]>([]);
@@ -292,6 +486,7 @@ const VoterManagement: React.FC = () => {
     voterId: '',
     name: '',
     relationName: '',
+    relationType: 'Father',
     aadharNumber: '',
     gender: 'Male',
     age: 18,
@@ -312,14 +507,23 @@ const VoterManagement: React.FC = () => {
     stateId: '',
     districtId: '',
     constituencyId: '',
+    mandalId: '',
+    panchayatId: '',
+    wardId: '',
     boothId: '',
     vitalStatus: 'Active',
+    deathDate: '',
+    deathNotes: '',
     physicalProfile: 'General',
     disabilityCategory: 'None',
+    disabilityPercent: 0,
     eciAssistanceNeeded: false,
     economicCategory: 'APL',
     incomeRange: '₹15,000 - ₹30,000',
     landOwnership: 'Small Farmer',
+    rationCardType: 'None',
+    rationCardNo: '',
+    housingType: 'Pucca Concrete',
     education: 'Unspecified',
   });
 
@@ -487,29 +691,48 @@ const VoterManagement: React.FC = () => {
   const rawState = profile?.stateId || profile?.state_id || electSettings.state_id || electSettings.stateId || '';
   const rawDistrict = profile?.districtId || profile?.district_id || electSettings.district_id || electSettings.districtId || '';
   const rawConstituency = profile?.constituencyId || profile?.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '';
+  const rawMandal = profile?.mandalId || profile?.mandal_id || electSettings.mandal_id || electSettings.mandalId || '';
+  const rawPanchayat = profile?.panchayatId || profile?.panchayat_id || electSettings.panchayat_id || electSettings.panchayatId || '';
+  const rawWard = profile?.wardId || profile?.ward_id || electSettings.ward_id || electSettings.wardId || '';
   const rawBooth = profile?.boothId || profile?.booth_id || electSettings.booth_id || electSettings.boothId || '';
   const rawAssignedBooths = profile?.assigned_booths || electSettings.assigned_booths || [];
 
-  const allowedStateIds = !isSuperAdmin && rawState
+  const isPrivilegedUser = isSuperAdmin || isAdmin || isManager || 
+    profile?.role === 'super_admin' || profile?.role === 'admin' || profile?.role === 'manager' ||
+    (user?.email || profile?.email || '').toLowerCase().trim() === 'vijaychauhanofficial01@gmail.com';
+
+  const allowedStateIds = !isPrivilegedUser && rawState
     ? String(rawState).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
     : [];
-  const allowedDistrictIds = !isSuperAdmin && rawDistrict
+  const allowedDistrictIds = !isPrivilegedUser && rawDistrict
     ? String(rawDistrict).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
     : [];
-  const allowedConstituencyIds = !isSuperAdmin && rawConstituency
+  const allowedConstituencyIds = !isPrivilegedUser && rawConstituency
     ? String(rawConstituency).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
     : [];
-  const allowedBoothIds = !isSuperAdmin && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
+  const allowedMandalIds = !isPrivilegedUser && rawMandal
+    ? String(rawMandal).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedPanchayatIds = !isPrivilegedUser && rawPanchayat
+    ? String(rawPanchayat).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedWardIds = !isPrivilegedUser && rawWard
+    ? String(rawWard).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+    : [];
+  const allowedBoothIds = !isPrivilegedUser && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
     ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') : (rawAssignedBooths || []).map(String).map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')) 
     : [];
 
-  const hasAssignedScope = isSuperAdmin || (
+  const hasAssignedScope = isPrivilegedUser || (
     allowedBoothIds.length > 0 ||
+    allowedWardIds.length > 0 ||
+    allowedPanchayatIds.length > 0 ||
+    allowedMandalIds.length > 0 ||
     allowedConstituencyIds.length > 0 ||
     allowedDistrictIds.length > 0 ||
     allowedStateIds.length > 0
   );
-  const isRestrictedUser = !isSuperAdmin;
+  const isRestrictedUser = !isPrivilegedUser;
 
   const fetchStates = async () => {
     try {
@@ -520,18 +743,77 @@ const VoterManagement: React.FC = () => {
 
   const fetchHierarchy = async () => {
     try {
-      const allDistricts = await api.get<IndiaDistrict[]>('/api/districts');
-      const allConstituencies = await api.get<IndiaConstituency[]>('/api/constituencies');
-      const allBooths = await api.get<IndiaBooth[]>('/api/booths');
+      const [allDistricts, allConstituencies, allMandals, allPanchayats, allWards, allBooths] = await Promise.all([
+        api.get<IndiaDistrict[]>('/api/districts').catch(() => []),
+        api.get<IndiaConstituency[]>('/api/constituencies').catch(() => []),
+        api.get<any[]>('/api/mandals').catch(() => []),
+        api.get<any[]>('/api/panchayats').catch(() => []),
+        api.get<any[]>('/api/wards').catch(() => []),
+        api.get<IndiaBooth[]>('/api/booths').catch(() => []),
+      ]);
 
       setDistricts(allDistricts.map((d: any) => ({ ...d, stateId: String(d.state_id || d.stateId || '') })));
       setConstituencies(allConstituencies.map((c: any) => ({ ...c, stateId: String(c.state_id || c.stateId || ''), districtId: String(c.district_id || c.districtId || '') })));
-      setBooths(allBooths.map((b: any) => ({ ...b, boothNumber: String(b.booth_number || b.boothNumber || ''), constituencyId: String(b.constituency_id || b.constituencyId || ''), mandalId: String(b.mandal_id || b.mandalId || '') })));
+      setMandals(allMandals.map((m: any) => ({ ...m, id: String(m.id), name: m.name || '', constituencyId: String(m.constituency_id || m.constituencyId || ''), districtId: String(m.district_id || m.districtId || '') })));
+      setPanchayats(allPanchayats.map((p: any) => ({ ...p, id: String(p.id), name: p.name || '', type: p.panchayat_type || p.type || 'Gram Panchayat', mandalId: String(p.mandal_id || p.mandalId || ''), constituencyId: String(p.constituency_id || p.constituencyId || '') })));
+      setWards(allWards.map((w: any) => ({ ...w, id: String(w.id), name: w.name || '', wardNumber: String(w.ward_number || w.wardNumber || ''), panchayatId: String(w.panchayat_id || w.panchayatId || ''), mandalId: String(w.mandal_id || w.mandalId || '') })));
+      setBooths(allBooths.map((b: any) => ({ ...b, boothNumber: String(b.booth_number || b.boothNumber || ''), constituencyId: String(b.constituency_id || b.constituencyId || ''), mandalId: String(b.mandal_id || b.mandalId || ''), panchayatId: String(b.panchayat_id || b.panchayatId || ''), wardId: String(b.ward_id || b.wardId || '') })));
     } catch (err) { console.error(err); }
   };
 
+  // Cascading loaders for Add/Edit Modal
+  useEffect(() => {
+    if (!formData.stateId) {
+      setModalDistricts([]);
+      return;
+    }
+    api.get<IndiaDistrict[]>(`/api/districts?stateId=${formData.stateId}`)
+      .then(d => setModalDistricts(d.map((x: any) => ({ ...x, id: String(x.id), stateId: String(x.state_id || x.stateId || '') }))))
+      .catch(console.error);
+  }, [formData.stateId]);
+
+  useEffect(() => {
+    if (!formData.districtId) {
+      setModalConstituencies([]);
+      return;
+    }
+    api.get<IndiaConstituency[]>(`/api/constituencies?districtId=${formData.districtId}`)
+      .then(c => setModalConstituencies(c.map((x: any) => ({ ...x, id: String(x.id), stateId: String(x.state_id || x.stateId || ''), districtId: String(x.district_id || x.districtId || '') }))))
+      .catch(console.error);
+  }, [formData.districtId]);
+
+  useEffect(() => {
+    if (!formData.constituencyId) {
+      setModalMandals([]);
+      return;
+    }
+    api.get<any[]>(`/api/mandals?constituencyId=${formData.constituencyId}`)
+      .then(m => setModalMandals(m.map((x: any) => ({ ...x, id: String(x.id) }))))
+      .catch(console.error);
+  }, [formData.constituencyId]);
+
+  useEffect(() => {
+    if (!formData.mandalId) {
+      setModalPanchayats([]);
+      return;
+    }
+    api.get<any[]>(`/api/panchayats?mandalId=${formData.mandalId}`)
+      .then(p => setModalPanchayats(p.map((x: any) => ({ ...x, id: String(x.id) }))))
+      .catch(console.error);
+  }, [formData.mandalId]);
+
+  useEffect(() => {
+    if (!formData.panchayatId) {
+      setModalWards([]);
+      return;
+    }
+    api.get<any[]>(`/api/wards?panchayatId=${formData.panchayatId}`)
+      .then(w => setModalWards(w.map((x: any) => ({ ...x, id: String(x.id) }))))
+      .catch(console.error);
+  }, [formData.panchayatId]);
+
   const fetchVoters = async () => {
-    if (!isSuperAdmin && !hasAssignedScope) {
+    if (!isPrivilegedUser && !hasAssignedScope) {
       setVoters([]);
       setLoading(false);
       return;
@@ -540,13 +822,31 @@ const VoterManagement: React.FC = () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set('limit', '1000');
+      params.set('limit', '10000');
 
       // 1. Explicit UI filter dropdown selections
       if (selectedBoothId !== 'all') {
         params.set('boothId', selectedBoothId);
       } else if (selectedBoothIds.length > 0) {
         params.set('boothIds', selectedBoothIds.join(','));
+      }
+
+      if (selectedWardId !== 'all') {
+        params.set('wardId', selectedWardId);
+      } else if (selectedWardIds.length > 0) {
+        params.set('wardIds', selectedWardIds.join(','));
+      }
+
+      if (selectedPanchayatId !== 'all') {
+        params.set('panchayatId', selectedPanchayatId);
+      } else if (selectedPanchayatIds.length > 0) {
+        params.set('panchayatIds', selectedPanchayatIds.join(','));
+      }
+
+      if (selectedMandalId !== 'all') {
+        params.set('mandalId', selectedMandalId);
+      } else if (selectedMandalIds.length > 0) {
+        params.set('mandalIds', selectedMandalIds.join(','));
       }
 
       if (selectedConstituencyId !== 'all') {
@@ -567,10 +867,19 @@ const VoterManagement: React.FC = () => {
         params.set('stateIds', selectedStateIds.join(','));
       }
 
-      // 2. If non-super admin and no explicit UI filters selected, apply assigned profile scope
-      if (!isSuperAdmin) {
+      // 2. If non-privileged user and no explicit UI filters selected, apply assigned profile scope
+      if (!isPrivilegedUser) {
         if (!params.has('boothId') && !params.has('boothIds') && allowedBoothIds.length > 0 && allowedBoothIds.length < 50) {
           params.set('boothIds', allowedBoothIds.join(','));
+        }
+        if (!params.has('wardId') && !params.has('wardIds') && allowedWardIds.length > 0) {
+          params.set('wardIds', allowedWardIds.join(','));
+        }
+        if (!params.has('panchayatId') && !params.has('panchayatIds') && allowedPanchayatIds.length > 0) {
+          params.set('panchayatIds', allowedPanchayatIds.join(','));
+        }
+        if (!params.has('mandalId') && !params.has('mandalIds') && allowedMandalIds.length > 0) {
+          params.set('mandalIds', allowedMandalIds.join(','));
         }
         if (!params.has('constituencyId') && !params.has('constituencyIds') && allowedConstituencyIds.length > 0) {
           params.set('constituencyIds', allowedConstituencyIds.join(','));
@@ -583,8 +892,8 @@ const VoterManagement: React.FC = () => {
         }
       }
 
-      const res = await api.get<{ data: any[] }>(`/api/voters?${params.toString()}`);
-      const rawList = res.data || [];
+      const res = await api.get<any>(`/api/voters?${params.toString()}`);
+      const rawList: any[] = Array.isArray(res) ? res : (res?.data || []);
       const seenKeys = new Set<string>();
       const uniqueRaw: any[] = [];
       for (const d of rawList) {
@@ -607,14 +916,24 @@ const VoterManagement: React.FC = () => {
         partNo: d.part_no || d.partNo,
         srNo: d.sr_no || d.srNo,
         houseNo: d.house_no || d.houseNo,
-        isKaryakarta: Boolean(d.is_karyakarta),
-        voted: d.voting_status === 'voted' || Boolean(d.voted),
+        vitalStatus: d.vitalStatus || d.vital_status || 'Active',
+        isKaryakarta: Boolean(d.is_karyakarta || d.isKaryakarta),
+        voted: d.voting_status === 'voted' || d.votingStatus === 'voted' || Boolean(d.voted),
         partyInclination: d.party_inclination || d.partyInclination,
         boothId: String(d.booth_id || d.boothId || ''),
+        boothName: d.booth_name || d.boothName || '',
         mandalId: String(d.mandal_id || d.mandalId || ''),
+        mandalName: d.mandal_name || d.mandalName || '',
+        panchayatId: String(d.panchayat_id || d.panchayatId || ''),
+        panchayatName: d.panchayat_name || d.panchayatName || '',
+        wardId: String(d.ward_id || d.wardId || ''),
+        wardName: d.ward_name || d.wardName || '',
         constituencyId: String(d.constituency_id || d.constituencyId || ''),
+        constituencyName: d.constituency_name || d.constituencyName || '',
         stateId: String(d.state_id || d.stateId || ''),
-        districtId: String(d.district_id || d.districtId || '')
+        stateName: d.state_name || d.stateName || '',
+        districtId: String(d.district_id || d.districtId || ''),
+        districtName: d.district_name || d.districtName || ''
       })) as Voter[];
       
       setVoters(newVoters);
@@ -635,14 +954,23 @@ const VoterManagement: React.FC = () => {
       if (boothDropdownRef.current && !boothDropdownRef.current.contains(event.target as Node)) {
         setIsBoothDropdownOpen(false);
       }
-      if (stateDropdownRef.current && !stateDropdownRef.current.contains(event.target as Node)) {
-        setIsStateDropdownOpen(false);
+      if (wardDropdownRef.current && !wardDropdownRef.current.contains(event.target as Node)) {
+        setIsWardDropdownOpen(false);
+      }
+      if (panchayatDropdownRef.current && !panchayatDropdownRef.current.contains(event.target as Node)) {
+        setIsPanchayatDropdownOpen(false);
+      }
+      if (mandalDropdownRef.current && !mandalDropdownRef.current.contains(event.target as Node)) {
+        setIsMandalDropdownOpen(false);
+      }
+      if (constituencyDropdownRef.current && !constituencyDropdownRef.current.contains(event.target as Node)) {
+        setIsConstituencyDropdownOpen(false);
       }
       if (districtDropdownRef.current && !districtDropdownRef.current.contains(event.target as Node)) {
         setIsDistrictDropdownOpen(false);
       }
-      if (constituencyDropdownRef.current && !constituencyDropdownRef.current.contains(event.target as Node)) {
-        setIsConstituencyDropdownOpen(false);
+      if (stateDropdownRef.current && !stateDropdownRef.current.contains(event.target as Node)) {
+        setIsStateDropdownOpen(false);
       }
     };
     document.addEventListener('mousedown', handleClickOutside);
@@ -676,6 +1004,30 @@ const VoterManagement: React.FC = () => {
   }, [selectedConstituencyIds]);
 
   useEffect(() => {
+    if (selectedMandalIds.length === 1) {
+      setSelectedMandalId(selectedMandalIds[0]);
+    } else {
+      setSelectedMandalId('all');
+    }
+  }, [selectedMandalIds]);
+
+  useEffect(() => {
+    if (selectedPanchayatIds.length === 1) {
+      setSelectedPanchayatId(selectedPanchayatIds[0]);
+    } else {
+      setSelectedPanchayatId('all');
+    }
+  }, [selectedPanchayatIds]);
+
+  useEffect(() => {
+    if (selectedWardIds.length === 1) {
+      setSelectedWardId(selectedWardIds[0]);
+    } else {
+      setSelectedWardId('all');
+    }
+  }, [selectedWardIds]);
+
+  useEffect(() => {
     if (selectedBoothIds.length === 1) {
       setSelectedBoothId(selectedBoothIds[0]);
     } else {
@@ -702,6 +1054,12 @@ const VoterManagement: React.FC = () => {
     selectedDistrictIds,
     selectedConstituencyId,
     selectedConstituencyIds,
+    selectedMandalId,
+    selectedMandalIds,
+    selectedPanchayatId,
+    selectedPanchayatIds,
+    selectedWardId,
+    selectedWardIds,
     selectedBoothId,
     selectedBoothIds
   ]);
@@ -709,9 +1067,9 @@ const VoterManagement: React.FC = () => {
   useEffect(() => {
     fetchVoters();
   }, [
-    selectedStateId, selectedDistrictId, selectedConstituencyId, selectedBoothId,
-    selectedBoothIds, selectedStateIds, selectedDistrictIds, selectedConstituencyIds,
-    booths, isSuperAdmin, allowedConstituencyIds.join(','), allowedDistrictIds.join(','),
+    selectedStateId, selectedDistrictId, selectedConstituencyId, selectedMandalId, selectedPanchayatId, selectedWardId, selectedBoothId,
+    selectedBoothIds, selectedWardIds, selectedPanchayatIds, selectedMandalIds, selectedStateIds, selectedDistrictIds, selectedConstituencyIds,
+    booths, isSuperAdmin, allowedConstituencyIds.join(','), allowedDistrictIds.join(','), allowedMandalIds.join(','), allowedPanchayatIds.join(','), allowedWardIds.join(','),
     allowedStateIds.join(','), allowedBoothIds.join(',')
   ]);
 
@@ -854,6 +1212,13 @@ const VoterManagement: React.FC = () => {
       const selectedPartyObj = parties.find(p => String(p.id) === String(sentimentFavoredPartyId) || p.name === sentimentFavoredPartyId);
       const voterData = {
         ...formData,
+        state_id: formData.stateId || null,
+        district_id: formData.districtId || null,
+        constituency_id: formData.constituencyId || null,
+        mandal_id: formData.mandalId || null,
+        panchayat_id: formData.panchayatId || null,
+        ward_id: formData.wardId || null,
+        booth_id: formData.boothId || null,
         adminId: targetAdmin,
         isKaryakarta: activeFormTab === 'political_sentiment' ? sentimentIsKaryakarta : formData.isKaryakarta,
         sentimentScore: sentimentStrength,
@@ -861,6 +1226,8 @@ const VoterManagement: React.FC = () => {
         favoredPartyId: sentimentFavoredPartyId,
         favoredPartyName: selectedPartyObj?.name || '',
         partyInclination: selectedPartyObj?.name || '',
+        relation_name: formData.relationName || '',
+        relation_type: formData.relationType || 'Father',
         notes: sentimentNotes,
         age: Number(formData.age)
       };
@@ -947,12 +1314,58 @@ const VoterManagement: React.FC = () => {
     }
   };
 
+  const openQuickStatusModal = (v: Voter) => {
+    setQuickStatusVoter(v);
+    setQuickStatusVal(v.vitalStatus || 'Active');
+    setQuickDeathDate(v.deathDate || '');
+    setQuickDeathNotes(v.deathNotes || '');
+    setQuickNewAddress(v.newAddress || '');
+  };
+
+  const handleQuickStatusSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!quickStatusVoter) return;
+    setStatusSubmitting(true);
+    try {
+      await api.put(`/api/voters/${quickStatusVoter.id}/status`, {
+        vitalStatus: quickStatusVal,
+        deathDate: quickStatusVal === 'Deceased' ? quickDeathDate : '',
+        deathNotes: quickStatusVal === 'Deceased' ? quickDeathNotes : '',
+        newAddress: quickStatusVal === 'Migrated/Shifted' ? quickNewAddress : (quickStatusVoter.newAddress || '')
+      });
+      setVoters(prev => prev.map(v => v.id === quickStatusVoter.id ? {
+        ...v,
+        vitalStatus: quickStatusVal,
+        deathDate: quickStatusVal === 'Deceased' ? quickDeathDate : '',
+        deathNotes: quickStatusVal === 'Deceased' ? quickDeathNotes : '',
+        newAddress: quickStatusVal === 'Migrated/Shifted' ? quickNewAddress : (v.newAddress || '')
+      } : v));
+      if (editingVoter && editingVoter.id === quickStatusVoter.id) {
+        setEditingVoter(prev => prev ? {
+          ...prev,
+          vitalStatus: quickStatusVal,
+          deathDate: quickStatusVal === 'Deceased' ? quickDeathDate : '',
+          deathNotes: quickStatusVal === 'Deceased' ? quickDeathNotes : '',
+          newAddress: quickStatusVal === 'Migrated/Shifted' ? quickNewAddress : (prev.newAddress || '')
+        } : null);
+      }
+      setSuccessMessage(`Status updated to "${quickStatusVal}" for ${quickStatusVoter.name}.`);
+      setQuickStatusVoter(null);
+      setTimeout(() => setSuccessMessage(''), 3000);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to update voter status');
+    } finally {
+      setStatusSubmitting(false);
+    }
+  };
+
   const startViewVoter = (v: Voter) => {
     setEditingVoter(v);
     setFormData({
       voterId: v.voterId || '',
       name: v.name || '',
       relationName: v.relationName || '',
+      relationType: v.relationType || 'Father',
       aadharNumber: v.aadharNumber || '',
       gender: v.gender || 'Male',
       age: v.age || 18,
@@ -973,14 +1386,23 @@ const VoterManagement: React.FC = () => {
       stateId: v.stateId || '',
       districtId: v.districtId || '',
       constituencyId: v.constituencyId || '',
+      mandalId: v.mandalId || (v as any).mandal_id || '',
+      panchayatId: v.panchayatId || (v as any).panchayat_id || '',
+      wardId: v.wardId || (v as any).ward_id || '',
       boothId: v.boothId || '',
       vitalStatus: v.vitalStatus || 'Active',
+      deathDate: v.deathDate || '',
+      deathNotes: v.deathNotes || '',
       physicalProfile: v.physicalProfile || 'General',
       disabilityCategory: v.disabilityCategory || 'None',
+      disabilityPercent: v.disabilityPercent || 0,
       eciAssistanceNeeded: !!v.eciAssistanceNeeded,
       economicCategory: v.economicCategory || 'APL',
       incomeRange: v.incomeRange || '₹15,000 - ₹30,000',
       landOwnership: v.landOwnership || 'Small Farmer',
+      rationCardType: v.rationCardType || 'None',
+      rationCardNo: v.rationCardNo || '',
+      housingType: v.housingType || 'Pucca Concrete',
       education: v.education || 'Unspecified',
     });
     
@@ -1005,6 +1427,7 @@ const VoterManagement: React.FC = () => {
       voterId: '', 
       name: '', 
       relationName: '',
+      relationType: 'Father',
       aadharNumber: '',
       gender: 'Male', 
       age: 18, 
@@ -1025,14 +1448,23 @@ const VoterManagement: React.FC = () => {
       stateId: selectedStateIds.length > 0 ? selectedStateIds[0] : (selectedStateId !== 'all' ? selectedStateId : (states[0]?.id || '')),
       districtId: selectedDistrictIds.length > 0 ? selectedDistrictIds[0] : (selectedDistrictId !== 'all' ? selectedDistrictId : ''),
       constituencyId: selectedConstituencyIds.length > 0 ? selectedConstituencyIds[0] : (selectedConstituencyId !== 'all' ? selectedConstituencyId : ''),
+      mandalId: '',
+      panchayatId: '',
+      wardId: '',
       boothId: selectedBoothIds.length > 0 ? selectedBoothIds[0] : (selectedBoothId !== 'all' ? selectedBoothId : ''),
       vitalStatus: 'Active',
+      deathDate: '',
+      deathNotes: '',
       physicalProfile: 'General',
       disabilityCategory: 'None',
+      disabilityPercent: 0,
       eciAssistanceNeeded: false,
       economicCategory: 'APL',
       incomeRange: '₹15,000 - ₹30,000',
       landOwnership: 'Small Farmer',
+      rationCardType: 'None',
+      rationCardNo: '',
+      housingType: 'Pucca Concrete',
       education: 'Unspecified',
     });
     setSentimentStatus('Neutral');
@@ -1055,6 +1487,7 @@ const VoterManagement: React.FC = () => {
       voterId: v.voterId || '',
       name: v.name || '',
       relationName: v.relationName || '',
+      relationType: v.relationType || 'Father',
       aadharNumber: v.aadharNumber || '',
       gender: v.gender || 'Male',
       age: v.age || 18,
@@ -1075,14 +1508,23 @@ const VoterManagement: React.FC = () => {
       stateId: v.stateId || '',
       districtId: v.districtId || '',
       constituencyId: v.constituencyId || '',
+      mandalId: v.mandalId || (v as any).mandal_id || '',
+      panchayatId: v.panchayatId || (v as any).panchayat_id || '',
+      wardId: v.wardId || (v as any).ward_id || '',
       boothId: v.boothId || '',
       vitalStatus: v.vitalStatus || 'Active',
+      deathDate: v.deathDate || '',
+      deathNotes: v.deathNotes || '',
       physicalProfile: v.physicalProfile || 'General',
       disabilityCategory: v.disabilityCategory || 'None',
+      disabilityPercent: v.disabilityPercent || 0,
       eciAssistanceNeeded: !!v.eciAssistanceNeeded,
       economicCategory: v.economicCategory || 'APL',
       incomeRange: v.incomeRange || '₹15,000 - ₹30,000',
       landOwnership: v.landOwnership || 'Small Farmer',
+      rationCardType: v.rationCardType || 'None',
+      rationCardNo: v.rationCardNo || '',
+      housingType: v.housingType || 'Pucca Concrete',
       education: v.education || 'Unspecified',
     });
     
@@ -1141,81 +1583,145 @@ const VoterManagement: React.FC = () => {
   };
 
   // Helper to extract full resolved location for a voter record
+  const normalize = (id: any): string => {
+    if (id === null || id === undefined) return '';
+    return String(id).trim().replace(/\.0$/, '');
+  };
+
   const getVoterLocation = (v: Voter) => {
-    const bId = String(v.boothId || (v as any).booth_id || '').trim();
-    const boothObj = booths.find(b => String(b.id) === bId || String(b.boothNumber) === bId || b.name === bId);
+    const bId = normalize(v.boothId || (v as any).booth_id);
+    const boothObj = booths.find(b => normalize(b.id) === bId || normalize(b.boothNumber) === bId || b.name?.trim() === bId);
     
-    const rawCId = String(v.constituencyId || (v as any).constituency_id || (boothObj ? (boothObj.constituencyId || (boothObj as any).constituency_id) : '') || '').trim();
-    const constObj = constituencies.find(c => String(c.id) === rawCId || c.name === rawCId);
-    const cId = constObj ? String(constObj.id) : rawCId;
+    const rawWId = normalize(v.wardId || (v as any).ward_id || (boothObj ? (boothObj.wardId || (boothObj as any).ward_id) : ''));
+    const wardObj = wards.find(w => normalize(w.id) === rawWId || w.name?.trim() === rawWId);
+    const wId = wardObj ? normalize(wardObj.id) : rawWId;
+    const wName = wardObj ? wardObj.name : ((v as any).wardName || (v as any).ward_name || (v as any).ward || rawWId);
+
+    const rawPId = normalize(v.panchayatId || (v as any).panchayat_id || (wardObj ? wardObj.panchayatId : '') || (boothObj ? ((boothObj as any).panchayatId || (boothObj as any).panchayat_id) : ''));
+    const panchayatObj = panchayats.find(p => normalize(p.id) === rawPId || p.name?.trim() === rawPId);
+    const pId = panchayatObj ? normalize(panchayatObj.id) : rawPId;
+    const pName = panchayatObj ? panchayatObj.name : ((v as any).panchayatName || (v as any).panchayat_name || (v as any).panchayat || rawPId);
+
+    const rawMId = normalize(v.mandalId || (v as any).mandal_id || (panchayatObj ? panchayatObj.mandalId : '') || (wardObj ? wardObj.mandalId : '') || (boothObj ? (boothObj.mandalId || (boothObj as any).mandal_id) : ''));
+    const mandalObj = mandals.find(m => normalize(m.id) === rawMId || m.name?.trim() === rawMId);
+    const mId = mandalObj ? normalize(mandalObj.id) : rawMId;
+    const mName = mandalObj ? mandalObj.name : ((v as any).mandalName || (v as any).mandal || (v as any).mandal_name || rawMId);
+
+    const rawCId = normalize(v.constituencyId || (v as any).constituency_id || (mandalObj ? mandalObj.constituencyId : '') || (panchayatObj ? panchayatObj.constituencyId : '') || (wardObj ? wardObj.constituencyId : '') || (boothObj ? (boothObj.constituencyId || (boothObj as any).constituency_id) : ''));
+    const constObj = constituencies.find(c => normalize(c.id) === rawCId || c.name?.trim() === rawCId);
+    const cId = constObj ? normalize(constObj.id) : rawCId;
     const cName = constObj ? constObj.name : rawCId;
     
-    const rawDId = String(v.districtId || (v as any).district_id || (constObj ? (constObj.districtId || (constObj as any).district_id) : '') || '').trim();
-    const distObj = districts.find(d => String(d.id) === rawDId || d.name === rawDId);
-    const dId = distObj ? String(distObj.id) : rawDId;
+    const rawDId = normalize(v.districtId || (v as any).district_id || (constObj ? (constObj.districtId || (constObj as any).district_id) : '') || (mandalObj ? mandalObj.districtId : ''));
+    const distObj = districts.find(d => normalize(d.id) === rawDId || d.name?.trim() === rawDId);
+    const dId = distObj ? normalize(distObj.id) : rawDId;
     const dName = distObj ? distObj.name : rawDId;
     
-    const rawSId = String(v.stateId || (v as any).state_id || (distObj ? (distObj.stateId || (distObj as any).state_id) : '') || (constObj ? (constObj.stateId || (constObj as any).state_id) : '') || '').trim();
-    const stateObj = states.find(s => String(s.id) === rawSId || s.name === rawSId || s.code === rawSId);
-    const sId = stateObj ? String(stateObj.id) : rawSId;
+    const rawSId = normalize(v.stateId || (v as any).state_id || (distObj ? (distObj.stateId || (distObj as any).state_id) : '') || (constObj ? (constObj.stateId || (constObj as any).state_id) : ''));
+    const stateObj = states.find(s => normalize(s.id) === rawSId || s.name?.trim() === rawSId || s.code?.trim() === rawSId);
+    const sId = stateObj ? normalize(stateObj.id) : rawSId;
     const sName = stateObj ? stateObj.name : rawSId;
-    
+
     return { 
-      boothId: bId, 
-      boothNumber: boothObj ? boothObj.boothNumber : '',
+      boothId: boothObj ? normalize(boothObj.id) : bId, 
+      boothNumber: boothObj ? normalize(boothObj.boothNumber) : bId,
+      boothName: boothObj ? boothObj.name : (v.boothName || ''),
       constituencyId: cId, 
       constituencyName: cName,
       districtId: dId, 
       districtName: dName,
       stateId: sId,
-      stateName: sName
+      stateName: sName,
+      mandalId: mId,
+      mandalName: mName,
+      panchayatId: pId,
+      panchayatName: pName,
+      wardId: wId,
+      wardName: wName
     };
   };
 
   // Determine if a voter is within the user's assigned scope
   const matchesUserScope = (v: Voter) => {
-    if (isSuperAdmin) return true;
+    if (isPrivilegedUser) return true;
     if (!hasAssignedScope) return false;
 
     const loc = getVoterLocation(v);
 
     // 1. Check booth level restriction
     if (allowedBoothIds.length > 0) {
-      const matchBooth = allowedBoothIds.some(id => 
-        id === loc.boothId || 
-        id === loc.boothNumber ||
-        booths.some(b => String(b.id) === id && (String(b.boothNumber) === loc.boothId || b.name === loc.boothId || String(b.id) === loc.boothId))
-      );
+      const matchBooth = allowedBoothIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.boothId) || 
+               nId === normalize(loc.boothNumber) ||
+               booths.some(b => normalize(b.id) === nId && (normalize(b.boothNumber) === normalize(loc.boothId) || b.name === loc.boothId || normalize(b.id) === normalize(loc.boothId)));
+      });
       if (matchBooth) return true;
     }
 
-    // 2. Check constituency level restriction
+    // 2. Check ward level restriction
+    if (allowedWardIds.length > 0) {
+      const matchWard = allowedWardIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.wardId) || 
+               nId === normalize(loc.wardName) ||
+               wards.some(w => normalize(w.id) === nId && (w.name === loc.wardName || normalize(w.id) === normalize(loc.wardId)));
+      });
+      if (matchWard) return true;
+    }
+
+    // 3. Check panchayat level restriction
+    if (allowedPanchayatIds.length > 0) {
+      const matchPanchayat = allowedPanchayatIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.panchayatId) || 
+               nId === normalize(loc.panchayatName) ||
+               panchayats.some(p => normalize(p.id) === nId && (p.name === loc.panchayatName || normalize(p.id) === normalize(loc.panchayatId)));
+      });
+      if (matchPanchayat) return true;
+    }
+
+    // 4. Check mandal (block/area) level restriction
+    if (allowedMandalIds.length > 0) {
+      const matchMandal = allowedMandalIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.mandalId) || 
+               nId === normalize(loc.mandalName) ||
+               mandals.some(m => normalize(m.id) === nId && (m.name === loc.mandalName || normalize(m.id) === normalize(loc.mandalId)));
+      });
+      if (matchMandal) return true;
+    }
+
+    // 5. Check constituency level restriction
     if (allowedConstituencyIds.length > 0) {
-      const matchConst = allowedConstituencyIds.some(id => 
-        id === loc.constituencyId || 
-        id === loc.constituencyName ||
-        constituencies.some(c => String(c.id) === id && (c.name === loc.constituencyName || String(c.id) === loc.constituencyId))
-      );
+      const matchConst = allowedConstituencyIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.constituencyId) || 
+               nId === normalize(loc.constituencyName) ||
+               constituencies.some(c => normalize(c.id) === nId && (c.name === loc.constituencyName || normalize(c.id) === normalize(loc.constituencyId)));
+      });
       if (matchConst) return true;
     }
 
-    // 3. Check district level restriction
+    // 6. Check district level restriction
     if (allowedDistrictIds.length > 0) {
-      const matchDist = allowedDistrictIds.some(id => 
-        id === loc.districtId || 
-        id === loc.districtName ||
-        districts.some(d => String(d.id) === id && (d.name === loc.districtName || String(d.id) === loc.districtId))
-      );
+      const matchDist = allowedDistrictIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.districtId) || 
+               nId === normalize(loc.districtName) ||
+               districts.some(d => normalize(d.id) === nId && (d.name === loc.districtName || normalize(d.id) === normalize(loc.districtId)));
+      });
       if (matchDist) return true;
     }
 
-    // 4. Check state level restriction
+    // 7. Check state level restriction
     if (allowedStateIds.length > 0) {
-      const matchState = allowedStateIds.some(id => 
-        id === loc.stateId || 
-        id === loc.stateName ||
-        states.some(s => String(s.id) === id && (s.name === loc.stateName || s.code === loc.stateName || String(s.id) === loc.stateId))
-      );
+      const matchState = allowedStateIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.stateId) || 
+               nId === normalize(loc.stateName) ||
+               states.some(s => normalize(s.id) === nId && (s.name === loc.stateName || s.code === loc.stateName || normalize(s.id) === normalize(loc.stateId)));
+      });
       if (matchState) return true;
     }
 
@@ -1236,6 +1742,13 @@ const VoterManagement: React.FC = () => {
       const matched = districts.filter(d => distIds.includes(String(d.id))).map(d => String(d.stateId));
       return Array.from(new Set(matched));
     }
+    if (allowedMandalIds.length > 0) {
+      const mnds = mandals.filter(m => allowedMandalIds.includes(String(m.id)));
+      const constIds = mnds.map(m => String(m.constituencyId));
+      const consts = constituencies.filter(c => constIds.includes(String(c.id)));
+      const distIds = consts.map(c => String(c.districtId));
+      return Array.from(new Set(districts.filter(d => distIds.includes(String(d.id))).map(d => String(d.stateId))));
+    }
     if (allowedBoothIds.length > 0) {
       const bths = booths.filter(b => allowedBoothIds.includes(String(b.id)));
       const constIds = bths.map(b => String(b.constituencyId));
@@ -1245,7 +1758,7 @@ const VoterManagement: React.FC = () => {
       return Array.from(new Set(matched));
     }
     return null;
-  }, [isRestrictedUser, allowedStateIds, allowedDistrictIds, allowedConstituencyIds, allowedBoothIds, districts, constituencies, booths]);
+  }, [isRestrictedUser, allowedStateIds, allowedDistrictIds, allowedConstituencyIds, allowedMandalIds, allowedBoothIds, districts, constituencies, mandals, booths]);
 
   // Scoped District IDs for dropdown filters
   const validScopedDistrictIds = useMemo(() => {
@@ -1253,6 +1766,12 @@ const VoterManagement: React.FC = () => {
     if (allowedDistrictIds.length > 0) return allowedDistrictIds;
     if (allowedConstituencyIds.length > 0) {
       const consts = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id)));
+      return Array.from(new Set(consts.map(c => String(c.districtId))));
+    }
+    if (allowedMandalIds.length > 0) {
+      const mnds = mandals.filter(m => allowedMandalIds.includes(String(m.id)));
+      const constIds = mnds.map(m => String(m.constituencyId));
+      const consts = constituencies.filter(c => constIds.includes(String(c.id)));
       return Array.from(new Set(consts.map(c => String(c.districtId))));
     }
     if (allowedBoothIds.length > 0) {
@@ -1265,12 +1784,22 @@ const VoterManagement: React.FC = () => {
       return districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
     }
     return null;
-  }, [isRestrictedUser, allowedDistrictIds, allowedConstituencyIds, allowedBoothIds, allowedStateIds, districts, constituencies, booths]);
+  }, [isRestrictedUser, allowedDistrictIds, allowedConstituencyIds, allowedMandalIds, allowedBoothIds, allowedStateIds, districts, constituencies, mandals, booths]);
 
   // Scoped Constituency IDs for dropdown filters
   const validScopedConstituencyIds = useMemo(() => {
     if (!isRestrictedUser) return null;
     if (allowedConstituencyIds.length > 0) return allowedConstituencyIds;
+    if (allowedMandalIds.length > 0) {
+      const mnds = mandals.filter(m => allowedMandalIds.includes(String(m.id)));
+      return Array.from(new Set(mnds.map(m => String(m.constituencyId))));
+    }
+    if (allowedPanchayatIds.length > 0) {
+      const pchs = panchayats.filter(p => allowedPanchayatIds.includes(String(p.id)));
+      const mndIds = pchs.map(p => String(p.mandalId));
+      const mnds = mandals.filter(m => mndIds.includes(String(m.id)));
+      return Array.from(new Set(mnds.map(m => String(m.constituencyId))));
+    }
     if (allowedBoothIds.length > 0) {
       const bths = booths.filter(b => allowedBoothIds.includes(String(b.id)));
       return Array.from(new Set(bths.map(b => String(b.constituencyId))));
@@ -1283,12 +1812,63 @@ const VoterManagement: React.FC = () => {
       return constituencies.filter(c => distIds.includes(String(c.districtId))).map(c => String(c.id));
     }
     return null;
-  }, [isRestrictedUser, allowedConstituencyIds, allowedBoothIds, allowedDistrictIds, allowedStateIds, constituencies, districts, booths]);
+  }, [isRestrictedUser, allowedConstituencyIds, allowedMandalIds, allowedPanchayatIds, allowedBoothIds, allowedDistrictIds, allowedStateIds, constituencies, mandals, panchayats, districts, booths]);
+
+  // Scoped Mandal (Block/Area) IDs for dropdown filters
+  const validScopedMandalIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedMandalIds.length > 0) return allowedMandalIds;
+    if (allowedPanchayatIds.length > 0) {
+      const pchs = panchayats.filter(p => allowedPanchayatIds.includes(String(p.id)));
+      return Array.from(new Set(pchs.map(p => String(p.mandalId))));
+    }
+    if (allowedConstituencyIds.length > 0) {
+      return mandals.filter(m => allowedConstituencyIds.includes(String(m.constituencyId))).map(m => String(m.id));
+    }
+    if (allowedDistrictIds.length > 0) {
+      const consts = constituencies.filter(c => allowedDistrictIds.includes(String(c.districtId))).map(c => String(c.id));
+      return mandals.filter(m => consts.includes(String(m.constituencyId)) || allowedDistrictIds.includes(String(m.districtId))).map(m => String(m.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedMandalIds, allowedPanchayatIds, allowedConstituencyIds, allowedDistrictIds, mandals, panchayats, constituencies]);
+
+  // Scoped Panchayat / ULB IDs for dropdown filters
+  const validScopedPanchayatIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedPanchayatIds.length > 0) return allowedPanchayatIds;
+    if (allowedWardIds.length > 0) {
+      const wrds = wards.filter(w => allowedWardIds.includes(String(w.id)));
+      return Array.from(new Set(wrds.map(w => String(w.panchayatId))));
+    }
+    if (allowedMandalIds.length > 0) {
+      return panchayats.filter(p => allowedMandalIds.includes(String(p.mandalId))).map(p => String(p.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedPanchayatIds, allowedWardIds, allowedMandalIds, panchayats, wards]);
+
+  // Scoped Ward / Village IDs for dropdown filters
+  const validScopedWardIds = useMemo(() => {
+    if (!isRestrictedUser) return null;
+    if (allowedWardIds.length > 0) return allowedWardIds;
+    if (allowedPanchayatIds.length > 0) {
+      return wards.filter(w => allowedPanchayatIds.includes(String(w.panchayatId))).map(w => String(w.id));
+    }
+    return null;
+  }, [isRestrictedUser, allowedWardIds, allowedPanchayatIds, wards]);
 
   // Scoped Booth IDs for dropdown filters
   const validScopedBoothIds = useMemo(() => {
     if (!isRestrictedUser) return null;
     if (allowedBoothIds.length > 0) return allowedBoothIds;
+    if (allowedWardIds.length > 0) {
+      return booths.filter(b => allowedWardIds.includes(String(b.wardId))).map(b => String(b.id));
+    }
+    if (allowedPanchayatIds.length > 0) {
+      return booths.filter(b => allowedPanchayatIds.includes(String((b as any).panchayatId))).map(b => String(b.id));
+    }
+    if (allowedMandalIds.length > 0) {
+      return booths.filter(b => allowedMandalIds.includes(String(b.mandalId))).map(b => String(b.id));
+    }
     if (allowedConstituencyIds.length > 0) {
       return booths.filter(b => allowedConstituencyIds.includes(String(b.constituencyId))).map(b => String(b.id));
     }
@@ -1302,7 +1882,7 @@ const VoterManagement: React.FC = () => {
       return booths.filter(b => consts.includes(String(b.constituencyId))).map(b => String(b.id));
     }
     return null;
-  }, [isRestrictedUser, allowedBoothIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, constituencies, districts]);
+  }, [isRestrictedUser, allowedBoothIds, allowedWardIds, allowedPanchayatIds, allowedMandalIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, wards, panchayats, mandals, constituencies, districts]);
 
   const filteredVoters = useMemo(() => {
     const seenKeys = new Set<string>();
@@ -1331,43 +1911,95 @@ const VoterManagement: React.FC = () => {
       // 2. Secure demographic scope enforcement for non-Super Admins
       if (!matchesUserScope(v)) return false;
 
-      // 3. Instant On-Screen Demographic Dropdown Filters
+      // 3. Instant On-Screen 7-Tier Demographic Dropdown Filters
       const loc = getVoterLocation(v);
 
-      // State filter
+      // State filter (1)
       if (selectedStateIds.length > 0) {
-        if (!loc.stateId || !selectedStateIds.includes(loc.stateId)) return false;
+        const matchState = selectedStateIds.some(sel => normalize(sel) === normalize(loc.stateId) || (states.some(s => normalize(s.id) === normalize(sel) && (normalize(s.id) === normalize(loc.stateId) || s.name === loc.stateName || s.code === loc.stateName))));
+        if (!matchState) return false;
       } else if (selectedStateId && selectedStateId !== 'all') {
-        if (loc.stateId !== selectedStateId) return false;
+        const selNorm = normalize(selectedStateId);
+        const matchState = selNorm === normalize(loc.stateId) || states.some(s => normalize(s.id) === selNorm && (normalize(s.id) === normalize(loc.stateId) || s.name === loc.stateName || s.code === loc.stateName));
+        if (!matchState) return false;
       }
 
-      // District filter
+      // District filter (2)
       if (selectedDistrictIds.length > 0) {
-        if (!loc.districtId || !selectedDistrictIds.includes(loc.districtId)) return false;
+        const matchDistrict = selectedDistrictIds.some(sel => normalize(sel) === normalize(loc.districtId) || (districts.some(d => normalize(d.id) === normalize(sel) && (normalize(d.id) === normalize(loc.districtId) || d.name === loc.districtName))));
+        if (!matchDistrict) return false;
       } else if (selectedDistrictId && selectedDistrictId !== 'all') {
-        if (loc.districtId !== selectedDistrictId) return false;
+        const selNorm = normalize(selectedDistrictId);
+        const matchDistrict = selNorm === normalize(loc.districtId) || districts.some(d => normalize(d.id) === selNorm && (normalize(d.id) === normalize(loc.districtId) || d.name === loc.districtName));
+        if (!matchDistrict) return false;
       }
 
-      // Constituency filter
+      // Constituency filter (3)
       if (selectedConstituencyIds.length > 0) {
-        if (!loc.constituencyId || !selectedConstituencyIds.includes(loc.constituencyId)) return false;
+        const matchConst = selectedConstituencyIds.some(sel => normalize(sel) === normalize(loc.constituencyId) || (constituencies.some(c => normalize(c.id) === normalize(sel) && (normalize(c.id) === normalize(loc.constituencyId) || c.name === loc.constituencyName))));
+        if (!matchConst) return false;
       } else if (selectedConstituencyId && selectedConstituencyId !== 'all') {
-        if (loc.constituencyId !== selectedConstituencyId) return false;
+        const selNorm = normalize(selectedConstituencyId);
+        const matchConst = selNorm === normalize(loc.constituencyId) || constituencies.some(c => normalize(c.id) === selNorm && (normalize(c.id) === normalize(loc.constituencyId) || c.name === loc.constituencyName));
+        if (!matchConst) return false;
       }
 
-      // Booth filter
+      // Block / Area (Mandal) filter (4)
+      if (selectedMandalIds.length > 0) {
+        const matchMandal = selectedMandalIds.some(sel => normalize(sel) === normalize(loc.mandalId) || (mandals.some(m => normalize(m.id) === normalize(sel) && (normalize(m.id) === normalize(loc.mandalId) || m.name === loc.mandalName))));
+        if (!matchMandal) return false;
+      } else if (selectedMandalId && selectedMandalId !== 'all') {
+        const selNorm = normalize(selectedMandalId);
+        const matchMandal = selNorm === normalize(loc.mandalId) || mandals.some(m => normalize(m.id) === selNorm && (normalize(m.id) === normalize(loc.mandalId) || m.name === loc.mandalName));
+        if (!matchMandal) return false;
+      }
+
+      // Panchayat / ULB filter (5)
+      if (selectedPanchayatIds.length > 0) {
+        const matchPanchayat = selectedPanchayatIds.some(sel => normalize(sel) === normalize(loc.panchayatId) || (panchayats.some(p => normalize(p.id) === normalize(sel) && (normalize(p.id) === normalize(loc.panchayatId) || p.name === loc.panchayatName))));
+        if (!matchPanchayat) return false;
+      } else if (selectedPanchayatId && selectedPanchayatId !== 'all') {
+        const selNorm = normalize(selectedPanchayatId);
+        const matchPanchayat = selNorm === normalize(loc.panchayatId) || panchayats.some(p => normalize(p.id) === selNorm && (normalize(p.id) === normalize(loc.panchayatId) || p.name === loc.panchayatName));
+        if (!matchPanchayat) return false;
+      }
+
+      // Ward / Village filter (6)
+      if (selectedWardIds.length > 0) {
+        const matchWard = selectedWardIds.some(sel => normalize(sel) === normalize(loc.wardId) || (wards.some(w => normalize(w.id) === normalize(sel) && (normalize(w.id) === normalize(loc.wardId) || w.name === loc.wardName))));
+        if (!matchWard) return false;
+      } else if (selectedWardId && selectedWardId !== 'all') {
+        const selNorm = normalize(selectedWardId);
+        const matchWard = selNorm === normalize(loc.wardId) || wards.some(w => normalize(w.id) === selNorm && (normalize(w.id) === normalize(loc.wardId) || w.name === loc.wardName));
+        if (!matchWard) return false;
+      }
+
+      // Polling Booth filter (7)
       if (selectedBoothIds.length > 0) {
-        if (!loc.boothId || !selectedBoothIds.includes(loc.boothId)) return false;
+        const matchesBooth = selectedBoothIds.some(selId => {
+          const nSel = normalize(selId);
+          return nSel === normalize(loc.boothId) || 
+                 nSel === normalize(loc.boothNumber) ||
+                 booths.some(b => (normalize(b.id) === nSel || normalize(b.boothNumber) === nSel) && 
+                   (normalize(b.id) === normalize(loc.boothId) || normalize(b.boothNumber) === normalize(loc.boothId) || normalize(b.boothNumber) === normalize(loc.boothNumber)));
+        });
+        if (!matchesBooth) return false;
       } else if (selectedBoothId && selectedBoothId !== 'all') {
-        if (loc.boothId !== selectedBoothId) return false;
+        const nSel = normalize(selectedBoothId);
+        const matchesBooth = nSel === normalize(loc.boothId) || 
+                             nSel === normalize(loc.boothNumber) ||
+                             booths.some(b => (normalize(b.id) === nSel || normalize(b.boothNumber) === nSel) && 
+                               (normalize(b.id) === normalize(loc.boothId) || normalize(b.boothNumber) === normalize(loc.boothId) || normalize(b.boothNumber) === normalize(loc.boothNumber)));
+        if (!matchesBooth) return false;
       }
 
       // Filter by vital status
-      const vStatus = v.vitalStatus || 'Active';
+      const vStatus = (v.vitalStatus || (v as any).vital_status || 'Active').toString().trim().toLowerCase();
       if (filterVitalStatus !== 'all') {
-        if (filterVitalStatus === 'Active' && vStatus !== 'Active') return false;
-        if (filterVitalStatus === 'Deceased' && vStatus !== 'Deceased') return false;
-        if (filterVitalStatus === 'Migrated/Shifted' && vStatus !== 'Migrated/Shifted' && vStatus !== 'Migrated') return false;
+        const fStatus = filterVitalStatus.toLowerCase();
+        if (fStatus === 'active' && vStatus !== 'active') return false;
+        if (fStatus === 'deceased' && vStatus !== 'deceased') return false;
+        if ((fStatus.includes('migrat') || fStatus.includes('shift')) && !vStatus.includes('migrat') && !vStatus.includes('shift')) return false;
       }
 
       // Filter by Gender
@@ -1430,21 +2062,34 @@ const VoterManagement: React.FC = () => {
     selectedDistrictIds,
     selectedConstituencyId,
     selectedConstituencyIds,
+    selectedMandalId,
+    selectedMandalIds,
+    selectedPanchayatId,
+    selectedPanchayatIds,
+    selectedWardId,
+    selectedWardIds,
     selectedBoothId,
     selectedBoothIds,
     voterSentiments,
     isSuperAdmin,
     hasAssignedScope,
     allowedBoothIds,
+    allowedWardIds,
+    allowedPanchayatIds,
+    allowedMandalIds,
     allowedConstituencyIds,
     allowedDistrictIds,
     allowedStateIds,
     booths,
+    wards,
+    panchayats,
+    mandals,
     constituencies,
     districts,
     states
   ]);
 
+  // 1. State Filter Options
   const filterableStates = states.filter(s => 
     !validScopedStateIds || validScopedStateIds.includes(String(s.id))
   );
@@ -1452,6 +2097,7 @@ const VoterManagement: React.FC = () => {
     s.name.toLowerCase().includes(stateSearchText.toLowerCase())
   );
 
+  // 2. District Filter Options (cascades from State)
   const filterableDistricts = districts.filter(d => {
     const isScoped = !validScopedDistrictIds || validScopedDistrictIds.includes(String(d.id));
     const matchesSelectedState = selectedStateIds.length === 0 || selectedStateIds.includes(String(d.stateId));
@@ -1461,6 +2107,7 @@ const VoterManagement: React.FC = () => {
     d.name.toLowerCase().includes(districtSearchText.toLowerCase())
   );
 
+  // 3. Constituency Filter Options (cascades from District / State)
   const filterableConstituencies = constituencies.filter(c => {
     const dist = districts.find(d => String(d.id) === String(c.districtId));
     const isScoped = !validScopedConstituencyIds || validScopedConstituencyIds.includes(String(c.id));
@@ -1472,6 +2119,56 @@ const VoterManagement: React.FC = () => {
     c.name.toLowerCase().includes(constituencySearchText.toLowerCase())
   );
 
+  // 4. Block / Area (Mandal) Filter Options (cascades from Constituency / District)
+  const filterableMandals = mandals.filter(m => {
+    const constObj = constituencies.find(c => String(c.id) === String(m.constituencyId));
+    const distObj = districts.find(d => String(d.id) === String(m.districtId || constObj?.districtId));
+    const isScoped = !validScopedMandalIds || validScopedMandalIds.includes(String(m.id));
+    const matchesSelectedState = selectedStateIds.length === 0 || (distObj && selectedStateIds.includes(String(distObj.stateId)));
+    const matchesSelectedDistrict = selectedDistrictIds.length === 0 || (distObj && selectedDistrictIds.includes(String(distObj.id))) || (constObj && selectedDistrictIds.includes(String(constObj.districtId)));
+    const matchesSelectedConstituency = selectedConstituencyIds.length === 0 || selectedConstituencyIds.includes(String(m.constituencyId));
+    return isScoped && matchesSelectedState && matchesSelectedDistrict && matchesSelectedConstituency;
+  });
+  const searchedMandals = filterableMandals.filter(m =>
+    m.name.toLowerCase().includes(mandalSearchText.toLowerCase())
+  );
+
+  // 5. Panchayat / ULB Filter Options (cascades from Mandal / Constituency)
+  const filterablePanchayats = panchayats.filter(p => {
+    const mandalObj = mandals.find(m => String(m.id) === String(p.mandalId));
+    const constObj = constituencies.find(c => String(c.id) === String(p.constituencyId || mandalObj?.constituencyId));
+    const distObj = districts.find(d => String(d.id) === String(constObj?.districtId));
+    const isScoped = !validScopedPanchayatIds || validScopedPanchayatIds.includes(String(p.id));
+    const matchesSelectedState = selectedStateIds.length === 0 || (distObj && selectedStateIds.includes(String(distObj.stateId)));
+    const matchesSelectedDistrict = selectedDistrictIds.length === 0 || (distObj && selectedDistrictIds.includes(String(distObj.id)));
+    const matchesSelectedConstituency = selectedConstituencyIds.length === 0 || (constObj && selectedConstituencyIds.includes(String(constObj.id)));
+    const matchesSelectedMandal = selectedMandalIds.length === 0 || selectedMandalIds.includes(String(p.mandalId));
+    return isScoped && matchesSelectedState && matchesSelectedDistrict && matchesSelectedConstituency && matchesSelectedMandal;
+  });
+  const searchedPanchayats = filterablePanchayats.filter(p =>
+    p.name.toLowerCase().includes(panchayatSearchText.toLowerCase())
+  );
+
+  // 6. Ward / Village Filter Options (cascades from Panchayat / Mandal)
+  const filterableWards = wards.filter(w => {
+    const panchayatObj = panchayats.find(p => String(p.id) === String(w.panchayatId));
+    const mandalObj = mandals.find(m => String(m.id) === String(w.mandalId || panchayatObj?.mandalId));
+    const constObj = constituencies.find(c => String(c.id) === String(mandalObj?.constituencyId));
+    const distObj = districts.find(d => String(d.id) === String(constObj?.districtId));
+    const isScoped = !validScopedWardIds || validScopedWardIds.includes(String(w.id));
+    const matchesSelectedState = selectedStateIds.length === 0 || (distObj && selectedStateIds.includes(String(distObj.stateId)));
+    const matchesSelectedDistrict = selectedDistrictIds.length === 0 || (distObj && selectedDistrictIds.includes(String(distObj.id)));
+    const matchesSelectedConstituency = selectedConstituencyIds.length === 0 || (constObj && selectedConstituencyIds.includes(String(constObj.id)));
+    const matchesSelectedMandal = selectedMandalIds.length === 0 || (mandalObj && selectedMandalIds.includes(String(mandalObj.id)));
+    const matchesSelectedPanchayat = selectedPanchayatIds.length === 0 || selectedPanchayatIds.includes(String(w.panchayatId));
+    return isScoped && matchesSelectedState && matchesSelectedDistrict && matchesSelectedConstituency && matchesSelectedMandal && matchesSelectedPanchayat;
+  });
+  const searchedWards = filterableWards.filter(w =>
+    w.name.toLowerCase().includes(wardSearchText.toLowerCase()) ||
+    (w.wardNumber && String(w.wardNumber).includes(wardSearchText))
+  );
+
+  // 7. Polling Booth Filter Options (cascades from Ward / Panchayat / Mandal / Constituency / District / State)
   const filterableBooths = booths.filter(b => {
     const conn = constituencies.find(c => String(c.id) === String(b.constituencyId));
     const dist = districts.find(d => String(d.id) === String(conn?.districtId));
@@ -1479,7 +2176,10 @@ const VoterManagement: React.FC = () => {
     const matchesSelectedState = selectedStateIds.length === 0 || (dist && selectedStateIds.includes(String(dist.stateId)));
     const matchesSelectedDistrict = selectedDistrictIds.length === 0 || (conn && selectedDistrictIds.includes(String(conn.districtId)));
     const matchesSelectedConstituency = selectedConstituencyIds.length === 0 || selectedConstituencyIds.includes(String(b.constituencyId));
-    return isScoped && matchesSelectedState && matchesSelectedDistrict && matchesSelectedConstituency;
+    const matchesSelectedMandal = selectedMandalIds.length === 0 || selectedMandalIds.includes(String(b.mandalId));
+    const matchesSelectedPanchayat = selectedPanchayatIds.length === 0 || selectedPanchayatIds.includes(String((b as any).panchayatId));
+    const matchesSelectedWard = selectedWardIds.length === 0 || selectedWardIds.includes(String(b.wardId));
+    return isScoped && matchesSelectedState && matchesSelectedDistrict && matchesSelectedConstituency && matchesSelectedMandal && matchesSelectedPanchayat && matchesSelectedWard;
   });
   const searchedBooths = filterableBooths.filter(b => 
     b.name.toLowerCase().includes(boothSearchText.toLowerCase()) || 
@@ -1527,6 +2227,14 @@ const VoterManagement: React.FC = () => {
         </div>
 
         <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+          <button 
+            type="button"
+            onClick={() => setIsWhatsAppFeedModalOpen(true)}
+            className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20"
+            title="Generate WhatsApp Extension Stream URL for filtered voters"
+          >
+            <MessageCircle size={14} /> WhatsApp Link
+          </button>
           {!isVolunteer && hasRight('voters', 'c') && (
             <>
               <button 
@@ -1648,522 +2356,961 @@ const VoterManagement: React.FC = () => {
       </div>
 
       <div className="webapp-card overflow-hidden">
-        {/* Filters Header */}
-        <div className="p-6 border-b border-zinc-200 dark:border-zinc-800 space-y-6 bg-zinc-50/50 dark:bg-zinc-900/30">
-          <div className="flex flex-col md:flex-row gap-4 items-stretch md:items-end">
-            <div className="flex-1 space-y-1.5">
-              <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5">
-                <Search size={10} className="text-blue-500" /> Search Registry
-              </label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" size={14} />
+        {/* Search Registry Header with Filter Button */}
+        <div className="p-4 sm:p-6 border-b border-zinc-200 dark:border-zinc-800 space-y-3 bg-zinc-50/50 dark:bg-zinc-900/30">
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between">
+            {/* Search Box + Filter Button */}
+            <div className="flex flex-1 items-center gap-2.5">
+              <div className="relative flex-1">
+                <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-zinc-400" size={15} />
                 <input 
                   type="text" 
                   placeholder="Search name, EPIC ID or Mobile..." 
                   value={searchTerm} 
                   onChange={e => setSearchTerm(e.target.value)} 
-                  className="webapp-input pl-10 h-11 text-xs py-0 w-full bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus:border-blue-500/50" 
+                  className="webapp-input pl-10 pr-9 h-11 text-xs py-0 w-full bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 focus:border-blue-500/50 rounded-xl" 
                 />
+                {searchTerm && (
+                  <button 
+                    type="button" 
+                    onClick={() => setSearchTerm('')} 
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 p-0.5 rounded-full"
+                    title="Clear search"
+                  >
+                    <X size={14} />
+                  </button>
+                )}
               </div>
+
+              {/* Filter Button opening Modal */}
+              <button
+                type="button"
+                onClick={() => setIsFilterModalOpen(true)}
+                className={`h-11 px-4 rounded-xl border font-bold text-xs flex items-center gap-2 transition-all shrink-0 select-none shadow-xs ${
+                  activeFilterCount > 0
+                    ? 'bg-blue-600 border-blue-600 text-white shadow-blue-500/20 hover:bg-blue-700'
+                    : 'bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
+                }`}
+              >
+                <SlidersHorizontal size={14} className={activeFilterCount > 0 ? 'text-white' : 'text-blue-500'} />
+                <span>Filters</span>
+                {activeFilterCount > 0 && (
+                  <span className="bg-white text-blue-600 dark:bg-white dark:text-blue-700 px-1.5 py-0.5 rounded-full text-[10px] font-black leading-none min-w-[18px] text-center">
+                    {activeFilterCount}
+                  </span>
+                )}
+              </button>
+
+              {/* WhatsApp Extension Feed Link Button */}
+              <button
+                type="button"
+                onClick={() => setIsWhatsAppFeedModalOpen(true)}
+                className="h-11 px-3.5 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold text-xs flex items-center gap-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all shrink-0 shadow-xs"
+                title="Generate WhatsApp Extension Stream URL for these filtered voters"
+              >
+                <MessageCircle size={14} className="text-emerald-600 dark:text-emerald-400" />
+                <span className="hidden md:inline">WhatsApp Link</span>
+              </button>
             </div>
-            
-            <div className="hidden lg:flex items-center gap-3 self-center mt-4">
-              <div className="h-8 w-px bg-zinc-200 dark:bg-zinc-800 mx-2" />
-              <div className="text-right">
+
+            {/* Total Results Counter */}
+            <div className="flex items-center justify-between sm:justify-end gap-3 px-3 py-2 sm:py-0 bg-white dark:bg-zinc-950 sm:bg-transparent rounded-xl border sm:border-0 border-zinc-200 dark:border-zinc-800 shrink-0">
+              <div className="text-left sm:text-right">
                 <div className="text-[10px] font-black text-zinc-400 uppercase tracking-widest leading-none">Total Results</div>
-                <div className="text-lg font-black text-blue-600 leading-none mt-1">{filteredVoters.length}</div>
+                <div className="text-base sm:text-lg font-black text-blue-600 leading-none mt-1">{filteredVoters.length}</div>
               </div>
             </div>
           </div>
 
-          {/* Demographic Multi-Select Dropdowns */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
-            {/* State Filter */}
-            <div className="space-y-1.5 relative" ref={stateDropdownRef}>
-              <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5">
-                <Globe size={10} className="text-blue-500" /> State
-              </label>
+          {/* Active Filter Chips / Tags */}
+          {activeFilterCount > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-1">
+              <span className="text-[10px] font-black uppercase text-zinc-400 tracking-wider mr-1">Active:</span>
+              {selectedStateIds.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  State ({selectedStateIds.length})
+                  <button type="button" onClick={() => setSelectedStateIds([])} className="hover:text-blue-900 dark:hover:text-white ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {selectedDistrictIds.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  District ({selectedDistrictIds.length})
+                  <button type="button" onClick={() => setSelectedDistrictIds([])} className="hover:text-blue-900 dark:hover:text-white ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {selectedConstituencyIds.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  Constituency ({selectedConstituencyIds.length})
+                  <button type="button" onClick={() => setSelectedConstituencyIds([])} className="hover:text-blue-900 dark:hover:text-white ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {selectedMandalIds.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  Block ({selectedMandalIds.length})
+                  <button type="button" onClick={() => setSelectedMandalIds([])} className="hover:text-blue-900 dark:hover:text-white ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {selectedPanchayatIds.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  Panchayat ({selectedPanchayatIds.length})
+                  <button type="button" onClick={() => setSelectedPanchayatIds([])} className="hover:text-blue-900 dark:hover:text-white ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {selectedWardIds.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  Ward ({selectedWardIds.length})
+                  <button type="button" onClick={() => setSelectedWardIds([])} className="hover:text-blue-900 dark:hover:text-white ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {selectedBoothIds.length > 0 && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40">
+                  Booth ({selectedBoothIds.length})
+                  <button type="button" onClick={() => setSelectedBoothIds([])} className="hover:text-blue-900 dark:hover:text-white ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterGender !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Gender: {filterGender}
+                  <button type="button" onClick={() => setFilterGender('all')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterCaste !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Caste: {filterCaste}
+                  <button type="button" onClick={() => setFilterCaste('all')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterAgeGroup !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Age: {filterAgeGroup}
+                  <button type="button" onClick={() => setFilterAgeGroup('all')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterEconomicCategory !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Economy: {filterEconomicCategory}
+                  <button type="button" onClick={() => setFilterEconomicCategory('all')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterSentiment !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Sentiment: {filterSentiment}
+                  <button type="button" onClick={() => setFilterSentiment('all')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterCompleteness !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Profile: {filterCompleteness}
+                  <button type="button" onClick={() => setFilterCompleteness('all')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterIsKaryakarta !== 'all' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Volunteer: {filterIsKaryakarta === 'yes' ? 'Volunteers' : 'General'}
+                  <button type="button" onClick={() => setFilterIsKaryakarta('all')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
+              {filterVitalStatus !== 'Active' && (
+                <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700">
+                  Status: {filterVitalStatus}
+                  <button type="button" onClick={() => setFilterVitalStatus('Active')} className="hover:text-red-500 ml-0.5"><X size={11} /></button>
+                </span>
+              )}
               <button
                 type="button"
-                onClick={() => setIsStateDropdownOpen(!isStateDropdownOpen)}
-                className="w-full flex items-center justify-between bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[44px]"
+                onClick={handleResetAllFilters}
+                className="text-[11px] font-bold text-red-600 dark:text-red-400 hover:underline ml-1 px-1 py-0.5"
               >
-                <span className="truncate text-zinc-700 dark:text-zinc-300">
-                  {selectedStateIds.length === 0 
-                    ? 'All States' 
-                    : selectedStateIds.length === 1 
-                      ? states.find(s => s.id === selectedStateIds[0])?.name || `${selectedStateIds.length} Selected`
-                      : `${selectedStateIds.length} States`
-                  }
-                </span>
-                <span className="text-zinc-400 text-[10px]">▼</span>
+                Clear All
               </button>
-              
-              {isStateDropdownOpen && (
-                <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 animate-in fade-in slide-in-from-top-1 duration-100 flex flex-col max-h-64">
-                  <div className="relative mb-2 shrink-0">
-                    <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder="Search state..."
-                      value={stateSearchText}
-                      onChange={e => setStateSearchText(e.target.value)}
-                      className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
-                    <div 
-                      onClick={() => setSelectedStateIds([])}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-350 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                    >
-                      <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                        selectedStateIds.length === 0 
-                          ? 'border-blue-500 bg-blue-500 text-white' 
-                          : 'border-zinc-300 dark:border-zinc-700'
-                      }`}>
-                        {selectedStateIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
-                      </div>
-                      All States
-                    </div>
-                    {searchedStates.map(s => {
-                      const isChecked = selectedStateIds.includes(s.id);
-                      return (
-                        <div 
-                          key={s.id}
-                          onClick={() => {
-                            if (isChecked) {
-                              setSelectedStateIds(prev => prev.filter(id => id !== s.id));
-                            } else {
-                              setSelectedStateIds(prev => [...prev, s.id]);
-                            }
-                          }}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                        >
-                          <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                            isChecked 
-                              ? 'border-blue-500 bg-blue-500 text-white' 
-                              : 'border-zinc-300 dark:border-zinc-700'
-                          }`}>
-                            {isChecked && <span className="text-[9px] font-black">✓</span>}
-                          </div>
-                          {s.name}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
             </div>
+          )}
+        </div>
 
-            {/* District Filter */}
-            <div className="space-y-1.5 relative" ref={districtDropdownRef}>
-              <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5">
-                <Flag size={10} className="text-blue-500" /> District
-              </label>
-              <button
-                type="button"
-                onClick={() => setIsDistrictDropdownOpen(!isDistrictDropdownOpen)}
-                className="w-full flex items-center justify-between bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[44px]"
+        {/* Filter Popup Modal */}
+        <AnimatePresence>
+          {isFilterModalOpen && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/60 backdrop-blur-xs">
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                transition={{ duration: 0.2 }}
+                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-3xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden"
               >
-                <span className="truncate text-zinc-700 dark:text-zinc-300">
-                  {selectedDistrictIds.length === 0 
-                    ? 'All Districts' 
-                    : selectedDistrictIds.length === 1 
-                      ? districts.find(d => d.id === selectedDistrictIds[0])?.name || `${selectedDistrictIds.length} Selected`
-                      : `${selectedDistrictIds.length} Districts`
-                  }
-                </span>
-                <span className="text-zinc-400 text-[10px]">▼</span>
-              </button>
-              
-              {isDistrictDropdownOpen && (
-                <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 animate-in fade-in slide-in-from-top-1 duration-100 flex flex-col max-h-64">
-                  <div className="relative mb-2 shrink-0">
-                    <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder="Search district..."
-                      value={districtSearchText}
-                      onChange={e => setDistrictSearchText(e.target.value)}
-                      className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
-                    <div 
-                      onClick={() => setSelectedDistrictIds([])}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                    >
-                      <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                        selectedDistrictIds.length === 0 
-                          ? 'border-blue-500 bg-blue-500 text-white' 
-                          : 'border-zinc-300 dark:border-zinc-700'
-                      }`}>
-                        {selectedDistrictIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
-                      </div>
-                      All Districts
+                {/* Modal Header */}
+                <div className="px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between bg-zinc-50/70 dark:bg-zinc-900/70">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400 border border-blue-200/50 dark:border-blue-800/40">
+                      <SlidersHorizontal size={18} />
                     </div>
-                    {searchedDistricts.map(d => {
-                      const isChecked = selectedDistrictIds.includes(d.id);
-                      return (
-                        <div 
-                          key={d.id}
-                          onClick={() => {
-                            if (isChecked) {
-                              setSelectedDistrictIds(prev => prev.filter(id => id !== d.id));
-                            } else {
-                              setSelectedDistrictIds(prev => [...prev, d.id]);
-                            }
-                          }}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                        >
-                          <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                            isChecked 
-                              ? 'border-blue-500 bg-blue-500 text-white' 
-                              : 'border-zinc-300 dark:border-zinc-700'
-                          }`}>
-                            {isChecked && <span className="text-[9px] font-black">✓</span>}
-                          </div>
-                          {d.name}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* Constituency Filter */}
-            <div className="space-y-1.5 relative" ref={constituencyDropdownRef}>
-              <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5">
-                <MapPin size={10} className="text-blue-500" /> Constituency
-              </label>
-              <button
-                type="button"
-                onClick={() => setIsConstituencyDropdownOpen(!isConstituencyDropdownOpen)}
-                className="w-full flex items-center justify-between bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[44px]"
-              >
-                <span className="truncate text-zinc-700 dark:text-zinc-300">
-                  {selectedConstituencyIds.length === 0 
-                    ? 'All Constituencies' 
-                    : selectedConstituencyIds.length === 1 
-                      ? constituencies.find(c => c.id === selectedConstituencyIds[0])?.name || `${selectedConstituencyIds.length} Selected`
-                      : `${selectedConstituencyIds.length} Constituencies`
-                  }
-                </span>
-                <span className="text-zinc-400 text-[10px]">▼</span>
-              </button>
-              
-              {isConstituencyDropdownOpen && (
-                <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 animate-in fade-in slide-in-from-top-1 duration-100 flex flex-col max-h-64">
-                  <div className="relative mb-2 shrink-0">
-                    <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder="Search constituency..."
-                      value={constituencySearchText}
-                      onChange={e => setConstituencySearchText(e.target.value)}
-                      className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
-                    <div 
-                      onClick={() => setSelectedConstituencyIds([])}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                    >
-                      <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                        selectedConstituencyIds.length === 0 
-                          ? 'border-blue-500 bg-blue-500 text-white' 
-                          : 'border-zinc-300 dark:border-zinc-700'
-                      }`}>
-                        {selectedConstituencyIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <h2 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white">Filter Voter Registry</h2>
+                        {activeFilterCount > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                            {activeFilterCount} Active
+                          </span>
+                        )}
                       </div>
-                      All Constituencies
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                        Choose territory levels, demographics, and intelligence filters to narrow down the records.
+                      </p>
                     </div>
-                    {searchedConstituencies.map(c => {
-                      const isChecked = selectedConstituencyIds.includes(c.id);
-                      return (
-                        <div 
-                          key={c.id}
-                          onClick={() => {
-                            if (isChecked) {
-                              setSelectedConstituencyIds(prev => prev.filter(id => id !== c.id));
-                            } else {
-                              setSelectedConstituencyIds(prev => [...prev, c.id]);
-                            }
-                          }}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                        >
-                          <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                            isChecked 
-                              ? 'border-blue-500 bg-blue-500 text-white' 
-                              : 'border-zinc-300 dark:border-zinc-700'
-                          }`}>
-                            {isChecked && <span className="text-[9px] font-black">✓</span>}
-                          </div>
-                          {c.name}
-                        </div>
-                      );
-                    })}
                   </div>
-                </div>
-              )}
-            </div>
-
-            {/* Booth Filter */}
-            <div className="space-y-1.5 relative" ref={boothDropdownRef}>
-              <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5">
-                <Home size={10} className="text-blue-500" /> Booth
-              </label>
-              <button
-                type="button"
-                onClick={() => setIsBoothDropdownOpen(!isBoothDropdownOpen)}
-                className="w-full flex items-center justify-between bg-white dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-xl px-3 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[44px]"
-              >
-                <span className="truncate text-zinc-700 dark:text-zinc-300">
-                  {selectedBoothIds.length === 0 
-                    ? 'All Booths' 
-                    : selectedBoothIds.length === 1 
-                      ? booths.find(b => b.id === selectedBoothIds[0])?.name || `${selectedBoothIds.length} Selected`
-                      : `${selectedBoothIds.length} Booths`
-                  }
-                </span>
-                <span className="text-zinc-400 text-[10px]">▼</span>
-              </button>
-              
-              {isBoothDropdownOpen && (
-                <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 animate-in fade-in slide-in-from-top-1 duration-100 flex flex-col max-h-64">
-                  <div className="relative mb-2 shrink-0">
-                    <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder="Search booth..."
-                      value={boothSearchText}
-                      onChange={e => setBoothSearchText(e.target.value)}
-                      className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
-                    />
-                  </div>
-                  <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
-                    <div 
-                      onClick={() => setSelectedBoothIds([])}
-                      className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                    >
-                      <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                        selectedBoothIds.length === 0 
-                          ? 'border-blue-500 bg-blue-500 text-white' 
-                          : 'border-zinc-300 dark:border-zinc-700'
-                      }`}>
-                        {selectedBoothIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
-                      </div>
-                      All Booths
-                    </div>
-                    {searchedBooths.map(b => {
-                      const isChecked = selectedBoothIds.includes(b.id);
-                      return (
-                        <div 
-                          key={b.id}
-                          onClick={() => {
-                            if (isChecked) {
-                              setSelectedBoothIds(prev => prev.filter(id => id !== b.id));
-                            } else {
-                              setSelectedBoothIds(prev => [...prev, b.id]);
-                            }
-                          }}
-                          className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
-                        >
-                          <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
-                            isChecked 
-                              ? 'border-blue-500 bg-blue-500 text-white' 
-                              : 'border-zinc-300 dark:border-zinc-700'
-                          }`}>
-                            {isChecked && <span className="text-[9px] font-black">✓</span>}
-                          </div>
-                          <div>
-                            <span className="block text-zinc-800 dark:text-zinc-200">{b.name}</span>
-                            <span className="block text-[8px] text-zinc-400 font-bold">No. {b.boothNumber}</span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Advanced Query Filters Section */}
-          <div className="pt-4 border-t border-zinc-200/50 dark:border-zinc-800/50">
-            <button
-              type="button"
-              onClick={() => setShowAdvancedFilters(!showAdvancedFilters)}
-              className="group flex items-center gap-2 text-[11px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-wider hover:text-blue-700 dark:hover:text-blue-300 transition-colors select-none"
-            >
-              <SlidersHorizontal size={12} className="group-hover:rotate-12 transition-transform" />
-              <span>{showAdvancedFilters ? "Hide Advanced Filters" : "Show Advanced Filters"}</span>
-              <span className={`text-[9px] transition-transform duration-200 ${showAdvancedFilters ? 'rotate-180' : ''}`}>▼</span>
-              
-              {(filterGender !== 'all' || filterCaste !== 'all' || filterAgeGroup !== 'all' || filterEconomicCategory !== 'all' || filterSentiment !== 'all' || filterCompleteness !== 'all' || filterIsKaryakarta !== 'all' || filterVitalStatus !== 'Active') && (
-                <span className="bg-blue-100 dark:bg-blue-950 text-blue-750 dark:text-blue-300 px-2 py-0.5 rounded-full text-[8px] font-extrabold normal-case leading-none">
-                  Active Filters
-                </span>
-              )}
-            </button>
-
-            {showAdvancedFilters && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mt-4 p-4 rounded-2xl bg-zinc-100/30 dark:bg-zinc-900/10 border border-zinc-200/50 dark:border-zinc-800/40 animate-in fade-in duration-155">
-                
-                {/* Gender Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Gender Selection</label>
-                  <select 
-                    value={filterGender} 
-                    onChange={e => setFilterGender(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="all">All Genders</option>
-                    <option value="Male">Male</option>
-                    <option value="Female">Female</option>
-                    <option value="Other">Other / Third Gender</option>
-                  </select>
-                </div>
-
-                {/* Caste / Category Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Caste / Category</label>
-                  <select 
-                    value={filterCaste} 
-                    onChange={e => setFilterCaste(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="all">All Castes</option>
-                    <option value="General">General</option>
-                    <option value="OBC">OBC</option>
-                    <option value="SC">SC</option>
-                    <option value="ST">ST</option>
-                    <option value="Minority">Minority</option>
-                  </select>
-                </div>
-
-                {/* Age Group Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Age Group</label>
-                  <select 
-                    value={filterAgeGroup} 
-                    onChange={e => setFilterAgeGroup(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="all">All Ages</option>
-                    <option value="under30">Under 30 Yrs</option>
-                    <option value="30to49">30 - 49 Yrs</option>
-                    <option value="50to69">50 - 69 Yrs</option>
-                    <option value="70plus">70 Yrs & Above</option>
-                  </select>
-                </div>
-
-                {/* Economic Category Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Economic Category</label>
-                  <select 
-                    value={filterEconomicCategory} 
-                    onChange={e => setFilterEconomicCategory(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="all">All Categories</option>
-                    <option value="APL">APL (Above Poverty Line)</option>
-                    <option value="BPL">BPL (Below Poverty Line)</option>
-                    <option value="EWS">EWS (Economically Weaker Section)</option>
-                  </select>
-                </div>
-
-                {/* Political Sentiment Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Voter Sentiment</label>
-                  <select 
-                    value={filterSentiment} 
-                    onChange={e => setFilterSentiment(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="all">All Sentiments</option>
-                    <option value="Support">Support</option>
-                    <option value="Neutral">Neutral</option>
-                    <option value="Oppose">Oppose</option>
-                    <option value="Other Party">Other Party</option>
-                    <option value="Unassigned">Unassigned / No Record</option>
-                  </select>
-                </div>
-
-                {/* Profile Completeness Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Profile Completeness</label>
-                  <select 
-                    value={filterCompleteness} 
-                    onChange={e => setFilterCompleteness(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="all">Any % Complete</option>
-                    <option value="high">Fully Complete (75% or More)</option>
-                    <option value="medium">Partially Complete (40% - 74%)</option>
-                    <option value="low">Incomplete (Under 40%)</option>
-                  </select>
-                </div>
-
-                {/* Volunteer Status Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Volunteer Status</label>
-                  <select 
-                    value={filterIsKaryakarta} 
-                    onChange={e => setFilterIsKaryakarta(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-955 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="all">All Roles</option>
-                    <option value="yes">Connection Volunteers</option>
-                    <option value="no">General Voters</option>
-                  </select>
-                </div>
-
-                {/* Vital Status Filter */}
-                <div className="space-y-1.5 flex flex-col">
-                  <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest font-bold">Vital Status</label>
-                  <select 
-                    value={filterVitalStatus} 
-                    onChange={e => setFilterVitalStatus(e.target.value)} 
-                    className="webapp-input w-full h-11 text-xs font-bold bg-white dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
-                  >
-                    <option value="Active">Active (Default View)</option>
-                    <option value="Deceased">Deceased (Archived)</option>
-                    <option value="Migrated/Shifted">Migrated/Shifted (Archived)</option>
-                    <option value="all">All (including Archived)</option>
-                  </select>
-                </div>
-
-                {/* Reset Filters Option inline */}
-                <div className="col-span-1 sm:col-span-2 lg:col-span-4 flex justify-end gap-2 pt-2 border-t border-zinc-200/30 dark:border-zinc-800/30">
                   <button
                     type="button"
-                    onClick={() => {
-                      setFilterGender('all');
-                      setFilterCaste('all');
-                      setFilterAgeGroup('all');
-                      setFilterEconomicCategory('all');
-                      setFilterSentiment('all');
-                      setFilterCompleteness('all');
-                      setFilterIsKaryakarta('all');
-                      setFilterVitalStatus('Active');
-                    }}
-                    className="text-[10px] font-black uppercase text-zinc-400 hover:text-zinc-650 dark:hover:text-zinc-200 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 transition-colors select-none"
+                    onClick={() => setIsFilterModalOpen(false)}
+                    className="p-2 text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
                   >
-                    Reset Advanced Options
+                    <X size={18} />
                   </button>
                 </div>
 
-              </div>
-            )}
-          </div>
+                {/* Modal Body */}
+                <div className="flex-1 overflow-y-auto p-6 space-y-6 custom-scrollbar">
+                  
+                  {/* Section 1: 7-Tier Demographic Multi-Select Cascading Dropdowns */}
+                  <div className="space-y-3">
+                    <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                      <Globe size={14} className="text-blue-500" />
+                      <h3 className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider">
+                        1. Geographic Territory Hierarchy
+                      </h3>
+                      <span className="text-[11px] text-zinc-400 font-normal ml-auto">Multi-level cascading</span>
+                    </div>
 
-          <div className="flex sm:hidden justify-between items-center bg-white dark:bg-zinc-955 px-4 py-2 rounded-xl border border-zinc-200 dark:border-zinc-800 mt-2">
-            <span className="text-[10px] font-black text-zinc-400 uppercase tracking-widest">Total Found</span>
-            <span className="text-xs font-black text-blue-600">{filteredVoters.length}</span>
-          </div>
-        </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                      {/* 1. State Filter */}
+                      <div className="space-y-1.5 relative" ref={stateDropdownRef}>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5 truncate" title="1. Assigned State(s)">
+                          <Globe size={10} className="text-blue-500 shrink-0" /> 1. State
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsStateDropdownOpen(!isStateDropdownOpen)}
+                          className="w-full flex items-center justify-between bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[42px]"
+                        >
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-[11px]">
+                            {selectedStateIds.length === 0 
+                              ? 'All States' 
+                              : selectedStateIds.length === 1 
+                                ? states.find(s => s.id === selectedStateIds[0])?.name || `${selectedStateIds.length} Selected`
+                                : `${selectedStateIds.length} States`
+                            }
+                          </span>
+                          <span className="text-zinc-400 text-[9px] ml-1">▼</span>
+                        </button>
+                        
+                        {isStateDropdownOpen && (
+                          <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 flex flex-col max-h-64">
+                            <div className="relative mb-2 shrink-0">
+                              <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder="Search state..."
+                                value={stateSearchText}
+                                onChange={e => setStateSearchText(e.target.value)}
+                                className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                              />
+                            </div>
+                            <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
+                              <div 
+                                onClick={() => setSelectedStateIds([])}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-350 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                              >
+                                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                  selectedStateIds.length === 0 
+                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                    : 'border-zinc-300 dark:border-zinc-700'
+                                }`}>
+                                  {selectedStateIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                                </div>
+                                All States
+                              </div>
+                              {searchedStates.map(s => {
+                                const isChecked = selectedStateIds.includes(s.id);
+                                return (
+                                  <div 
+                                    key={s.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedStateIds(prev => prev.filter(id => id !== s.id));
+                                      } else {
+                                        setSelectedStateIds(prev => [...prev, s.id]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                      isChecked 
+                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                        : 'border-zinc-300 dark:border-zinc-700'
+                                    }`}>
+                                      {isChecked && <span className="text-[9px] font-black">✓</span>}
+                                    </div>
+                                    {s.name}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. District Filter */}
+                      <div className="space-y-1.5 relative" ref={districtDropdownRef}>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5 truncate" title="2. Assigned District(s)">
+                          <Flag size={10} className="text-blue-500 shrink-0" /> 2. District
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsDistrictDropdownOpen(!isDistrictDropdownOpen)}
+                          className="w-full flex items-center justify-between bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[42px]"
+                        >
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-[11px]">
+                            {selectedDistrictIds.length === 0 
+                              ? 'All Districts' 
+                              : selectedDistrictIds.length === 1 
+                                ? districts.find(d => d.id === selectedDistrictIds[0])?.name || `${selectedDistrictIds.length} Selected`
+                                : `${selectedDistrictIds.length} Districts`
+                            }
+                          </span>
+                          <span className="text-zinc-400 text-[9px] ml-1">▼</span>
+                        </button>
+                        
+                        {isDistrictDropdownOpen && (
+                          <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 flex flex-col max-h-64">
+                            <div className="relative mb-2 shrink-0">
+                              <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder="Search district..."
+                                value={districtSearchText}
+                                onChange={e => setDistrictSearchText(e.target.value)}
+                                className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-955 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                              />
+                            </div>
+                            <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
+                              <div 
+                                onClick={() => setSelectedDistrictIds([])}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                              >
+                                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                  selectedDistrictIds.length === 0 
+                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                    : 'border-zinc-300 dark:border-zinc-700'
+                                }`}>
+                                  {selectedDistrictIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                                </div>
+                                All Districts
+                              </div>
+                              {searchedDistricts.map(d => {
+                                const isChecked = selectedDistrictIds.includes(d.id);
+                                return (
+                                  <div 
+                                    key={d.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedDistrictIds(prev => prev.filter(id => id !== d.id));
+                                      } else {
+                                        setSelectedDistrictIds(prev => [...prev, d.id]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                      isChecked 
+                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                        : 'border-zinc-300 dark:border-zinc-700'
+                                    }`}>
+                                      {isChecked && <span className="text-[9px] font-black">✓</span>}
+                                    </div>
+                                    {d.name}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 3. Constituency Filter */}
+                      <div className="space-y-1.5 relative" ref={constituencyDropdownRef}>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5 truncate" title="3. Assigned Constituency(s)">
+                          <MapPin size={10} className="text-blue-500 shrink-0" /> 3. Constituency
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsConstituencyDropdownOpen(!isConstituencyDropdownOpen)}
+                          className="w-full flex items-center justify-between bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[42px]"
+                        >
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-[11px]">
+                            {selectedConstituencyIds.length === 0 
+                              ? 'All Constituencies' 
+                              : selectedConstituencyIds.length === 1 
+                                ? constituencies.find(c => c.id === selectedConstituencyIds[0])?.name || `${selectedConstituencyIds.length} Selected`
+                                : `${selectedConstituencyIds.length} Constituencies`
+                            }
+                          </span>
+                          <span className="text-zinc-400 text-[9px] ml-1">▼</span>
+                        </button>
+                        
+                        {isConstituencyDropdownOpen && (
+                          <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 flex flex-col max-h-64">
+                            <div className="relative mb-2 shrink-0">
+                              <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder="Search constituency..."
+                                value={constituencySearchText}
+                                onChange={e => setConstituencySearchText(e.target.value)}
+                                className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                              />
+                            </div>
+                            <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
+                              <div 
+                                onClick={() => setSelectedConstituencyIds([])}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                              >
+                                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                  selectedConstituencyIds.length === 0 
+                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                    : 'border-zinc-300 dark:border-zinc-700'
+                                }`}>
+                                  {selectedConstituencyIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                                </div>
+                                All Constituencies
+                              </div>
+                              {searchedConstituencies.map(c => {
+                                const isChecked = selectedConstituencyIds.includes(c.id);
+                                return (
+                                  <div 
+                                    key={c.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedConstituencyIds(prev => prev.filter(id => id !== c.id));
+                                      } else {
+                                        setSelectedConstituencyIds(prev => [...prev, c.id]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                      isChecked 
+                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                        : 'border-zinc-300 dark:border-zinc-700'
+                                    }`}>
+                                      {isChecked && <span className="text-[9px] font-black">✓</span>}
+                                    </div>
+                                    {c.name}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 4. Block / Area (Mandal) Filter */}
+                      <div className="space-y-1.5 relative" ref={mandalDropdownRef}>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5 truncate" title="4. Assigned Block / Area(s)">
+                          <Building2 size={10} className="text-blue-500 shrink-0" /> 4. Block / Area
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsMandalDropdownOpen(!isMandalDropdownOpen)}
+                          className="w-full flex items-center justify-between bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[42px]"
+                        >
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-[11px]">
+                            {selectedMandalIds.length === 0 
+                              ? 'All Blocks' 
+                              : selectedMandalIds.length === 1 
+                                ? mandals.find(m => m.id === selectedMandalIds[0])?.name || `${selectedMandalIds.length} Selected`
+                                : `${selectedMandalIds.length} Blocks`
+                            }
+                          </span>
+                          <span className="text-zinc-400 text-[9px] ml-1">▼</span>
+                        </button>
+                        
+                        {isMandalDropdownOpen && (
+                          <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 flex flex-col max-h-64">
+                            <div className="relative mb-2 shrink-0">
+                              <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder="Search block / area..."
+                                value={mandalSearchText}
+                                onChange={e => setMandalSearchText(e.target.value)}
+                                className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                              />
+                            </div>
+                            <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
+                              <div 
+                                onClick={() => setSelectedMandalIds([])}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                              >
+                                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                  selectedMandalIds.length === 0 
+                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                    : 'border-zinc-300 dark:border-zinc-700'
+                                }`}>
+                                  {selectedMandalIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                                </div>
+                                All Blocks / Areas
+                              </div>
+                              {searchedMandals.map(m => {
+                                const isChecked = selectedMandalIds.includes(m.id);
+                                return (
+                                  <div 
+                                    key={m.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedMandalIds(prev => prev.filter(id => id !== m.id));
+                                      } else {
+                                        setSelectedMandalIds(prev => [...prev, m.id]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                      isChecked 
+                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                        : 'border-zinc-300 dark:border-zinc-700'
+                                    }`}>
+                                      {isChecked && <span className="text-[9px] font-black">✓</span>}
+                                    </div>
+                                    {m.name}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 5. Panchayat / ULB Filter */}
+                      <div className="space-y-1.5 relative" ref={panchayatDropdownRef}>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5 truncate" title="5. Assigned Panchayat / ULB(s)">
+                          <Home size={10} className="text-blue-500 shrink-0" /> 5. Panchayat / ULB
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsPanchayatDropdownOpen(!isPanchayatDropdownOpen)}
+                          className="w-full flex items-center justify-between bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[42px]"
+                        >
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-[11px]">
+                            {selectedPanchayatIds.length === 0 
+                              ? 'All Panchayats' 
+                              : selectedPanchayatIds.length === 1 
+                                ? panchayats.find(p => p.id === selectedPanchayatIds[0])?.name || `${selectedPanchayatIds.length} Selected`
+                                : `${selectedPanchayatIds.length} Panchayats`
+                            }
+                          </span>
+                          <span className="text-zinc-400 text-[9px] ml-1">▼</span>
+                        </button>
+                        
+                        {isPanchayatDropdownOpen && (
+                          <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 flex flex-col max-h-64">
+                            <div className="relative mb-2 shrink-0">
+                              <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder="Search panchayat / ULB..."
+                                value={panchayatSearchText}
+                                onChange={e => setPanchayatSearchText(e.target.value)}
+                                className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                              />
+                            </div>
+                            <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
+                              <div 
+                                onClick={() => setSelectedPanchayatIds([])}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                              >
+                                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                  selectedPanchayatIds.length === 0 
+                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                    : 'border-zinc-300 dark:border-zinc-700'
+                                }`}>
+                                  {selectedPanchayatIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                                </div>
+                                All Panchayats / ULBs
+                              </div>
+                              {searchedPanchayats.map(p => {
+                                const isChecked = selectedPanchayatIds.includes(p.id);
+                                return (
+                                  <div 
+                                    key={p.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedPanchayatIds(prev => prev.filter(id => id !== p.id));
+                                      } else {
+                                        setSelectedPanchayatIds(prev => [...prev, p.id]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                      isChecked 
+                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                        : 'border-zinc-300 dark:border-zinc-700'
+                                    }`}>
+                                      {isChecked && <span className="text-[9px] font-black">✓</span>}
+                                    </div>
+                                    <div>
+                                      <span className="block text-zinc-800 dark:text-zinc-200">{p.name}</span>
+                                      <span className="block text-[8px] text-zinc-400 font-bold">{p.type || 'Gram Panchayat'}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 6. Ward / Village Filter */}
+                      <div className="space-y-1.5 relative" ref={wardDropdownRef}>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5 truncate" title="6. Assigned Ward / Village(s)">
+                          <Users size={10} className="text-blue-500 shrink-0" /> 6. Ward / Village
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsWardDropdownOpen(!isWardDropdownOpen)}
+                          className="w-full flex items-center justify-between bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[42px]"
+                        >
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-[11px]">
+                            {selectedWardIds.length === 0 
+                              ? 'All Wards' 
+                              : selectedWardIds.length === 1 
+                                ? (wards.find(w => w.id === selectedWardIds[0])?.name || `${selectedWardIds.length} Selected`)
+                                : `${selectedWardIds.length} Wards`
+                            }
+                          </span>
+                          <span className="text-zinc-400 text-[9px] ml-1">▼</span>
+                        </button>
+                        
+                        {isWardDropdownOpen && (
+                          <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 flex flex-col max-h-64">
+                            <div className="relative mb-2 shrink-0">
+                              <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder="Search ward / village..."
+                                value={wardSearchText}
+                                onChange={e => setWardSearchText(e.target.value)}
+                                className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                              />
+                            </div>
+                            <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
+                              <div 
+                                onClick={() => setSelectedWardIds([])}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                              >
+                                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                  selectedWardIds.length === 0 
+                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                    : 'border-zinc-300 dark:border-zinc-700'
+                                }`}>
+                                  {selectedWardIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                                </div>
+                                All Wards / Villages
+                              </div>
+                              {searchedWards.map(w => {
+                                const isChecked = selectedWardIds.includes(w.id);
+                                return (
+                                  <div 
+                                    key={w.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedWardIds(prev => prev.filter(id => id !== w.id));
+                                      } else {
+                                        setSelectedWardIds(prev => [...prev, w.id]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                      isChecked 
+                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                        : 'border-zinc-300 dark:border-zinc-700'
+                                    }`}>
+                                      {isChecked && <span className="text-[9px] font-black">✓</span>}
+                                    </div>
+                                    <div>
+                                      <span className="block text-zinc-800 dark:text-zinc-200">{w.name}</span>
+                                      {w.wardNumber && <span className="block text-[8px] text-zinc-400 font-bold">Ward #{w.wardNumber}</span>}
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 7. Polling Booth Filter */}
+                      <div className="space-y-1.5 relative" ref={boothDropdownRef}>
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest flex items-center gap-1.5 truncate" title="7. Assigned Polling Booth(s)">
+                          <Home size={10} className="text-blue-500 shrink-0" /> 7. Polling Booth
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => setIsBoothDropdownOpen(!isBoothDropdownOpen)}
+                          className="w-full flex items-center justify-between bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-xl px-2.5 py-2 text-xs font-bold text-left hover:border-zinc-300 dark:hover:border-zinc-700 transition-all select-none min-h-[42px]"
+                        >
+                          <span className="truncate text-zinc-700 dark:text-zinc-300 text-[11px]">
+                            {selectedBoothIds.length === 0 
+                              ? 'All Booths' 
+                              : selectedBoothIds.length === 1 
+                                ? booths.find(b => b.id === selectedBoothIds[0])?.name || `${selectedBoothIds.length} Selected`
+                                : `${selectedBoothIds.length} Booths`
+                            }
+                          </span>
+                          <span className="text-zinc-400 text-[9px] ml-1">▼</span>
+                        </button>
+                        
+                        {isBoothDropdownOpen && (
+                          <div className="absolute left-0 mt-1 w-full min-w-[220px] bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 p-2.5 flex flex-col max-h-64">
+                            <div className="relative mb-2 shrink-0">
+                              <Search className="absolute left-2.5 top-2.5 w-3 h-3 text-zinc-400" />
+                              <input
+                                type="text"
+                                placeholder="Search booth..."
+                                value={boothSearchText}
+                                onChange={e => setBoothSearchText(e.target.value)}
+                                className="w-full pl-8 pr-2 py-1.5 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg outline-none text-[11px] focus:ring-1 focus:ring-blue-500 text-zinc-800 dark:text-zinc-100"
+                              />
+                            </div>
+                            <div className="overflow-y-auto space-y-0.5 custom-scrollbar flex-1">
+                              <div 
+                                onClick={() => setSelectedBoothIds([])}
+                                className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                              >
+                                <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                  selectedBoothIds.length === 0 
+                                    ? 'border-blue-500 bg-blue-500 text-white' 
+                                    : 'border-zinc-300 dark:border-zinc-700'
+                                }`}>
+                                  {selectedBoothIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
+                                </div>
+                                All Booths
+                              </div>
+                              {searchedBooths.map(b => {
+                                const isChecked = selectedBoothIds.includes(b.id);
+                                return (
+                                  <div 
+                                    key={b.id}
+                                    onClick={() => {
+                                      if (isChecked) {
+                                        setSelectedBoothIds(prev => prev.filter(id => id !== b.id));
+                                      } else {
+                                        setSelectedBoothIds(prev => [...prev, b.id]);
+                                      }
+                                    }}
+                                    className="flex items-center gap-2 px-2.5 py-1.5 rounded-lg text-[11px] font-bold text-zinc-650 dark:text-zinc-355 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer transition-colors"
+                                  >
+                                    <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 transition-all ${
+                                      isChecked 
+                                        ? 'border-blue-500 bg-blue-500 text-white' 
+                                        : 'border-zinc-300 dark:border-zinc-700'
+                                    }`}>
+                                      {isChecked && <span className="text-[9px] font-black">✓</span>}
+                                    </div>
+                                    <div>
+                                      <span className="block text-zinc-800 dark:text-zinc-200">{b.name}</span>
+                                      <span className="block text-[8px] text-zinc-400 font-bold">No. {b.boothNumber}</span>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 2: Demographic & Socio-Economic Criteria */}
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                      <Users size={14} className="text-indigo-500" />
+                      <h3 className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider">
+                        2. Demographic & Socio-Economic Filters
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {/* Gender Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Gender</label>
+                        <select 
+                          value={filterGender} 
+                          onChange={e => setFilterGender(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">All Genders</option>
+                          <option value="Male">Male</option>
+                          <option value="Female">Female</option>
+                          <option value="Other">Other / Third Gender</option>
+                        </select>
+                      </div>
+
+                      {/* Caste / Category Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Caste / Category</label>
+                        <select 
+                          value={filterCaste} 
+                          onChange={e => setFilterCaste(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">All Castes</option>
+                          <option value="General">General</option>
+                          <option value="OBC">OBC</option>
+                          <option value="SC">SC</option>
+                          <option value="ST">ST</option>
+                          <option value="Minority">Minority</option>
+                        </select>
+                      </div>
+
+                      {/* Age Group Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Age Group</label>
+                        <select 
+                          value={filterAgeGroup} 
+                          onChange={e => setFilterAgeGroup(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">All Ages</option>
+                          <option value="under30">Under 30 Yrs</option>
+                          <option value="30to49">30 - 49 Yrs</option>
+                          <option value="50to69">50 - 69 Yrs</option>
+                          <option value="70plus">70 Yrs & Above</option>
+                        </select>
+                      </div>
+
+                      {/* Economic Category Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Economic Category</label>
+                        <select 
+                          value={filterEconomicCategory} 
+                          onChange={e => setFilterEconomicCategory(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">All Categories</option>
+                          <option value="APL">APL (Above Poverty Line)</option>
+                          <option value="BPL">BPL (Below Poverty Line)</option>
+                          <option value="EWS">EWS (Economically Weaker Section)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Section 3: Political Sentiment, Volunteer & Vital Status */}
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                      <Activity size={14} className="text-purple-500" />
+                      <h3 className="text-xs font-black uppercase text-zinc-700 dark:text-zinc-300 tracking-wider">
+                        3. Political Sentiment, Roles & Status
+                      </h3>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                      {/* Political Sentiment Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Voter Sentiment</label>
+                        <select 
+                          value={filterSentiment} 
+                          onChange={e => setFilterSentiment(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">All Sentiments</option>
+                          <option value="Support">Support</option>
+                          <option value="Neutral">Neutral</option>
+                          <option value="Oppose">Oppose</option>
+                          <option value="Other Party">Other Party</option>
+                          <option value="Unassigned">Unassigned / No Record</option>
+                        </select>
+                      </div>
+
+                      {/* Profile Completeness Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Profile Completeness</label>
+                        <select 
+                          value={filterCompleteness} 
+                          onChange={e => setFilterCompleteness(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">Any % Complete</option>
+                          <option value="high">Fully Complete (75% or More)</option>
+                          <option value="medium">Partially Complete (40% - 74%)</option>
+                          <option value="low">Incomplete (Under 40%)</option>
+                        </select>
+                      </div>
+
+                      {/* Volunteer Status Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Volunteer Status</label>
+                        <select 
+                          value={filterIsKaryakarta} 
+                          onChange={e => setFilterIsKaryakarta(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">All Roles</option>
+                          <option value="yes">Connection Volunteers</option>
+                          <option value="no">General Voters</option>
+                        </select>
+                      </div>
+
+                      {/* Vital Status Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest font-bold">Vital Status</label>
+                        <select 
+                          value={filterVitalStatus} 
+                          onChange={e => setFilterVitalStatus(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-950 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="Active">Active (Default View)</option>
+                          <option value="Deceased">Deceased (Archived)</option>
+                          <option value="Migrated/Shifted">Migrated/Shifted (Archived)</option>
+                          <option value="all">All (including Archived)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+
+                {/* Modal Footer */}
+                <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/70 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                  <button
+                    type="button"
+                    onClick={handleResetAllFilters}
+                    disabled={activeFilterCount === 0}
+                    className="flex items-center justify-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 border border-zinc-200 dark:border-zinc-800 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+                  >
+                    <RotateCcw size={13} />
+                    Reset All Filters
+                  </button>
+
+                  <div className="flex items-center justify-end gap-3">
+                    <span className="text-xs font-semibold text-zinc-500 dark:text-zinc-400">
+                      Found <strong className="text-zinc-900 dark:text-white">{filteredVoters.length}</strong> matching voters
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsFilterModalOpen(false)}
+                      className="webapp-button-primary h-10 px-5 rounded-xl text-xs font-bold flex items-center justify-center gap-2"
+                    >
+                      <Check size={14} />
+                      Apply & Close
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
 
         {/* Table Action Toolbar with Column Customizer */}
         <div className="px-6 py-3 bg-white dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -2179,13 +3326,13 @@ const VoterManagement: React.FC = () => {
 
         {/* Table View (Desktop) */}
         <div className="overflow-x-auto hidden md:block">
-            <table className="w-full text-left border-collapse min-w-[1000px]">
+            <table className="w-full text-left border-collapse min-w-[1000px] whitespace-nowrap">
             <thead>
-              <tr className="bg-zinc-50/50 dark:bg-zinc-900/30 border-b border-zinc-200 dark:border-zinc-800">
+              <tr className="bg-zinc-50/70 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800">
                 {voterColumnManager.visibleColumns.map(col => (
                   <th
                     key={col.id}
-                    className={`px-6 py-4 text-[10px] font-black uppercase text-zinc-400 tracking-wider ${col.id === 'actions' ? 'text-right' : ''}`}
+                    className={`px-4 py-2.5 text-[10px] font-black uppercase text-zinc-400 tracking-wider whitespace-nowrap ${col.id === 'actions' ? 'text-right' : ''}`}
                     style={{ minWidth: col.minWidth }}
                   >
                     {col.label}
@@ -2196,132 +3343,267 @@ const VoterManagement: React.FC = () => {
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
               {loading && voters.length === 0 ? (
                 <tr>
-                  <td colSpan={voterColumnManager.visibleColumns.length || 1} className="py-20 text-center">
+                  <td colSpan={voterColumnManager.visibleColumns.length || 1} className="py-12 text-center">
                     <Loader2 size={24} className="animate-spin mx-auto text-zinc-300" />
                   </td>
                 </tr>
               ) : filteredVoters.length === 0 ? (
                 <tr>
-                  <td colSpan={voterColumnManager.visibleColumns.length || 1} className="py-20 text-center text-zinc-400 text-xs">
+                  <td colSpan={voterColumnManager.visibleColumns.length || 1} className="py-12 text-center text-zinc-400 text-xs">
                     No voters found matching criteria.
                   </td>
                 </tr>
               ) : (
                 paginatedVoters.map((v, index) => (
-                  <tr key={v.id} className="group hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 transition-colors">
+                  <tr key={v.id} className="group hover:bg-zinc-50/60 dark:hover:bg-zinc-900/40 transition-colors">
                     {voterColumnManager.visibleColumns.map(col => {
                       switch (col.id) {
                         case 'slNo':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-bold text-zinc-400 dark:text-zinc-650">
+                            <td key={col.id} className="px-4 py-2 text-xs font-bold text-zinc-400 dark:text-zinc-650">
                               {(activePage - 1) * pageSize + index + 1}
                             </td>
                           );
                         case 'voterId':
                           return (
-                            <td key={col.id} className="px-6 py-5">
-                              <div className="flex flex-col gap-1">
-                                <span className="text-[10px] font-black text-blue-600 bg-blue-50 dark:bg-zinc-850 px-1.5 py-0.5 rounded w-fit">
-                                  {v.voterId}
-                                </span>
-                                {v.aadharNumber && (
-                                  <span className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono leading-none mt-1">
-                                    Aadhaar: {v.aadharNumber}
-                                  </span>
-                                )}
-                              </div>
+                            <td key={col.id} className="px-4 py-2">
+                              <span className="text-[11px] font-mono font-bold text-blue-600 bg-blue-50 dark:bg-zinc-850 px-1.5 py-0.5 rounded">
+                                {v.voterId}
+                              </span>
                             </td>
                           );
                         case 'aadharNumber':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-mono font-bold text-zinc-700 dark:text-zinc-300">
+                            <td key={col.id} className="px-4 py-2 text-xs font-mono font-bold text-zinc-700 dark:text-zinc-300">
                               {v.aadharNumber || <span className="text-zinc-400 font-bold">-</span>}
                             </td>
                           );
                         case 'name':
                           return (
-                            <td key={col.id} className="px-6 py-5">
-                              <div className="font-bold text-zinc-900 dark:text-zinc-100 text-sm leading-tight">{v.name}</div>
+                            <td key={col.id} className="px-4 py-2">
+                              <div className="font-bold text-zinc-900 dark:text-zinc-100 text-xs truncate max-w-[190px]" title={v.name}>
+                                {v.name}
+                              </div>
                             </td>
                           );
                         case 'relationName':
                           return (
-                            <td key={col.id} className="px-6 py-5">
+                            <td key={col.id} className="px-4 py-2">
                               {v.relationName ? (
-                                <div className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-                                  {v.relationName}
+                                <div className="flex items-center gap-1.5 text-xs text-zinc-800 dark:text-zinc-200 truncate max-w-[210px]" title={`${v.relationType || 'Father'}: ${v.relationName}`}>
+                                  <span className="shrink-0 px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/40">
+                                    {v.relationType || 'Father'}
+                                  </span>
+                                  <span className="font-semibold text-zinc-800 dark:text-zinc-100 truncate">{v.relationName}</span>
                                 </div>
                               ) : (
                                 <span className="text-xs text-zinc-400 font-bold">-</span>
                               )}
                             </td>
                           );
+                        case 'relationType':
+                          return (
+                            <td key={col.id} className="px-4 py-2">
+                              <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
+                                {v.relationType || 'Father'}
+                              </span>
+                            </td>
+                          );
                         case 'gender': {
                           const g = (v.gender || '').trim().toUpperCase();
                           const displayGender = g.startsWith('M') ? 'M' : g.startsWith('F') ? 'F' : (g.startsWith('T') || g.startsWith('O')) ? 'O' : '-';
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                               {displayGender}
                             </td>
                           );
                         }
                         case 'age':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                               {v.age ? `${v.age} Yrs` : '-'}
+                            </td>
+                          );
+                        case 'vitalStatus': {
+                          const status = v.vitalStatus || 'Active';
+                          let badgeStyle = 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60';
+                          let dotStyle = 'bg-emerald-500';
+                          let icon = '🟢';
+                          if (status === 'Deceased') {
+                            badgeStyle = 'bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-300 dark:border-red-800/60';
+                            dotStyle = 'bg-red-500';
+                            icon = '🔴';
+                          } else if (status === 'Migrated/Shifted') {
+                            badgeStyle = 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/60';
+                            dotStyle = 'bg-amber-500';
+                            icon = '🟡';
+                          } else if (status === 'Duplicate/Review') {
+                            badgeStyle = 'bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800/60';
+                            dotStyle = 'bg-blue-500';
+                            icon = '🔵';
+                          }
+                          return (
+                            <td key={col.id} className="px-4 py-2">
+                              <button
+                                type="button"
+                                onClick={() => openQuickStatusModal(v)}
+                                title={`Click to change status (Currently: ${status}${v.deathDate ? ` - Died: ${v.deathDate}` : ''})`}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider border transition-transform hover:scale-105 active:scale-95 cursor-pointer ${badgeStyle}`}
+                              >
+                                <span className={`w-1.5 h-1.5 rounded-full ${dotStyle}`} />
+                                <span>{status}</span>
+                              </button>
+                            </td>
+                          );
+                        }
+                        case 'education':
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.education && v.education !== 'Unspecified' ? (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-900/50">
+                                  {v.education}
+                                </span>
+                              ) : (
+                                <span className="text-zinc-400 font-bold">-</span>
+                              )}
+                            </td>
+                          );
+                        case 'economicCategory':
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.economicCategory ? (
+                                <span className={`inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                                  v.economicCategory === 'BPL' || v.economicCategory === 'Antyodaya'
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'
+                                    : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                                }`}>
+                                  {v.economicCategory}
+                                </span>
+                              ) : (
+                                <span className="text-zinc-400 font-bold">-</span>
+                              )}
+                            </td>
+                          );
+                        case 'physicalProfile':
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.physicalProfile && v.physicalProfile !== 'General' ? (
+                                <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black uppercase bg-purple-100 text-purple-700 dark:bg-purple-950/40 dark:text-purple-300 border border-purple-200 dark:border-purple-900/50">
+                                  {v.physicalProfile}
+                                </span>
+                              ) : (
+                                <span className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">General</span>
+                              )}
                             </td>
                           );
                         case 'caste':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                              <div className="font-bold">{v.caste || '-'}</div>
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.caste || '-'}
                             </td>
                           );
                         case 'houseNo':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                               {(v as any).houseNo || (v as any).houseNumber || (v as any).doorNo || <span className="text-zinc-400 font-bold">-</span>}
                             </td>
                           );
                         case 'village':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                              <div>{v.village || (v as any).section || '-'}</div>
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[150px]" title={v.village || (v as any).section || '-'}>
+                                {v.village || (v as any).section || '-'}
+                              </div>
                             </td>
                           );
-                        case 'mandal':
+                        case 'state': {
+                          const loc = getVoterLocation(v);
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                              <div>{(v as any).mandal || '-'}</div>
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[120px]" title={loc.stateName || '-'}>
+                                {loc.stateName || '-'}
+                              </div>
                             </td>
                           );
+                        }
+                        case 'district': {
+                          const loc = getVoterLocation(v);
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[130px]" title={loc.districtName || '-'}>
+                                {loc.districtName || '-'}
+                              </div>
+                            </td>
+                          );
+                        }
+                        case 'constituency': {
+                          const loc = getVoterLocation(v);
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[140px]" title={loc.constituencyName || '-'}>
+                                {loc.constituencyName || '-'}
+                              </div>
+                            </td>
+                          );
+                        }
+                        case 'mandal': {
+                          const loc = getVoterLocation(v);
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[140px]" title={loc.mandalName || '-'}>
+                                {loc.mandalName || '-'}
+                              </div>
+                            </td>
+                          );
+                        }
+                        case 'panchayat': {
+                          const loc = getVoterLocation(v);
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[140px]" title={loc.panchayatName || '-'}>
+                                {loc.panchayatName || '-'}
+                              </div>
+                            </td>
+                          );
+                        }
+                        case 'ward': {
+                          const loc = getVoterLocation(v);
+                          return (
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[130px]" title={loc.wardName || '-'}>
+                                {loc.wardName || '-'}
+                              </div>
+                            </td>
+                          );
+                        }
                         case 'booth': {
                           const booth = booths.find(b => b.id === v.boothId);
+                          const boothTitle = booth ? booth.name : (v.boothName || '-');
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                              <div className="line-clamp-1 text-zinc-800 dark:text-zinc-200 font-bold">{booth ? booth.name : '-'}</div>
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                              <div className="truncate max-w-[180px] text-zinc-800 dark:text-zinc-200 font-medium" title={boothTitle}>
+                                {boothTitle}
+                              </div>
                             </td>
                           );
                         }
                         case 'mobile':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                              <div className="font-bold">{v.mobile || '-'}</div>
-                              {v.additionalMobile && <div className="text-[10px] text-zinc-400 dark:text-zinc-500 font-normal mt-0.5">Alt: {v.additionalMobile}</div>}
-                              {v.email && <div className="text-[10px] text-blue-500 hover:underline mt-0.5 max-w-[150px] truncate" title={v.email}>{v.email}</div>}
+                            <td key={col.id} className="px-4 py-2 text-xs font-mono font-semibold text-zinc-700 dark:text-zinc-300">
+                              {v.mobile || '-'}
                             </td>
                           );
                         case 'additionalMobile':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                            <td key={col.id} className="px-4 py-2 text-xs font-mono font-semibold text-zinc-700 dark:text-zinc-300">
                               {v.additionalMobile || <span className="text-zinc-400 font-bold">-</span>}
                             </td>
                           );
                         case 'email':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                            <td key={col.id} className="px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300">
                               {v.email ? (
-                                <a href={`mailto:${v.email}`} className="text-blue-500 hover:underline truncate max-w-[160px] block">
+                                <a href={`mailto:${v.email}`} className="text-blue-500 hover:underline truncate max-w-[160px] block" title={v.email}>
                                   {v.email}
                                 </a>
                               ) : (
@@ -2339,8 +3621,8 @@ const VoterManagement: React.FC = () => {
                           else if (sentiment === 'Other Party') badgeColor = 'bg-amber-500/10 text-amber-650 dark:bg-amber-950/30 dark:text-amber-400 border border-amber-500/20';
                           
                           return (
-                            <td key={col.id} className="px-6 py-5">
-                              <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider ${badgeColor}`}>
+                            <td key={col.id} className="px-4 py-2">
+                              <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${badgeColor}`}>
                                 {sentiment === 'Support' && <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />}
                                 {sentiment === 'Neutral' && <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />}
                                 {sentiment === 'Oppose' && <span className="w-1.5 h-1.5 rounded-full bg-red-500" />}
@@ -2359,10 +3641,10 @@ const VoterManagement: React.FC = () => {
                           const fullName = partyObj?.name || rawParty;
 
                           return (
-                            <td key={col.id} className="px-6 py-5 text-xs font-bold text-zinc-700 dark:text-zinc-300">
+                            <td key={col.id} className="px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300">
                               {abbrev ? (
                                 <span 
-                                  className="inline-flex items-center px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white uppercase font-bold text-xs" 
+                                  className="inline-flex items-center px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white uppercase font-bold text-[11px]" 
                                   title={fullName}
                                 >
                                   {abbrev}
@@ -2375,36 +3657,34 @@ const VoterManagement: React.FC = () => {
                         }
                         case 'isVolunteer':
                           return (
-                            <td key={col.id} className="px-6 py-5">
+                            <td key={col.id} className="px-4 py-2">
                               {(v as any).isVolunteer || (v as any).is_volunteer || (v as any).isKaryakarta ? (
-                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-black uppercase bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
                                   ★ Volunteer
                                 </span>
                               ) : (
-                                <span className="text-[10px] text-zinc-400">Voter</span>
+                                <span className="text-[10px] text-zinc-400 font-medium">Voter</span>
                               )}
                             </td>
                           );
                         case 'profileComplete': {
                           const percent = getCompletenessPercent(v);
-                          let badgeColor = 'text-red-650 bg-red-500/10 border-red-500/20 dark:text-red-400 dark:bg-red-950/20';
                           let barColor = 'bg-red-500';
+                          let textColor = 'text-red-600 dark:text-red-400';
                           if (percent >= 75) {
-                            badgeColor = 'text-emerald-600 bg-emerald-500/10 border-emerald-500/20 dark:text-emerald-400 dark:bg-emerald-950/25';
                             barColor = 'bg-emerald-500';
+                            textColor = 'text-emerald-600 dark:text-emerald-400';
                           } else if (percent >= 40) {
-                            badgeColor = 'text-amber-600 bg-amber-500/10 border-amber-500/20 dark:text-amber-400 dark:bg-amber-950/20';
                             barColor = 'bg-amber-500';
+                            textColor = 'text-amber-600 dark:text-amber-400';
                           }
                           return (
-                            <td key={col.id} className="px-6 py-5">
-                              <div className="flex flex-col gap-1.5 w-24">
-                                <div className="flex items-center justify-between">
-                                  <span className={`px-1.5 py-0.5 rounded text-[9px] font-black tracking-wide border uppercase leading-none ${badgeColor}`}>
-                                    {percent}% Complete
-                                  </span>
-                                </div>
-                                <div className="w-full bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
+                            <td key={col.id} className="px-4 py-2">
+                              <div className="flex items-center gap-2 min-w-[110px]">
+                                <span className={`text-[10px] font-black tracking-wide ${textColor}`}>
+                                  {percent}%
+                                </span>
+                                <div className="w-16 bg-zinc-200 dark:bg-zinc-800 h-1.5 rounded-full overflow-hidden">
                                   <div className={`h-full rounded-full ${barColor}`} style={{ width: `${percent}%` }} />
                                 </div>
                               </div>
@@ -2413,23 +3693,23 @@ const VoterManagement: React.FC = () => {
                         }
                         case 'actions':
                           return (
-                            <td key={col.id} className="px-6 py-5 text-right">
-                              <div className="flex justify-end gap-1.5">
+                            <td key={col.id} className="px-4 py-2 text-right">
+                              <div className="flex justify-end gap-1">
                                 <button 
                                   onClick={() => startViewVoter(v)}
                                   title="View Voter Details"
-                                  className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-blue-600 hover:border-blue-300 dark:hover:text-blue-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider shadow-xs transform active:scale-95 transition-all cursor-pointer"
+                                  className="p-1 px-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-blue-600 hover:border-blue-300 dark:hover:text-blue-400 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider shadow-2xs transform active:scale-95 transition-all cursor-pointer"
                                 >
-                                  <Eye size={12} />
+                                  <Eye size={11} />
                                   <span>View</span>
                                 </button>
                                 {hasRight('voters', 'u') && (
                                   <button 
                                     onClick={() => startEditVoter(v)}
                                     title="Edit Voter Information"
-                                    className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-amber-600 hover:border-amber-300 dark:hover:text-amber-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider shadow-xs transform active:scale-95 transition-all cursor-pointer"
+                                    className="p-1 px-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-600 dark:text-zinc-400 hover:text-amber-600 hover:border-amber-300 dark:hover:text-amber-400 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider shadow-2xs transform active:scale-95 transition-all cursor-pointer"
                                   >
-                                    <Edit3 size={12} />
+                                    <Edit3 size={11} />
                                     <span>Edit</span>
                                   </button>
                                 )}
@@ -2437,9 +3717,9 @@ const VoterManagement: React.FC = () => {
                                   <button 
                                     onClick={() => setDeletingId(v.id)} 
                                     title="Delete Voter Record"
-                                    className="p-1 px-2 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-500 hover:text-red-600 hover:border-red-300 dark:hover:text-red-400 rounded-lg flex items-center gap-1 text-[10px] font-black uppercase tracking-wider shadow-xs transform active:scale-95 transition-all cursor-pointer"
+                                    className="p-1 px-1.5 border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 text-zinc-500 hover:text-red-600 hover:border-red-300 dark:hover:text-red-400 rounded-md flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider shadow-2xs transform active:scale-95 transition-all cursor-pointer"
                                   >
-                                    <Trash2 size={12} />
+                                    <Trash2 size={11} />
                                     <span>Delete</span>
                                   </button>
                                 )}
@@ -2471,8 +3751,11 @@ const VoterManagement: React.FC = () => {
                     <div>
                       <div className="font-bold text-zinc-900 dark:text-white text-sm">{v.name}</div>
                       {v.relationName && (
-                        <div className="text-[11px] text-zinc-400 dark:text-zinc-500 font-medium mt-0.5">
-                          F/H: <span className="font-semibold text-zinc-600 dark:text-zinc-300">{v.relationName}</span>
+                        <div className="text-[11px] text-zinc-500 dark:text-zinc-400 font-medium mt-0.5 flex items-center gap-1.5">
+                          <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold uppercase bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40 shrink-0">
+                            {v.relationType || 'Father'}
+                          </span>
+                          <span className="font-semibold text-zinc-800 dark:text-zinc-200">{v.relationName}</span>
                         </div>
                       )}
                       <div className="flex flex-wrap items-center gap-2 mt-0.5">
@@ -2810,7 +4093,7 @@ const VoterManagement: React.FC = () => {
                                       {editingVoter.name}
                                     </div>
                                     <div className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
-                                      {editingVoter.relationName ? `Relation: ${editingVoter.relationName}` : 'No relative specified'}
+                                      {editingVoter.relationName ? `${editingVoter.relationType || 'Father'}: ${editingVoter.relationName}` : 'No relative specified'}
                                     </div>
                                     <div className="flex flex-wrap items-center gap-2 mt-1">
                                       <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
@@ -2909,9 +4192,14 @@ const VoterManagement: React.FC = () => {
 
                                   {/* Father / Husband Name */}
                                   <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Father / Husband Name</span>
+                                    <div className="flex items-center justify-between">
+                                      <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Father / Husband</span>
+                                      <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                        {editingVoter.relationType || 'Father'}
+                                      </span>
+                                    </div>
                                     <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
-                                      {editingVoter.relationName || 'Not recorded'}
+                                      {editingVoter.relationName ? `${editingVoter.relationType || 'Father'}: ${editingVoter.relationName}` : 'Not recorded'}
                                     </span>
                                   </div>
 
@@ -2960,39 +4248,63 @@ const VoterManagement: React.FC = () => {
                               {/* Administrative Geography Details */}
                               <div className="space-y-3 pt-2">
                                 <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                                  <MapPin size={14} className="text-blue-500" /> Administrative Deployment & Hierarchy
+                                  <MapPin size={14} className="text-blue-500" /> Administrative Deployment & Demographic Hierarchy
                                 </h4>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                                   {/* State */}
                                   <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">State</span>
-                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">1. State</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
                                       {loc.stateName || 'Unassigned'}
                                     </span>
                                   </div>
 
                                   {/* District */}
                                   <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">District</span>
-                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">2. District</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
                                       {loc.districtName || 'Unassigned'}
                                     </span>
                                   </div>
 
                                   {/* Constituency */}
                                   <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Constituency</span>
-                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">3. Constituency</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
                                       {loc.constituencyName || 'Unassigned'}
                                     </span>
                                   </div>
 
-                                  {/* Polling Booth */}
-                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 sm:col-span-2 lg:col-span-1">
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Polling Booth</span>
+                                  {/* Block / Area */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">4. Block / Area</span>
                                     <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
-                                      {loc.boothNumber ? `#${loc.boothNumber} - ` : ''}{booths.find(b => b.id === editingVoter.boothId)?.name || loc.boothId || 'Unassigned'}
+                                      {loc.mandalName || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  {/* Panchayat / MC / ULB */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">5. Panchayat / MC / ULB</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
+                                      {loc.panchayatName || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  {/* Ward / Village */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">6. Ward / Village</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
+                                      {loc.wardName || 'Unassigned'}
+                                    </span>
+                                  </div>
+
+                                  {/* Polling Booth */}
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 sm:col-span-2">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">7. Polling Booth</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 block truncate">
+                                      {loc.boothNumber ? `#${loc.boothNumber} - ` : ''}{booths.find(b => b.id === editingVoter.boothId)?.name || loc.boothName || loc.boothId || 'Unassigned'}
                                     </span>
                                   </div>
 
@@ -3148,9 +4460,19 @@ const VoterManagement: React.FC = () => {
                               
                               {/* Health & Vital Status */}
                               <div className="space-y-3">
-                                <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-2">
-                                  <Activity size={14} className="text-purple-500" /> Health & Vital Demographics
-                                </h4>
+                                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-2">
+                                  <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] flex items-center gap-2">
+                                    <Activity size={14} className="text-purple-500" /> Health & Vital Demographics
+                                  </h4>
+                                  <button
+                                    type="button"
+                                    onClick={() => openQuickStatusModal(editingVoter)}
+                                    className="text-[10px] font-bold px-2.5 py-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 flex items-center gap-1.5 transition-all cursor-pointer"
+                                  >
+                                    <Edit3 size={11} />
+                                    <span>Quick Change Status</span>
+                                  </button>
+                                </div>
 
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                                   {/* Vital Status */}
@@ -3159,9 +4481,13 @@ const VoterManagement: React.FC = () => {
                                     <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-black uppercase tracking-wider mt-1.5 ${
                                       editingVoter.vitalStatus === 'Deceased' ? 'bg-red-50 text-red-600 border border-red-200 dark:bg-red-950/40 dark:text-red-400' :
                                       editingVoter.vitalStatus === 'Migrated/Shifted' ? 'bg-amber-50 text-amber-600 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-400' :
+                                      editingVoter.vitalStatus === 'Duplicate/Review' ? 'bg-blue-50 text-blue-600 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-400' :
                                       'bg-emerald-50 text-emerald-600 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400'
                                     }`}>
-                                      {editingVoter.vitalStatus || 'Active'}
+                                      {editingVoter.vitalStatus === 'Deceased' ? '🔴 Deceased' :
+                                       editingVoter.vitalStatus === 'Migrated/Shifted' ? '🟡 Migrated / Shifted' :
+                                       editingVoter.vitalStatus === 'Duplicate/Review' ? '🔵 Duplicate / Review' :
+                                       '🟢 Active / Live'}
                                     </span>
                                   </div>
 
@@ -3173,11 +4499,13 @@ const VoterManagement: React.FC = () => {
                                     </span>
                                   </div>
 
-                                  {/* Disability Category */}
+                                  {/* Disability Category & Percentage */}
                                   <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Disability Category</span>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Disability & Severity</span>
                                     <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
-                                      {editingVoter.disabilityCategory || 'None'}
+                                      {editingVoter.disabilityCategory && editingVoter.disabilityCategory !== 'None'
+                                        ? `${editingVoter.disabilityCategory}${editingVoter.disabilityPercent ? ` (${editingVoter.disabilityPercent}%)` : ''}`
+                                        : 'None'}
                                     </span>
                                   </div>
 
@@ -3193,6 +4521,23 @@ const VoterManagement: React.FC = () => {
                                     </span>
                                   </div>
                                 </div>
+
+                                {/* Deceased details banner if marked Deceased */}
+                                {editingVoter.vitalStatus === 'Deceased' && (
+                                  <div className="p-4 rounded-2xl bg-red-50/70 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 space-y-1.5">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-red-700 dark:text-red-300 block">
+                                      Deceased Elector Record Details
+                                    </span>
+                                    <div className="flex flex-wrap items-center gap-4 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+                                      {editingVoter.deathDate && (
+                                        <div>Date of Demise: <strong className="text-red-700 dark:text-red-300">{editingVoter.deathDate}</strong></div>
+                                      )}
+                                      {editingVoter.deathNotes && (
+                                        <div>Notes / Reference: <strong className="text-zinc-700 dark:text-zinc-300">{editingVoter.deathNotes}</strong></div>
+                                      )}
+                                    </div>
+                                  </div>
+                                )}
                               </div>
 
                               {/* Economic Profile */}
@@ -3201,7 +4546,7 @@ const VoterManagement: React.FC = () => {
                                   <Coins size={14} className="text-orange-500" /> Economic & Welfare Profile
                                 </h4>
 
-                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                                <div className="grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-5 gap-3.5">
                                   <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
                                     <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Economic Category</span>
                                     <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
@@ -3210,7 +4555,7 @@ const VoterManagement: React.FC = () => {
                                   </div>
 
                                   <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
-                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Monthly Household Income</span>
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Monthly Income</span>
                                     <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
                                       {editingVoter.incomeRange || '₹15,000 - ₹30,000'}
                                     </span>
@@ -3220,6 +4565,22 @@ const VoterManagement: React.FC = () => {
                                     <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Land Ownership</span>
                                     <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
                                       {editingVoter.landOwnership || 'Small Farmer'}
+                                    </span>
+                                  </div>
+
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Ration Card</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
+                                      {editingVoter.rationCardType && editingVoter.rationCardType !== 'None' 
+                                        ? `${editingVoter.rationCardType}${editingVoter.rationCardNo ? ` (#${editingVoter.rationCardNo})` : ''}`
+                                        : 'None'}
+                                    </span>
+                                  </div>
+
+                                  <div className="p-4 rounded-2xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800">
+                                    <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Housing Type</span>
+                                    <span className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-1 block">
+                                      {editingVoter.housingType || 'Pucca Concrete'}
                                     </span>
                                   </div>
                                 </div>
@@ -3428,12 +4789,26 @@ const VoterManagement: React.FC = () => {
                             <input disabled={isVolunteer} required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="As per voter list" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Father / Husband Name</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider flex items-center justify-between">
+                              <span>Father / Husband Name</span>
+                              <select 
+                                disabled={isVolunteer} 
+                                value={formData.relationType || 'Father'} 
+                                onChange={e => setFormData({ ...formData, relationType: e.target.value })}
+                                className="text-[9px] font-bold bg-transparent text-blue-600 dark:text-blue-400 outline-hidden cursor-pointer"
+                              >
+                                <option value="Father">Father</option>
+                                <option value="Husband">Husband</option>
+                                <option value="Mother">Mother</option>
+                                <option value="Guardian">Guardian</option>
+                                <option value="Other">Other</option>
+                              </select>
+                            </label>
                             <input disabled={isVolunteer} value={formData.relationName || ''} onChange={e => setFormData({ ...formData, relationName: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="Father's or Husband's Name" />
                           </div>
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Aadhar Number</label>
-                            <input disabled={isVolunteer} value={formData.aadharNumber} onChange={e => setFormData({ ...formData, aadharNumber: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 1234 5678 9012" />
+                            <input disabled={isVolunteer} value={formData.aadharNumber} onChange={e => setFormData({ ...formData, aadharNumber: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold font-mono ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 1234 5678 9012" />
                           </div>
                         </div>
 
@@ -3532,48 +4907,138 @@ const VoterManagement: React.FC = () => {
                         </div>
                       </div>
 
-                      {/* Deployment / Administrative Location Details */}
+                      {/* Deployment / Administrative Location Details (7-Level Cascading Hierarchy) */}
                       <div className="space-y-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
-                        <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Deployment & Geography</h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 pb-1">
+                          <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em]">Administrative Deployment & Demographic Mapping</h4>
+                          <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400 uppercase tracking-widest bg-blue-500/10 px-2 py-0.5 rounded-full">7-Tier Interlinked</span>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                          {/* 1. State */}
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">State</label>
-                            <select disabled={isVolunteer} required value={formData.stateId} onChange={e => setFormData({ ...formData, stateId: e.target.value, districtId: '', constituencyId: '', boothId: '' })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">1. State</label>
+                            <select 
+                              disabled={isVolunteer} 
+                              required 
+                              value={formData.stateId} 
+                              onChange={e => setFormData({ ...formData, stateId: e.target.value, districtId: '', constituencyId: '', mandalId: '', panchayatId: '', wardId: '', boothId: '' })} 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
+                            >
                               <option value="" disabled>Select State</option>
-                              {states.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                              {states.map(s => <option key={s.id} value={s.id}>{s.name} ({s.code})</option>)}
                             </select>
                           </div>
+
+                          {/* 2. District */}
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">District</label>
-                            <select disabled={isVolunteer} required value={formData.districtId} onChange={e => setFormData({ ...formData, districtId: e.target.value, constituencyId: '', boothId: '' })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">2. District</label>
+                            <select 
+                              disabled={isVolunteer} 
+                              required 
+                              value={formData.districtId} 
+                              onChange={e => setFormData({ ...formData, districtId: e.target.value, constituencyId: '', mandalId: '', panchayatId: '', wardId: '', boothId: '' })} 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
+                            >
                               <option value="" disabled>Select District</option>
-                              {districts.filter(d => d.stateId === formData.stateId).map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+                              {(modalDistricts.length > 0 ? modalDistricts : districts.filter(d => String(d.stateId) === String(formData.stateId))).map(d => (
+                                <option key={d.id} value={d.id}>{d.name}</option>
+                              ))}
                             </select>
                           </div>
-                        </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {/* 3. Constituency */}
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Constituency</label>
-                            <select disabled={isVolunteer} required value={formData.constituencyId} onChange={e => setFormData({ ...formData, constituencyId: e.target.value, boothId: '' })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">3. Constituency</label>
+                            <select 
+                              disabled={isVolunteer} 
+                              required 
+                              value={formData.constituencyId} 
+                              onChange={e => setFormData({ ...formData, constituencyId: e.target.value, mandalId: '', panchayatId: '', wardId: '', boothId: '' })} 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
+                            >
                               <option value="" disabled>Select Constituency</option>
-                              {constituencies.filter(c => c.districtId === formData.districtId).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                              {(modalConstituencies.length > 0 ? modalConstituencies : constituencies.filter(c => String(c.districtId) === String(formData.districtId))).map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
                             </select>
                           </div>
+
+                          {/* 4. Block / Area (Mandal) */}
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Booth</label>
-                            <select disabled={isVolunteer} required value={formData.boothId} onChange={e => setFormData({ ...formData, boothId: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}>
-                              <option value="" disabled>Select Booth</option>
-                              {booths.filter(b => b.constituencyId === formData.constituencyId).map(b => <option key={b.id} value={b.id}>#{b.boothNumber} - {b.name}</option>)}
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">4. Block / Area (Mandal)</label>
+                            <select 
+                              disabled={isVolunteer} 
+                              value={formData.mandalId} 
+                              onChange={e => setFormData({ ...formData, mandalId: e.target.value, panchayatId: '', wardId: '', boothId: '' })} 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
+                            >
+                              <option value="">Select Block / Area (Optional)</option>
+                              {(modalMandals.length > 0 ? modalMandals : mandals.filter(m => String(m.constituencyId) === String(formData.constituencyId))).map(m => (
+                                <option key={m.id} value={m.id}>{m.name} {m.mandal_code ? `(${m.mandal_code})` : ''}</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* 5. Panchayat / MC / ULB */}
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">5. Panchayat / MC / ULB</label>
+                            <select 
+                              disabled={isVolunteer} 
+                              value={formData.panchayatId} 
+                              onChange={e => setFormData({ ...formData, panchayatId: e.target.value, wardId: '', boothId: '' })} 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
+                            >
+                              <option value="">Select Local Body / Panchayat (Optional)</option>
+                              {(modalPanchayats.length > 0 ? modalPanchayats : panchayats.filter(p => !formData.mandalId || String(p.mandalId) === String(formData.mandalId))).map(p => (
+                                <option key={p.id} value={p.id}>{p.name} ({p.type || 'GP'})</option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* 6. Ward / Village */}
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">6. Ward / Village</label>
+                            <select 
+                              disabled={isVolunteer} 
+                              value={formData.wardId} 
+                              onChange={e => setFormData({ ...formData, wardId: e.target.value, boothId: '' })} 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
+                            >
+                              <option value="">Select Ward / Village (Optional)</option>
+                              {(modalWards.length > 0 ? modalWards : wards.filter(w => !formData.panchayatId || String(w.panchayatId) === String(formData.panchayatId))).map(w => (
+                                <option key={w.id} value={w.id}>{w.name} {w.wardNumber ? `(Ward #${w.wardNumber})` : ''}</option>
+                              ))}
                             </select>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          {/* 7. Polling Station / Booth */}
+                          <div className="space-y-1.5 flex flex-col sm:col-span-1">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">7. Polling Booth</label>
+                            <select 
+                              disabled={isVolunteer} 
+                              required 
+                              value={formData.boothId} 
+                              onChange={e => setFormData({ ...formData, boothId: e.target.value })} 
+                              className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
+                            >
+                              <option value="" disabled>Select Polling Booth</option>
+                              {booths
+                                .filter(b => (!formData.constituencyId || String(b.constituencyId) === String(formData.constituencyId)) && (!formData.wardId || String(b.wardId) === String(formData.wardId)))
+                                .map(b => (
+                                  <option key={b.id} value={b.id}>#{b.boothNumber} - {b.name}</option>
+                                ))
+                              }
+                            </select>
+                          </div>
+
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Part No</label>
                             <input disabled={isVolunteer} value={formData.partNo} onChange={e => setFormData({ ...formData, partNo: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 52" />
                           </div>
+
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Serial No</label>
                             <input disabled={isVolunteer} value={formData.srNo} onChange={e => setFormData({ ...formData, srNo: e.target.value })} className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`} placeholder="e.g. 142" />
@@ -3705,29 +5170,78 @@ const VoterManagement: React.FC = () => {
 
                       {/* Health Section */}
                       <div className="space-y-4">
-                        <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Health & Vital Status</h4>
+                        <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Health & Vital Demographics</h4>
+                        
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Vital Status</label>
                             <select value={formData.vitalStatus} onChange={e => setFormData({ ...formData, vitalStatus: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
-                              <option value="Active">Active (On List)</option>
-                              <option value="Deceased">Deceased</option>
+                              <option value="Active">Active / Alive (On List)</option>
+                              <option value="Deceased">Deceased / Demised</option>
                               <option value="Migrated/Shifted">Migrated / Shifted</option>
+                              <option value="Duplicate/Review">Duplicate / Under Review</option>
                             </select>
-                            <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">Rule: Archived status will automatically exclude the voter from active operational lists by default.</p>
+                            <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">Status changes sync automatically with dedicated campaign analytics and vital registers.</p>
                           </div>
+                          
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Physical / Health Profile</label>
-                            <select value={formData.physicalProfile} onChange={e => setFormData({ ...formData, physicalProfile: e.target.value, disabilityCategory: e.target.value === 'PwD' ? formData.disabilityCategory : 'None' })} className="webapp-input w-full h-11 text-sm font-bold">
+                            <select value={formData.physicalProfile} onChange={e => setFormData({ ...formData, physicalProfile: e.target.value, disabilityCategory: e.target.value === 'PwD' ? (formData.disabilityCategory || 'Locomotor') : 'None' })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="General">General / Healthy</option>
                               <option value="PwD">PwD (Person with Disability)</option>
                               <option value="Senior Citizen">Senior Citizen (Bedridden/Frail)</option>
-                              <option value="Chronic Illness">Chronic Illness</option>
+                              <option value="Chronic Illness">Chronic Illness / Critical Care</option>
                             </select>
                           </div>
                         </div>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {/* Conditional Deceased Input Fields */}
+                        {formData.vitalStatus === 'Deceased' && (
+                          <div className="p-4 rounded-2xl bg-red-50/70 dark:bg-red-950/20 border border-red-200 dark:border-red-900/40 space-y-3 animate-in fade-in duration-150">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-red-700 dark:text-red-300 block">
+                              Deceased Details & Verification Reference
+                            </span>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              <div className="space-y-1 flex flex-col">
+                                <label className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400">Date of Death / Demise</label>
+                                <input
+                                  type="date"
+                                  value={formData.deathDate || ''}
+                                  onChange={e => setFormData({ ...formData, deathDate: e.target.value })}
+                                  className="webapp-input w-full h-10 text-sm font-bold bg-white dark:bg-zinc-900"
+                                />
+                              </div>
+                              <div className="space-y-1 flex flex-col">
+                                <label className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400">Death Cause / Registry Reference Notes</label>
+                                <input
+                                  type="text"
+                                  value={formData.deathNotes || ''}
+                                  onChange={e => setFormData({ ...formData, deathNotes: e.target.value })}
+                                  placeholder="e.g. Hospital Certificate / Form 7 submitted"
+                                  className="webapp-input w-full h-10 text-sm font-bold bg-white dark:bg-zinc-900"
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Conditional Shifted Input Fields */}
+                        {formData.vitalStatus === 'Migrated/Shifted' && (
+                          <div className="p-4 rounded-2xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/40 space-y-2 animate-in fade-in duration-150">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300 block">
+                              Shifted / Migrated Destination Address Tracker
+                            </span>
+                            <input
+                              type="text"
+                              value={formData.newAddress || ''}
+                              onChange={e => setFormData({ ...formData, newAddress: e.target.value })}
+                              placeholder="e.g. Relocated to Sector 62, Noida / Out of Constituency"
+                              className="webapp-input w-full h-10 text-sm font-bold bg-white dark:bg-zinc-900"
+                            />
+                          </div>
+                        )}
+
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className={`text-[10px] font-black uppercase tracking-wider ${formData.physicalProfile !== 'PwD' ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'}`}>Disability Category</label>
                             <select 
@@ -3743,12 +5257,33 @@ const VoterManagement: React.FC = () => {
                               <option value="Other">Other disability</option>
                             </select>
                           </div>
+
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className={`text-[10px] font-black uppercase tracking-wider ${formData.physicalProfile !== 'PwD' ? 'text-zinc-400 dark:text-zinc-600' : 'text-zinc-500 dark:text-zinc-400'}`}>
+                              Disability Severity ({formData.disabilityPercent || 0}%)
+                            </label>
+                            <div className="flex items-center gap-2 h-11">
+                              <input
+                                type="range"
+                                min="0"
+                                max="100"
+                                step="5"
+                                disabled={formData.physicalProfile !== 'PwD'}
+                                value={formData.disabilityPercent || 0}
+                                onChange={e => setFormData({ ...formData, disabilityPercent: Number(e.target.value) })}
+                                className="flex-1 accent-purple-600 cursor-pointer disabled:cursor-not-allowed disabled:opacity-40"
+                              />
+                              <span className="text-xs font-bold font-mono text-zinc-700 dark:text-zinc-300 w-10 text-right">
+                                {formData.disabilityPercent || 0}%
+                              </span>
+                            </div>
+                          </div>
                           
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">ECI Assistance Needed</label>
                             <div className="flex bg-zinc-100 dark:bg-zinc-900 p-0.5 rounded-xl border border-zinc-200 dark:border-zinc-800 h-11 items-center">
                               {[
-                                { label: 'No Assistance', value: false },
+                                { label: 'Standard', value: false },
                                 { label: 'ECI Assist', value: true }
                               ].map(item => (
                                 <button
@@ -3772,17 +5307,19 @@ const VoterManagement: React.FC = () => {
                       {/* Economic Section */}
                       <div className="space-y-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
                         <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Economic & Welfare Intelligence</h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                           <div className="space-y-1.5 flex flex-col">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Economic Category</label>
                             <select value={formData.economicCategory || 'APL'} onChange={e => setFormData({ ...formData, economicCategory: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="APL">APL (Above Poverty Line)</option>
                               <option value="BPL">BPL (Below Poverty Line)</option>
                               <option value="EWS">EWS (Economically Weaker Section)</option>
+                              <option value="Antyodaya">Antyodaya (Poorest of Poor)</option>
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Monthly Household Income Range</label>
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Monthly Income Range</label>
                             <select value={formData.incomeRange || '₹15,000 - ₹30,000'} onChange={e => setFormData({ ...formData, incomeRange: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
                               <option value="Under ₹15,000">Under ₹15,000</option>
                               <option value="₹15,000 - ₹30,000">₹15,000 - ₹30,000</option>
@@ -3790,17 +5327,51 @@ const VoterManagement: React.FC = () => {
                               <option value="Above ₹60,000">Above ₹60,000</option>
                             </select>
                           </div>
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Land Ownership Type</label>
+                            <select value={formData.landOwnership || 'Small Farmer'} onChange={e => setFormData({ ...formData, landOwnership: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
+                              <option value="Landless">Landless</option>
+                              <option value="Small Farmer">Small Farmer</option>
+                              <option value="Marginal Farmer">Marginal Farmer</option>
+                              <option value="Large Landowner">Large Landowner</option>
+                              <option value="Urban Commercial/Residential Only">Urban Commercial / Residential Only</option>
+                            </select>
+                          </div>
                         </div>
 
-                        <div className="space-y-1.5 flex flex-col">
-                          <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Land Ownership Type</label>
-                          <select value={formData.landOwnership || 'Small Farmer'} onChange={e => setFormData({ ...formData, landOwnership: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
-                            <option value="Landless">Landless</option>
-                            <option value="Small Farmer">Small Farmer</option>
-                            <option value="Marginal Farmer">Marginal Farmer</option>
-                            <option value="Large Landowner">Large Landowner</option>
-                            <option value="Urban Commercial/Residential Only">Urban Commercial / Residential Only</option>
-                          </select>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Ration Card Type</label>
+                            <select value={formData.rationCardType || 'None'} onChange={e => setFormData({ ...formData, rationCardType: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
+                              <option value="None">None / No Card</option>
+                              <option value="White/APL">White / APL Card</option>
+                              <option value="Yellow/BPL">Yellow / BPL Card</option>
+                              <option value="Pink/Antyodaya">Pink / Antyodaya (AAY)</option>
+                              <option value="Green/Priority">Green / Priority Household (PHH)</option>
+                            </select>
+                          </div>
+                          
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Ration Card Number</label>
+                            <input 
+                              type="text" 
+                              value={formData.rationCardNo || ''} 
+                              onChange={e => setFormData({ ...formData, rationCardNo: e.target.value })} 
+                              placeholder="e.g. RC-98234123" 
+                              className="webapp-input w-full h-11 text-sm font-bold font-mono" 
+                            />
+                          </div>
+
+                          <div className="space-y-1.5 flex flex-col">
+                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Housing Type</label>
+                            <select value={formData.housingType || 'Pucca Concrete'} onChange={e => setFormData({ ...formData, housingType: e.target.value })} className="webapp-input w-full h-11 text-sm font-bold">
+                              <option value="Pucca Concrete">Pucca (Concrete/Owned)</option>
+                              <option value="Semi-Pucca">Semi-Pucca</option>
+                              <option value="Kutcha">Kutcha / Thatched</option>
+                              <option value="Rented">Rented Accommodation</option>
+                              <option value="Homeless">Homeless / Temporary Shelter</option>
+                            </select>
+                          </div>
                         </div>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
@@ -4085,14 +5656,176 @@ const VoterManagement: React.FC = () => {
        {/* Bulk Import Modal */}
        <BulkImportModal
          isOpen={isImportModalOpen}
-         onClose={() => setIsImportModalOpen(false)}
-         onSuccess={fetchVoters}
+         onClose={() => {
+           setIsImportModalOpen(false);
+           fetchVoters();
+         }}
+         onSuccess={() => {
+           fetchVoters();
+           fetchHierarchy();
+         }}
          states={states}
          initialStateId={selectedStateId !== 'all' ? selectedStateId : (selectedStateIds[0] || '')}
          initialDistrictId={selectedDistrictId !== 'all' ? selectedDistrictId : (selectedDistrictIds[0] || '')}
          initialConstituencyId={selectedConstituencyId !== 'all' ? selectedConstituencyId : (selectedConstituencyIds[0] || '')}
+         initialMandalId={selectedMandalId !== 'all' ? selectedMandalId : (selectedMandalIds[0] || '')}
+         initialPanchayatId={selectedPanchayatId !== 'all' ? selectedPanchayatId : (selectedPanchayatIds[0] || '')}
+         initialWardId={selectedWardId !== 'all' ? selectedWardId : (selectedWardIds[0] || '')}
          initialBoothId={selectedBoothId !== 'all' ? selectedBoothId : (selectedBoothIds[0] || '')}
        />
+
+       {/* WhatsApp Extension Stream Link Generator Modal */}
+       <WhatsAppFeedModal
+         isOpen={isWhatsAppFeedModalOpen}
+         onClose={() => setIsWhatsAppFeedModalOpen(false)}
+         currentFilters={currentFeedFilterCriteria}
+         filterSummaryText={feedFilterSummary}
+         matchingCount={filteredVoters.length}
+         states={states}
+         districts={districts}
+         constituencies={constituencies}
+         booths={booths}
+       />
+
+       {/* Quick Vital Status Switcher Modal */}
+       <AnimatePresence>
+         {quickStatusVoter && (
+           <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+             <motion.div 
+               initial={{ opacity: 0 }} 
+               animate={{ opacity: 1 }} 
+               exit={{ opacity: 0 }} 
+               onClick={() => setQuickStatusVoter(null)} 
+               className="absolute inset-0 bg-black/60 backdrop-blur-xs" 
+             />
+             <motion.div 
+               initial={{ scale: 0.95, opacity: 0, y: 10 }} 
+               animate={{ scale: 1, opacity: 1, y: 0 }} 
+               exit={{ scale: 0.95, opacity: 0, y: 10 }} 
+               className="relative bg-white dark:bg-zinc-950 p-6 sm:p-7 rounded-[28px] border border-zinc-200 dark:border-zinc-800 shadow-2xl max-w-lg w-full space-y-5 overflow-hidden"
+             >
+               <div className="flex items-start justify-between">
+                 <div>
+                   <div className="flex items-center gap-2">
+                     <span className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600 dark:text-blue-400">
+                       <Activity size={18} />
+                     </span>
+                     <h3 className="text-base font-black text-zinc-900 dark:text-white">
+                       Update Voter Vital Status
+                     </h3>
+                   </div>
+                   <p className="text-xs text-zinc-500 dark:text-zinc-400 font-medium mt-1">
+                     {quickStatusVoter.name} • <span className="font-mono font-bold text-blue-600 dark:text-blue-400">#{quickStatusVoter.voterId}</span>
+                   </p>
+                 </div>
+                 <button
+                   type="button"
+                   onClick={() => setQuickStatusVoter(null)}
+                   className="p-1.5 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+                 >
+                   <X size={18} />
+                 </button>
+               </div>
+
+               <form onSubmit={handleQuickStatusSubmit} className="space-y-4">
+                 {/* Status Selector Pills */}
+                 <div className="space-y-1.5">
+                   <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">
+                     Vital Status Classification
+                   </label>
+                   <div className="grid grid-cols-2 gap-2">
+                     {[
+                       { id: 'Active', label: '🟢 Active / Alive', desc: 'Active in electoral roll', activeBg: 'border-emerald-600 bg-emerald-50 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300 dark:border-emerald-700' },
+                       { id: 'Deceased', label: '🔴 Deceased / Dead', desc: 'Demised; Form 7 mark', activeBg: 'border-red-600 bg-red-50 text-red-800 dark:bg-red-950/50 dark:text-red-300 dark:border-red-700' },
+                       { id: 'Migrated/Shifted', label: '🟡 Migrated / Shifted', desc: 'Moved residence/booth', activeBg: 'border-amber-600 bg-amber-50 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300 dark:border-amber-700' },
+                       { id: 'Duplicate/Review', label: '🔵 Review / Duplicate', desc: 'Flagged for verification', activeBg: 'border-blue-600 bg-blue-50 text-blue-800 dark:bg-blue-950/50 dark:text-blue-300 dark:border-blue-700' },
+                     ].map(item => {
+                       const isSelected = quickStatusVal === item.id;
+                       return (
+                         <button
+                           key={item.id}
+                           type="button"
+                           onClick={() => setQuickStatusVal(item.id)}
+                           className={`p-3 rounded-xl border text-left transition-all cursor-pointer ${
+                             isSelected 
+                               ? `${item.activeBg} ring-2 ring-blue-500/20 shadow-xs font-bold` 
+                               : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/40 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+                           }`}
+                         >
+                           <div className="text-xs font-black">{item.label}</div>
+                           <div className="text-[10px] opacity-70 font-medium mt-0.5">{item.desc}</div>
+                         </button>
+                       );
+                     })}
+                   </div>
+                 </div>
+
+                 {/* If Deceased: Date of Death & Notes */}
+                 {quickStatusVal === 'Deceased' && (
+                   <div className="p-4 rounded-2xl bg-red-50/80 dark:bg-red-950/30 border border-red-200 dark:border-red-900/40 space-y-3 animate-in fade-in duration-150">
+                     <span className="text-[10px] font-black uppercase tracking-wider text-red-700 dark:text-red-300 block">
+                       Demise Verification Reference
+                     </span>
+                     <div className="space-y-1">
+                       <label className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400">Date of Death</label>
+                       <input
+                         type="date"
+                         value={quickDeathDate}
+                         onChange={e => setQuickDeathDate(e.target.value)}
+                         className="webapp-input w-full h-10 text-sm font-bold bg-white dark:bg-zinc-900"
+                       />
+                     </div>
+                     <div className="space-y-1">
+                       <label className="text-[9px] font-black uppercase text-zinc-500 dark:text-zinc-400">Death Notes / Registry Document Reference</label>
+                       <input
+                         type="text"
+                         value={quickDeathNotes}
+                         onChange={e => setQuickDeathNotes(e.target.value)}
+                         placeholder="e.g. Death Certificate No #8742 / Form 7"
+                         className="webapp-input w-full h-10 text-sm font-bold bg-white dark:bg-zinc-900"
+                       />
+                     </div>
+                   </div>
+                 )}
+
+                 {/* If Migrated/Shifted: Destination Address */}
+                 {quickStatusVal === 'Migrated/Shifted' && (
+                   <div className="p-4 rounded-2xl bg-amber-50/80 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/40 space-y-2 animate-in fade-in duration-150">
+                     <span className="text-[10px] font-black uppercase tracking-wider text-amber-700 dark:text-amber-300 block">
+                       New Shifted Location Tracker
+                     </span>
+                     <input
+                       type="text"
+                       value={quickNewAddress}
+                       onChange={e => setQuickNewAddress(e.target.value)}
+                       placeholder="e.g. Shifted to Ward 12, Hyderabad"
+                       className="webapp-input w-full h-10 text-sm font-bold bg-white dark:bg-zinc-900"
+                     />
+                   </div>
+                 )}
+
+                 <div className="flex gap-2 pt-2">
+                   <button
+                     type="button"
+                     onClick={() => setQuickStatusVoter(null)}
+                     className="flex-1 px-4 py-2.5 rounded-xl border border-zinc-200 dark:border-zinc-800 text-xs font-bold text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900 transition-all cursor-pointer"
+                   >
+                     Cancel
+                   </button>
+                   <button
+                     type="submit"
+                     disabled={statusSubmitting}
+                     className="flex-1 px-4 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold flex items-center justify-center gap-2 shadow-sm transition-all cursor-pointer"
+                   >
+                     {statusSubmitting ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+                     <span>Save Vital Status</span>
+                   </button>
+                 </div>
+               </form>
+             </motion.div>
+           </div>
+         )}
+       </AnimatePresence>
 
       {/* Delete Confirmation */}
       <AnimatePresence>

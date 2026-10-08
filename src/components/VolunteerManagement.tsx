@@ -821,47 +821,47 @@ export default function VolunteerManagement() {
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead className="bg-zinc-50 dark:bg-zinc-950/80 text-[11px] font-bold text-zinc-500 border-b border-zinc-200 dark:border-zinc-800">
+            <table className="w-full text-left text-xs border-collapse min-w-[850px] whitespace-nowrap">
+              <thead className="bg-zinc-50/70 dark:bg-zinc-950/80 text-[10px] font-black uppercase tracking-wider text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
                 <tr>
                   {volunteerColumnManager.visibleColumns.map(col => {
                     switch (col.id) {
                       case 'sr_no':
-                        return <th key={col.id} className="p-3.5 w-12 text-center">#</th>;
+                        return <th key={col.id} className="py-2.5 px-3 w-10 text-center">#</th>;
                       case 'name_epic':
-                        return <th key={col.id} className="p-3.5">Name &amp; EPIC</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Name &amp; EPIC</th>;
                       case 'leadership':
-                        return isSuperAdmin ? <th key={col.id} className="p-3.5">Supervising Leadership</th> : null;
+                        return isSuperAdmin ? <th key={col.id} className="py-2.5 px-3">Supervising Leadership</th> : null;
                       case 'mobile':
-                        return <th key={col.id} className="p-3.5">Contact</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Contact</th>;
                       case 'registered_booth':
-                        return <th key={col.id} className="p-3.5" title="Where this voter is enrolled in the electoral voter roll">Registered Booth (Voter Roll)</th>;
+                        return <th key={col.id} className="py-2.5 px-3" title="Where this voter is enrolled in the electoral voter roll">Registered Booth</th>;
                       case 'assigned_booth':
-                        return <th key={col.id} className="p-3.5" title="Operational polling station assigned for volunteer duties">Assigned Duty Booth (Campaign)</th>;
+                        return <th key={col.id} className="py-2.5 px-3" title="Operational polling station assigned for volunteer duties">Duty Booth</th>;
                       case 'village':
-                        return <th key={col.id} className="p-3.5">Village / Area</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Village / Area</th>;
                       case 'tasks':
-                        return <th key={col.id} className="p-3.5">Tasks</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Tasks</th>;
                       case 'rating':
-                        return <th key={col.id} className="p-3.5 text-center">Rating</th>;
+                        return <th key={col.id} className="py-2.5 px-3 text-center">Rating</th>;
                       case 'status':
-                        return <th key={col.id} className="p-3.5 text-center">Status</th>;
+                        return <th key={col.id} className="py-2.5 px-3 text-center">Status</th>;
                       case 'aadhaar':
-                        return <th key={col.id} className="p-3.5">Aadhaar</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Aadhaar</th>;
                       case 'gender_age':
-                        return <th key={col.id} className="p-3.5">Gender / Age</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Gender / Age</th>;
                       case 'house_no':
-                        return <th key={col.id} className="p-3.5">House No</th>;
+                        return <th key={col.id} className="py-2.5 px-3">House No</th>;
                       case 'caste':
-                        return <th key={col.id} className="p-3.5">Caste</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Caste</th>;
                       case 'occupation':
-                        return <th key={col.id} className="p-3.5">Occupation</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Occupation</th>;
                       case 'created_at':
-                        return <th key={col.id} className="p-3.5">Enrolled Date</th>;
+                        return <th key={col.id} className="py-2.5 px-3">Enrolled Date</th>;
                       case 'actions':
-                        return <th key={col.id} className="p-3.5 text-right">Actions</th>;
+                        return <th key={col.id} className="py-2.5 px-3 text-right">Actions</th>;
                       default:
-                        return <th key={col.id} className="p-3.5">{col.label}</th>;
+                        return <th key={col.id} className="py-2.5 px-3">{col.label}</th>;
                     }
                   })}
                 </tr>
@@ -876,36 +876,34 @@ export default function VolunteerManagement() {
                       {volunteerColumnManager.visibleColumns.map(col => {
                         switch (col.id) {
                           case 'sr_no':
-                            return <td key={col.id} className="p-3.5 text-center font-mono text-zinc-400 text-[11px]">{idx + 1}</td>;
+                            return <td key={col.id} className="py-2 px-3 text-center font-mono text-zinc-400 text-[11px]">{idx + 1}</td>;
                           case 'name_epic':
                             return (
-                              <td key={col.id} className="p-3.5">
-                                <div className="font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
-                                  {k.name}
-                                </div>
-                                <div className="flex items-center gap-1.5 flex-wrap mt-0.5">
-                                  <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 font-semibold">{k.voterId}</span>
+                              <td key={col.id} className="py-2 px-3">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="font-bold text-zinc-900 dark:text-white truncate max-w-[160px]" title={k.name}>
+                                    {k.name}
+                                  </span>
+                                  <span className="text-[10px] font-mono text-blue-600 dark:text-blue-400 font-semibold shrink-0">
+                                    ({k.voterId})
+                                  </span>
                                 </div>
                               </td>
                             );
                           case 'leadership':
                             if (!isSuperAdmin) return null;
                             return (
-                              <td key={col.id} className="p-3.5 space-y-1">
+                              <td key={col.id} className="py-2 px-3">
                                 <div className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 px-1.5 py-0.5 rounded border border-blue-200 dark:border-blue-800/40">
+                                  <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 px-1.5 py-0.2 rounded border border-blue-200 dark:border-blue-800/40">
                                     <Shield size={10} className="text-blue-600" />
-                                    <span>Admin: {getKaryakartaAdminName(k)}</span>
+                                    <span>{getKaryakartaAdminName(k)}</span>
                                   </span>
 
-                                  {getKaryakartaManagerName(k) ? (
-                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 px-1.5 py-0.5 rounded border border-purple-200 dark:border-purple-800/40">
+                                  {getKaryakartaManagerName(k) && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-purple-50 text-purple-700 dark:bg-purple-950/60 dark:text-purple-300 px-1.5 py-0.2 rounded border border-purple-200 dark:border-purple-800/40">
                                       <Users size={10} className="text-purple-600" />
-                                      <span>Mgr: {getKaryakartaManagerName(k)}</span>
-                                    </span>
-                                  ) : (
-                                    <span className="inline-flex items-center text-[9px] font-medium text-zinc-400 bg-zinc-100 dark:bg-zinc-800/60 px-1.5 py-0.5 rounded">
-                                      Direct Admin
+                                      <span>{getKaryakartaManagerName(k)}</span>
                                     </span>
                                   )}
                                 </div>
@@ -913,12 +911,12 @@ export default function VolunteerManagement() {
                             );
                           case 'mobile':
                             return (
-                              <td key={col.id} className="p-3.5 font-mono">
+                              <td key={col.id} className="py-2 px-3 font-mono text-xs">
                                 <div className="flex items-center gap-1.5">
-                                  <span>{k.mobile || '—'}</span>
+                                  <span>{k.mobile || '-'}</span>
                                   {k.mobile && (
                                     <a href={`tel:${k.mobile}`} className="text-blue-600 hover:text-blue-800 p-0.5" title="Call">
-                                      <Phone size={12} />
+                                      <Phone size={11} />
                                     </a>
                                   )}
                                 </div>
@@ -926,35 +924,31 @@ export default function VolunteerManagement() {
                             );
                           case 'registered_booth':
                             return (
-                              <td key={col.id} className="p-3.5 font-medium">
+                              <td key={col.id} className="py-2 px-3 font-medium">
                                 {(k.boothName || k.voterBoothName) ? (
-                                  <div className="flex items-center gap-1.5" title={`Voter Roll Booth: ${k.boothNumber || k.voterBoothNumber ? '#' + (k.boothNumber || k.voterBoothNumber) + ' ' : ''}${k.boothName || k.voterBoothName}`}>
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-zinc-800 dark:text-zinc-200 bg-zinc-100 dark:bg-zinc-800/80 px-2 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700 max-w-[180px] truncate">
-                                      <Vote size={12} className="text-blue-500 shrink-0" />
-                                      <span className="truncate">
-                                        {k.boothNumber || k.voterBoothNumber ? `#${k.boothNumber || k.voterBoothNumber} ` : ''}{k.boothName || k.voterBoothName}
-                                      </span>
+                                  <div className="flex items-center gap-1 text-[11px] font-semibold text-zinc-800 dark:text-zinc-200 truncate max-w-[160px]" title={`Voter Roll Booth: ${k.boothNumber || k.voterBoothNumber ? '#' + (k.boothNumber || k.voterBoothNumber) + ' ' : ''}${k.boothName || k.voterBoothName}`}>
+                                    <Vote size={11} className="text-blue-500 shrink-0" />
+                                    <span className="truncate">
+                                      {k.boothNumber || k.voterBoothNumber ? `#${k.boothNumber || k.voterBoothNumber} ` : ''}{k.boothName || k.voterBoothName}
                                     </span>
                                   </div>
                                 ) : (
-                                  <span className="text-zinc-400 italic text-[11px]">—</span>
+                                  <span className="text-zinc-400 text-xs">-</span>
                                 )}
                               </td>
                             );
                           case 'assigned_booth':
                             return (
-                              <td key={col.id} className="p-3.5 font-medium">
+                              <td key={col.id} className="py-2 px-3 font-medium">
                                 {k.assignedBoothName ? (
-                                  <div className="flex items-center gap-1.5" title={`Campaign Duty Booth: ${k.assignedBoothNumber ? '#' + k.assignedBoothNumber + ' ' : ''}${k.assignedBoothName}`}>
-                                    <span className="inline-flex items-center gap-1 text-[11px] font-bold text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/60 px-2 py-1 rounded-lg border border-purple-200 dark:border-purple-800/50 max-w-[180px] truncate">
-                                      <MapPin size={12} className="text-purple-600 dark:text-purple-400 shrink-0" />
-                                      <span className="truncate">
-                                        {k.assignedBoothNumber ? `#${k.assignedBoothNumber} ` : ''}{k.assignedBoothName}
-                                      </span>
+                                  <div className="flex items-center gap-1 text-[11px] font-bold text-purple-700 dark:text-purple-300 truncate max-w-[160px]" title={`Campaign Duty Booth: ${k.assignedBoothNumber ? '#' + k.assignedBoothNumber + ' ' : ''}${k.assignedBoothName}`}>
+                                    <MapPin size={11} className="text-purple-600 dark:text-purple-400 shrink-0" />
+                                    <span className="truncate">
+                                      {k.assignedBoothNumber ? `#${k.assignedBoothNumber} ` : ''}{k.assignedBoothName}
                                     </span>
                                   </div>
                                 ) : (
-                                  <span className="inline-flex items-center text-[10px] font-medium text-zinc-400 bg-zinc-100 dark:bg-zinc-800/60 px-2 py-0.5 rounded-full italic">
+                                  <span className="text-zinc-400 text-xs font-normal italic">
                                     Unassigned
                                   </span>
                                 )}
@@ -962,36 +956,36 @@ export default function VolunteerManagement() {
                             );
                           case 'village':
                             return (
-                              <td key={col.id} className="p-3.5 text-zinc-600 dark:text-zinc-400">
-                                {k.village || k.boothName || '—'}
+                              <td key={col.id} className="py-2 px-3 text-zinc-600 dark:text-zinc-400 text-xs truncate max-w-[140px]" title={k.village || k.boothName || '-'}>
+                                {k.village || k.boothName || '-'}
                               </td>
                             );
                           case 'tasks':
                             return (
-                              <td key={col.id} className="p-3.5">
+                              <td key={col.id} className="py-2 px-3">
                                 <button
                                   onClick={() => handleOpenTasks(k)}
-                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 hover:bg-blue-50 hover:text-blue-600 text-[11px] font-semibold transition-colors"
+                                  className="inline-flex items-center gap-1 px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-blue-50 hover:text-blue-600 text-[10px] font-semibold transition-colors"
                                 >
-                                  <ListTodo size={12} />
+                                  <ListTodo size={11} />
                                   <span>{completedTasks}/{totalTasks} Done</span>
                                 </button>
                               </td>
                             );
                           case 'rating':
                             return (
-                              <td key={col.id} className="p-3.5 text-center">
-                                <span className="font-bold text-amber-500 flex items-center justify-center gap-0.5">
-                                  <Star size={12} className="fill-amber-400" /> {k.performanceRating?.toFixed(1) || '5.0'}
+                              <td key={col.id} className="py-2 px-3 text-center">
+                                <span className="font-bold text-amber-500 flex items-center justify-center gap-0.5 text-xs">
+                                  <Star size={11} className="fill-amber-400" /> {k.performanceRating?.toFixed(1) || '5.0'}
                                 </span>
                               </td>
                             );
                           case 'status':
                             return (
-                              <td key={col.id} className="p-3.5 text-center">
+                              <td key={col.id} className="py-2 px-3 text-center">
                                 <button
                                   onClick={() => handleToggleStatus(k)}
-                                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  className={`px-2 py-0.2 rounded-full text-[10px] font-bold ${
                                     k.status === 'Active' 
                                       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400' 
                                       : 'bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400'
@@ -1002,51 +996,56 @@ export default function VolunteerManagement() {
                               </td>
                             );
                           case 'aadhaar':
-                            return <td key={col.id} className="p-3.5 font-mono text-zinc-600 dark:text-zinc-400">{k.aadharNumber || '—'}</td>;
+                            return <td key={col.id} className="py-2 px-3 font-mono text-zinc-600 dark:text-zinc-400 text-xs">{k.aadharNumber || '-'}</td>;
                           case 'gender_age':
-                            return <td key={col.id} className="p-3.5 text-zinc-600 dark:text-zinc-400">{[k.gender, k.age ? `${k.age} yrs` : ''].filter(Boolean).join(', ') || '—'}</td>;
+                            return <td key={col.id} className="py-2 px-3 text-zinc-600 dark:text-zinc-400 text-xs">{[k.gender, k.age ? `${k.age} yrs` : ''].filter(Boolean).join(', ') || '-'}</td>;
                           case 'house_no':
-                            return <td key={col.id} className="p-3.5 text-zinc-600 dark:text-zinc-400">{k.houseNo || '—'}</td>;
+                            return <td key={col.id} className="py-2 px-3 text-zinc-600 dark:text-zinc-400 text-xs">{k.houseNo || '-'}</td>;
                           case 'caste':
-                            return <td key={col.id} className="p-3.5 text-zinc-600 dark:text-zinc-400">{k.caste || '—'}</td>;
+                            return <td key={col.id} className="py-2 px-3 text-zinc-600 dark:text-zinc-400 text-xs">{k.caste || '-'}</td>;
                           case 'occupation':
-                            return <td key={col.id} className="p-3.5 text-zinc-600 dark:text-zinc-400">{k.occupation || '—'}</td>;
+                            return <td key={col.id} className="py-2 px-3 text-zinc-600 dark:text-zinc-400 text-xs">{k.occupation || '-'}</td>;
                           case 'created_at':
-                            return <td key={col.id} className="p-3.5 text-zinc-500 text-[11px] whitespace-nowrap">{k.createdAt ? new Date(k.createdAt).toLocaleDateString() : '—'}</td>;
+                            return <td key={col.id} className="py-2 px-3 text-zinc-500 text-[11px] whitespace-nowrap">{k.createdAt ? new Date(k.createdAt).toLocaleDateString() : '-'}</td>;
                           case 'actions':
                             return (
-                              <td key={col.id} className="p-3.5 text-right space-x-1 whitespace-nowrap">
-                                <button
-                                  onClick={() => {
-                                    setActiveKaryakarta(k);
-                                    setIsViewOpen(true);
-                                  }}
-                                  className="p-1 rounded text-zinc-400 hover:text-blue-600"
-                                  title="View Full Profile & Hierarchy"
-                                >
-                                  <Eye size={14} />
-                                </button>
-                                {hasRight('volunteers', 'u') && (
-                                  <button
-                                    onClick={() => handleOpenEdit(k)}
-                                    className="p-1 rounded text-zinc-400 hover:text-amber-600"
-                                    title="Edit"
-                                  >
-                                    <Edit3 size={14} />
-                                  </button>
-                                )}
-                                {hasRight('volunteers', 'd') && (
+                              <td key={col.id} className="py-2 px-3 text-right whitespace-nowrap">
+                                <div className="flex items-center justify-end gap-1.5">
                                   <button
                                     onClick={() => {
-                                      setDeletingKaryakarta(k);
-                                      setIsDeleteOpen(true);
+                                      setActiveKaryakarta(k);
+                                      setIsViewOpen(true);
                                     }}
-                                    className="p-1 rounded text-zinc-400 hover:text-red-600"
-                                    title="Remove"
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                    title="View Full Profile & Hierarchy"
                                   >
-                                    <Trash2 size={14} />
+                                    <Eye size={12} />
+                                    <span>View</span>
                                   </button>
-                                )}
+                                  {hasRight('volunteers', 'u') && (
+                                    <button
+                                      onClick={() => handleOpenEdit(k)}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                      title="Edit"
+                                    >
+                                      <Edit3 size={12} />
+                                      <span>Edit</span>
+                                    </button>
+                                  )}
+                                  {hasRight('volunteers', 'd') && (
+                                    <button
+                                      onClick={() => {
+                                        setDeletingKaryakarta(k);
+                                        setIsDeleteOpen(true);
+                                      }}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                      title="Delete"
+                                    >
+                                      <Trash2 size={12} />
+                                      <span>Delete</span>
+                                    </button>
+                                  )}
+                                </div>
                               </td>
                             );
                           default:
@@ -1463,14 +1462,14 @@ export default function VolunteerManagement() {
                       </p>
                     </div>
                   ) : (
-                    <table className="w-full text-left text-xs border-collapse">
+                    <table className="w-full text-left text-xs border-collapse whitespace-nowrap">
                       <thead className="bg-zinc-50 dark:bg-zinc-950 text-[10px] font-bold uppercase text-zinc-500 sticky top-0 border-b border-zinc-200 dark:border-zinc-800">
                         <tr>
-                          <th className="p-2.5">Name</th>
-                          <th className="p-2.5">EPIC No</th>
-                          <th className="p-2.5">Mobile</th>
-                          <th className="p-2.5">Registered Booth</th>
-                          <th className="p-2.5 text-right">Action</th>
+                          <th className="py-2 px-3">Name</th>
+                          <th className="py-2 px-3">EPIC No</th>
+                          <th className="py-2 px-3">Mobile</th>
+                          <th className="py-2 px-3">Registered Booth</th>
+                          <th className="py-2 px-3 text-right">Action</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -1479,22 +1478,22 @@ export default function VolunteerManagement() {
 
                           return (
                             <tr key={v.id} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/30">
-                              <td className="p-2.5 font-bold text-zinc-900 dark:text-white">{v.name}</td>
-                              <td className="p-2.5 font-mono text-blue-600 dark:text-blue-400 font-semibold">{v.voter_id}</td>
-                              <td className="p-2.5 font-mono text-zinc-500">{v.mobile || '—'}</td>
-                              <td className="p-2.5 text-zinc-500">
+                              <td className="py-1.5 px-3 font-bold text-zinc-900 dark:text-white">{v.name}</td>
+                              <td className="py-1.5 px-3 font-mono text-blue-600 dark:text-blue-400 font-semibold">{v.voter_id}</td>
+                              <td className="py-1.5 px-3 font-mono text-zinc-500">{v.mobile || '-'}</td>
+                              <td className="py-1.5 px-3 text-zinc-500">
                                 <span className="inline-flex items-center gap-1 text-[11px]">
                                   <Vote size={11} className="text-blue-500" />
-                                  {v.booth_number ? `#${v.booth_number} ` : ''}{v.booth_name || v.village || '—'}
+                                  {v.booth_number ? `#${v.booth_number} ` : ''}{v.booth_name || v.village || '-'}
                                 </span>
                               </td>
-                              <td className="p-2.5 text-right">
+                              <td className="py-1.5 px-3 text-right">
                                 {isAlreadyRecruited ? (
                                   <span className="text-[10px] text-emerald-600 font-bold px-2 py-0.5 bg-emerald-50 dark:bg-emerald-950/60 dark:text-emerald-400 rounded">Recruited</span>
                                 ) : (
                                   <button
                                     onClick={() => handleRecruitVoter(v)}
-                                    className="px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] shadow-xs"
+                                    className="px-2.5 py-0.5 rounded-md bg-blue-600 hover:bg-blue-700 text-white font-bold text-[11px] shadow-xs"
                                   >
                                     Recruit
                                   </button>

@@ -648,15 +648,15 @@ export default function BoothAgentManagement() {
         ) : (
           viewMode === 'table' ? (
             <div className="overflow-x-auto custom-scrollbar">
-              <table className="w-full text-left border-collapse min-w-[750px]">
+              <table className="w-full text-left border-collapse min-w-[750px] whitespace-nowrap">
                 <thead>
-                  <tr className="bg-zinc-50 dark:bg-zinc-900/50 text-[10px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
-                    <th className="px-6 py-4 w-12">#</th>
-                    <th className="px-6 py-4">Booth No</th>
-                    <th className="px-6 py-4">Booth Name</th>
-                    <th className="px-6 py-4">Village / Ward</th>
-                    <th className="px-6 py-4 text-center">Karyakarta Count</th>
-                    <th className="px-6 py-4 text-right">Coverage actions</th>
+                  <tr className="bg-zinc-50/70 dark:bg-zinc-900/50 text-[10px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
+                    <th className="px-4 py-2 w-10">#</th>
+                    <th className="px-4 py-2">Booth No</th>
+                    <th className="px-4 py-2">Booth Name</th>
+                    <th className="px-4 py-2">Village / Ward</th>
+                    <th className="px-4 py-2 text-center">Karyakarta Count</th>
+                    <th className="px-4 py-2 text-right">Coverage actions</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -666,31 +666,31 @@ export default function BoothAgentManagement() {
                     return (
                       <React.Fragment key={b.id}>
                         <tr className={`hover:bg-zinc-50/50 dark:hover:bg-zinc-900/30 transition-all text-xs ${isExpanded ? 'bg-zinc-50/40 dark:bg-zinc-900/20' : ''}`}>
-                          <td className="px-6 py-3 font-bold text-zinc-400">
+                          <td className="px-4 py-2 font-bold text-zinc-400">
                             <div className="flex items-center gap-1.5">
                               <button
                                 type="button"
                                 onClick={() => setExpandedBooths(prev => ({ ...prev, [b.id]: !prev[b.id] }))}
-                                className="p-1 hover:bg-zinc-150 dark:hover:bg-zinc-800 rounded transition-all text-zinc-400 hover:text-zinc-900 dark:hover:text-white shrink-0 cursor-pointer"
+                                className="p-0.5 hover:bg-zinc-150 dark:hover:bg-zinc-800 rounded transition-all text-zinc-400 hover:text-zinc-900 dark:hover:text-white shrink-0 cursor-pointer"
                                 title={isExpanded ? "Collapse Karyakarta list" : "Expand Karyakarta list"}
                               >
-                                {isExpanded ? <ChevronDown size={14} className="text-rose-500" /> : <ChevronRight size={14} />}
+                                {isExpanded ? <ChevronDown size={13} className="text-rose-500" /> : <ChevronRight size={13} />}
                               </button>
                               <span>{idx + 1}</span>
                             </div>
                           </td>
-                          <td className="px-6 py-3 font-black text-zinc-800 dark:text-zinc-200">#{b.boothNumber}</td>
-                          <td className="px-6 py-3">
-                            <div className="font-bold text-zinc-900 dark:text-white leading-normal line-clamp-1">{b.name}</div>
+                          <td className="px-4 py-2 font-black text-zinc-800 dark:text-zinc-200">#{b.boothNumber}</td>
+                          <td className="px-4 py-2">
+                            <div className="font-bold text-zinc-900 dark:text-white truncate max-w-[200px]" title={b.name}>{b.name}</div>
                           </td>
-                          <td className="px-6 py-3 text-zinc-650 dark:text-zinc-400">
+                          <td className="px-4 py-2 text-zinc-650 dark:text-zinc-400 text-xs truncate max-w-[150px]">
                             {b.village || 'General Sector'}
                           </td>
-                          <td className="px-6 py-3 text-center">
+                          <td className="px-4 py-2 text-center">
                             {boothAssignments.length > 0 ? (
                               <button
                                 onClick={() => setExpandedBooths(prev => ({ ...prev, [b.id]: !prev[b.id] }))}
-                                className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full transition-all outline-none cursor-pointer ${
+                                className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full transition-all outline-none cursor-pointer ${
                                   isExpanded 
                                     ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-200/50' 
                                     : 'bg-emerald-50 dark:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-150 dark:border-emerald-500/15 hover:scale-105 active:scale-95'
@@ -699,23 +699,23 @@ export default function BoothAgentManagement() {
                               >
                                 <span className={`w-1.5 h-1.5 rounded-full ${isExpanded ? 'bg-rose-500' : 'bg-emerald-500 animate-pulse'}`}></span>
                                 <span>{boothAssignments.length} {boothAssignments.length === 1 ? 'Karyakarta' : 'Karyakartas'}</span>
-                                {isExpanded ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
+                                {isExpanded ? <ChevronDown size={9} /> : <ChevronRight size={9} />}
                               </button>
                             ) : (
-                              <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-rose-50 dark:bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-150 dark:border-rose-500/15 text-[10px] font-bold">
+                              <div className="inline-flex items-center gap-1 px-2 py-0.2 rounded-full bg-rose-50 dark:bg-rose-500/10 text-rose-500 dark:text-rose-400 border border-rose-150 dark:border-rose-500/15 text-[10px] font-bold">
                                 <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
                                 <span>No coverage</span>
                               </div>
                             )}
                           </td>
-                          <td className="px-6 py-3 text-right">
-                            <div className="flex items-center justify-end gap-2">
+                          <td className="px-4 py-2 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
                               <button 
                                 onClick={() => setSelectedBoothDetails(b)}
-                                className="inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white dark:hover:bg-zinc-900 hover:bg-zinc-105 active:scale-95 transition-all shadow-sm"
+                                className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-800 text-zinc-700 hover:text-zinc-900 dark:text-zinc-300 dark:hover:text-white dark:hover:bg-zinc-900 hover:bg-zinc-105 active:scale-95 transition-all shadow-2xs"
                                 title="View booth info and deployed Karyakartas list"
                               >
-                                <Eye size={12} /> View Info
+                                <Eye size={11} /> View Info
                               </button>
                               {hasRight('booths', 'c') ? (
                                 <button 
@@ -759,16 +759,16 @@ export default function BoothAgentManagement() {
                                   </div>
                                 ) : (
                                   <div className="overflow-x-auto custom-scrollbar">
-                                    <table className="w-full text-left border-collapse text-xs min-w-[650px]">
+                                    <table className="w-full text-left border-collapse text-xs min-w-[650px] whitespace-nowrap">
                                       <thead>
                                         <tr className="bg-zinc-100/30 dark:bg-zinc-900/50 text-[9px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
-                                          <th className="px-4 py-2 w-10">#</th>
-                                          <th className="px-4 py-2">Karyakarta Name</th>
-                                          <th className="px-4 py-2">Designation / Role</th>
-                                          <th className="px-4 py-2">Mobile Number</th>
-                                          <th className="px-4 py-2">Voter Card / Aadhar ID</th>
-                                          <th className="px-4 py-2">Deployed By</th>
-                                          <th className="px-4 py-2 text-right">Actions</th>
+                                          <th className="px-3 py-2 w-10">#</th>
+                                          <th className="px-3 py-2">Karyakarta Name</th>
+                                          <th className="px-3 py-2">Designation / Role</th>
+                                          <th className="px-3 py-2">Mobile Number</th>
+                                          <th className="px-3 py-2">Voter Card / Aadhar ID</th>
+                                          <th className="px-3 py-2">Deployed By</th>
+                                          <th className="px-3 py-2 text-right">Actions</th>
                                         </tr>
                                       </thead>
                                       <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
@@ -777,24 +777,22 @@ export default function BoothAgentManagement() {
                                           const voterCard = fullVol?.voterId || asg.agentAadhar;
                                           return (
                                             <tr key={asg.id} className="hover:bg-zinc-50/45 dark:hover:bg-zinc-900/10 transition-colors">
-                                              <td className="px-4 py-2 font-bold text-zinc-400">{sIdx + 1}</td>
-                                              <td className="px-4 py-2">
+                                              <td className="px-3 py-2 font-bold text-zinc-400">{sIdx + 1}</td>
+                                              <td className="px-3 py-2">
                                                 <div className="flex items-center gap-2">
                                                   <div className="w-6 h-6 rounded-full bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 font-extrabold text-[9px] flex items-center justify-center uppercase border border-rose-100/30 shrink-0">
                                                     {asg.agentName?.substring(0, 2) || 'KK'}
                                                   </div>
-                                                  <div>
-                                                    <span className="font-extrabold text-zinc-900 dark:text-white leading-normal">{asg.agentName}</span>
-                                                    <span className="text-[8px] uppercase tracking-wider text-emerald-500 font-extrabold ml-2">● Active</span>
-                                                  </div>
+                                                  <span className="font-extrabold text-zinc-900 dark:text-white leading-normal text-xs">{asg.agentName}</span>
+                                                  <span className="text-[8px] uppercase tracking-wider text-emerald-500 font-extrabold ml-1">● Active</span>
                                                 </div>
                                               </td>
-                                              <td className="px-4 py-2">
+                                              <td className="px-3 py-2">
                                                 <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 dark:bg-emerald-955/40 text-emerald-600 dark:text-emerald-400 border border-emerald-150/40 dark:border-emerald-900/10">
                                                   {asg.designation || 'Booth Level Assistant'}
                                                 </span>
                                               </td>
-                                              <td className="px-4 py-2">
+                                              <td className="px-3 py-2">
                                                 {asg.agentMobile ? (
                                                   <a 
                                                     href={`tel:${asg.agentMobile}`} 
@@ -803,36 +801,32 @@ export default function BoothAgentManagement() {
                                                     {asg.agentMobile}
                                                   </a>
                                                 ) : (
-                                                  <span className="text-zinc-400 italic">No number</span>
+                                                  <span className="text-zinc-400">-</span>
                                                 )}
                                               </td>
-                                              <td className="px-4 py-2">
-                                                <div className="space-y-0.5 text-[10px]">
+                                              <td className="px-3 py-2">
+                                                <div className="flex items-center gap-2 text-[10px]">
                                                   {voterCard && (
-                                                    <div className="font-semibold text-zinc-500 dark:text-zinc-450">
-                                                      <span className="text-[8px] uppercase text-zinc-400 mr-1">VOTER:</span>
-                                                      <span className="font-mono">{voterCard}</span>
-                                                    </div>
+                                                    <span className="font-semibold text-zinc-500 dark:text-zinc-400 font-mono">
+                                                      <span className="text-[8px] uppercase text-zinc-400 mr-1">EPIC:</span>{voterCard}
+                                                    </span>
                                                   )}
-                                                  {asg.agentAadhar && (
-                                                    <div className="text-zinc-450">
-                                                      <span className="text-[8px] uppercase text-zinc-400 mr-1">AADHAR:</span>
-                                                      <span className="font-mono">{asg.agentAadhar}</span>
-                                                    </div>
+                                                  {asg.agentAadhar && !voterCard && (
+                                                    <span className="text-zinc-450 font-mono">
+                                                      <span className="text-[8px] uppercase text-zinc-400 mr-1">AADHAR:</span>{asg.agentAadhar}
+                                                    </span>
                                                   )}
                                                   {!voterCard && !asg.agentAadhar && (
-                                                    <span className="text-zinc-400 italic text-[10px]">No IDs provided</span>
+                                                    <span className="text-zinc-400">-</span>
                                                   )}
                                                 </div>
                                               </td>
-                                              <td className="px-4 py-2">
-                                                <div className="text-[10px] text-zinc-500">
-                                                  <span className="font-semibold text-zinc-700 dark:text-zinc-350" title={adminMap[asg.adminId]?.email}>
-                                                    {asg.adminId === user?.uid ? 'You' : (adminMap[asg.adminId]?.username || 'External')}
-                                                  </span>
+                                              <td className="px-3 py-2">
+                                                <div className="text-[10px] text-zinc-600 dark:text-zinc-350 font-semibold" title={adminMap[asg.adminId]?.email}>
+                                                  {asg.adminId === user?.uid ? 'You' : (adminMap[asg.adminId]?.username || 'External')}
                                                 </div>
                                               </td>
-                                              <td className="px-4 py-2 text-right">
+                                              <td className="px-3 py-2 text-right">
                                                 {hasRight('booths', 'd') && (
                                                   <button
                                                     onClick={() => setDismissingAssignment({
@@ -1020,16 +1014,16 @@ export default function BoothAgentManagement() {
                           <p className="text-[10px] text-zinc-500 mt-1">Deploy a Karyakarta helper to track this physical voter booth.</p>
                         </div>
                       ) : (
-                        <table className="w-full text-left border-collapse min-w-[700px]">
+                        <table className="w-full text-left border-collapse min-w-[700px] whitespace-nowrap">
                           <thead>
                             <tr className="bg-zinc-50/50 dark:bg-zinc-900/20 text-[9px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
-                              <th className="px-6 py-3 w-10">#</th>
-                              <th className="px-6 py-3">Karyakarta Info</th>
-                              <th className="px-6 py-3">Designation / Role</th>
-                              <th className="px-6 py-3">Mobile Number</th>
-                              <th className="px-6 py-3">Government IDs</th>
-                              <th className="px-6 py-3">Deployed By</th>
-                              <th className="px-6 py-3 text-right">Actions</th>
+                              <th className="px-3 py-2 w-10">#</th>
+                              <th className="px-3 py-2">Karyakarta Info</th>
+                              <th className="px-3 py-2">Designation / Role</th>
+                              <th className="px-3 py-2">Mobile Number</th>
+                              <th className="px-3 py-2">Government IDs</th>
+                              <th className="px-3 py-2">Deployed By</th>
+                              <th className="px-3 py-2 text-right">Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -1038,27 +1032,22 @@ export default function BoothAgentManagement() {
                               const voterCard = fullVol?.voterId || asg.agentAadhar;
                               return (
                                 <tr key={asg.id} className="hover:bg-zinc-50/30 dark:hover:bg-zinc-900/20 transition-all text-xs">
-                                  <td className="px-6 py-4 font-bold text-zinc-450">{idx + 1}</td>
-                                  <td className="px-6 py-4">
-                                    <div className="flex items-center gap-2.5">
-                                      <div className="w-7 h-7 rounded-full bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 font-extrabold text-[10px] flex items-center justify-center uppercase border border-rose-100/30 shrink-0">
+                                  <td className="px-3 py-2 font-bold text-zinc-450">{idx + 1}</td>
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center gap-2">
+                                      <div className="w-6 h-6 rounded-full bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 font-extrabold text-[9px] flex items-center justify-center uppercase border border-rose-100/30 shrink-0">
                                         {asg.agentName?.substring(0, 2) || 'KK'}
                                       </div>
-                                      <div>
-                                        <div className="font-extrabold text-zinc-900 dark:text-white leading-normal">{asg.agentName}</div>
-                                        <div className="text-[10px] font-semibold text-zinc-400 flex items-center gap-1 mt-0.5">
-                                          <span>Status:</span>
-                                          <span className="text-emerald-500 font-bold uppercase text-[9px]">● Active</span>
-                                        </div>
-                                      </div>
+                                      <span className="font-extrabold text-zinc-900 dark:text-white leading-normal text-xs">{asg.agentName}</span>
+                                      <span className="text-emerald-500 font-bold uppercase text-[9px]">● Active</span>
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4">
-                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-extrabold bg-emerald-50 dark:bg-emerald-955/40 text-emerald-600 dark:text-emerald-400 border border-emerald-150 dark:border-emerald-900/20">
+                                  <td className="px-3 py-2">
+                                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-emerald-50 dark:bg-emerald-955/40 text-emerald-600 dark:text-emerald-400 border border-emerald-150 dark:border-emerald-900/20">
                                       {asg.designation || 'Booth Level Assistant'}
                                     </span>
                                   </td>
-                                  <td className="px-6 py-4">
+                                  <td className="px-3 py-2">
                                     {asg.agentMobile ? (
                                       <a 
                                         href={`tel:${asg.agentMobile}`} 
@@ -1067,40 +1056,33 @@ export default function BoothAgentManagement() {
                                         {asg.agentMobile}
                                       </a>
                                     ) : (
-                                      <span className="text-zinc-450 italic">Not available</span>
+                                      <span className="text-zinc-400">-</span>
                                     )}
                                   </td>
-                                  <td className="px-6 py-4">
-                                    <div className="space-y-0.5">
+                                  <td className="px-3 py-2">
+                                    <div className="flex items-center gap-2 text-[10px]">
                                       {voterCard && (
-                                        <div className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
-                                          <span className="uppercase text-[8px] text-zinc-400">Voter EPIC:</span>
-                                          <span className="font-mono font-bold">{voterCard}</span>
-                                        </div>
+                                        <span className="font-mono font-bold text-zinc-600 dark:text-zinc-300">
+                                          <span className="text-[8px] uppercase text-zinc-400 mr-1">EPIC:</span>{voterCard}
+                                        </span>
                                       )}
-                                      {asg.agentAadhar && (
-                                        <div className="text-[10px] font-semibold text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
-                                          <span className="uppercase text-[8px] text-zinc-400">Aadhar:</span>
-                                          <span className="font-mono">{asg.agentAadhar}</span>
-                                        </div>
+                                      {asg.agentAadhar && !voterCard && (
+                                        <span className="font-mono text-zinc-500">
+                                          <span className="text-[8px] uppercase text-zinc-400 mr-1">AADHAR:</span>{asg.agentAadhar}
+                                        </span>
                                       )}
                                       {!voterCard && !asg.agentAadhar && (
-                                        <span className="text-zinc-455 text-[10px] italic">No IDs saved</span>
+                                        <span className="text-zinc-400">-</span>
                                       )}
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4">
-                                    <div className="text-[10px] text-zinc-500">
-                                      <div className="font-bold text-zinc-700 dark:text-zinc-300">
-                                        {asg.adminId === user?.uid ? 'You' : (adminMap[asg.adminId]?.username || 'External Admin')}
-                                      </div>
-                                      <div className="text-[8px] text-zinc-400 truncate mt-0.5 max-w-[120px]" title={adminMap[asg.adminId]?.email}>
-                                        {adminMap[asg.adminId]?.email || ''}
-                                      </div>
+                                  <td className="px-3 py-2">
+                                    <div className="text-[10px] text-zinc-600 dark:text-zinc-300 font-medium">
+                                      {asg.adminId === user?.uid ? 'You' : (adminMap[asg.adminId]?.username || 'External Admin')}
                                     </div>
                                   </td>
-                                  <td className="px-6 py-4 text-right">
-                                    <div className="flex items-center justify-end gap-2">
+                                  <td className="px-3 py-2 text-right">
+                                    <div className="flex items-center justify-end gap-1">
                                       {hasRight('booths', 'd') && (
                                         <button
                                           onClick={() => setDismissingAssignment({
@@ -1109,7 +1091,7 @@ export default function BoothAgentManagement() {
                                             volunteerId: asg.agentVolunteerDocId || '',
                                             agentName: asg.agentName
                                           })}
-                                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-zinc-200 dark:border-zinc-800 hover:border-rose-200 text-zinc-650 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-955/20 transition-all cursor-pointer"
+                                          className="inline-flex items-center gap-0.5 px-2 py-0.5 rounded text-[10px] font-bold border border-zinc-200 dark:border-zinc-800 text-zinc-650 hover:text-rose-500 hover:bg-rose-50 dark:hover:bg-rose-955/20 transition-all cursor-pointer"
                                           title="Dismiss Karyakarta"
                                         >
                                           <UserMinus size={11} /> Dismiss

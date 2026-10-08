@@ -89,9 +89,9 @@ function buildSafeInClause(
   return orParts.length === 1 ? orParts[0] : `(${orParts.join(' OR ')})`;
 }
 
-async function getRequesterInfo(reqUser: any): Promise<{ isSuperAdmin: boolean; userRow: any }> {
+async function getRequesterInfo(reqUser: any): Promise<{ isSuperAdmin: boolean; userRow: any; reqUid: string }> {
   if (!reqUser) {
-    return { isSuperAdmin: false, userRow: null };
+    return { isSuperAdmin: false, userRow: null, reqUid: '' };
   }
 
   const email = (reqUser.email || '').toLowerCase().trim();
@@ -99,7 +99,7 @@ async function getRequesterInfo(reqUser: any): Promise<{ isSuperAdmin: boolean; 
 
   // 1. Check if root super admin by owner email
   if (email === 'vijaychauhanofficial01@gmail.com') {
-    return { isSuperAdmin: true, userRow: null };
+    return { isSuperAdmin: true, userRow: null, reqUid: uid || 'usr_super_admin_vijay' };
   }
 
   // 2. Query user from database by email or id
@@ -120,8 +120,9 @@ async function getRequesterInfo(reqUser: any): Promise<{ isSuperAdmin: boolean; 
 
   const role = userRow?.role || reqUser.role;
   const isSuperAdmin = role === 'super_admin' || email === 'vijaychauhanofficial01@gmail.com';
+  const effectiveUid = userRow?.id || uid || email;
 
-  return { isSuperAdmin, userRow };
+  return { isSuperAdmin, userRow, reqUid: effectiveUid };
 }
 
 // Auto-create users and user_invites tables if they don't exist
@@ -194,6 +195,12 @@ async function ensureAuthTables() {
           ALTER TABLE dbo.users ADD district_id NVARCHAR(MAX) NULL;
         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'constituency_id')
           ALTER TABLE dbo.users ADD constituency_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'mandal_id')
+          ALTER TABLE dbo.users ADD mandal_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'panchayat_id')
+          ALTER TABLE dbo.users ADD panchayat_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'ward_id')
+          ALTER TABLE dbo.users ADD ward_id NVARCHAR(MAX) NULL;
         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'booth_id')
           ALTER TABLE dbo.users ADD booth_id NVARCHAR(MAX) NULL;
         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'assigned_booths')
@@ -206,6 +213,62 @@ async function ensureAuthTables() {
           ALTER TABLE dbo.users ADD created_by NVARCHAR(255) NULL;
         IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.users') AND name = 'disabled')
           ALTER TABLE dbo.users ADD disabled BIT NOT NULL DEFAULT 0;
+      END
+
+      IF OBJECT_ID(N'dbo.user_invites', N'U') IS NOT NULL
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.user_invites') AND name = 'mandal_id')
+          ALTER TABLE dbo.user_invites ADD mandal_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.user_invites') AND name = 'panchayat_id')
+          ALTER TABLE dbo.user_invites ADD panchayat_id NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.user_invites') AND name = 'ward_id')
+          ALTER TABLE dbo.user_invites ADD ward_id NVARCHAR(MAX) NULL;
+      END
+
+      IF OBJECT_ID(N'dbo.panchayats', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.panchayats (
+          id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          code VARCHAR(50) NULL,
+          type VARCHAR(100) DEFAULT 'Gram Panchayat',
+          mandal_id INT NULL,
+          constituency_id INT NULL,
+          district_id INT NULL,
+          state_id INT NULL,
+          population INT DEFAULT 0,
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+          created_by VARCHAR(128) NULL
+        );
+      END
+
+      IF OBJECT_ID(N'dbo.wards', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.wards (
+          id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          name VARCHAR(255) NOT NULL,
+          ward_number VARCHAR(50) NULL,
+          type VARCHAR(100) DEFAULT 'Ward',
+          panchayat_id INT NULL,
+          mandal_id INT NULL,
+          constituency_id INT NULL,
+          district_id INT NULL,
+          state_id INT NULL,
+          population INT DEFAULT 0,
+          total_voters INT DEFAULT 0,
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+          created_by VARCHAR(128) NULL
+        );
+      END
+
+      IF OBJECT_ID(N'dbo.booths', N'U') IS NOT NULL
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.booths') AND name = 'panchayat_id')
+          ALTER TABLE dbo.booths ADD panchayat_id INT NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.booths') AND name = 'ward_id')
+          ALTER TABLE dbo.booths ADD ward_id INT NULL;
+        IF NOT EXISTS (SELECT 1 FROM sys.columns WHERE object_id = OBJECT_ID('dbo.booths') AND name = 'booth_label')
+          ALTER TABLE dbo.booths ADD booth_label VARCHAR(100) NULL;
       END
     `);
 
@@ -270,11 +333,152 @@ async function ensureDemographicSchema() {
       IF OBJECT_ID(N'dbo.booths', N'U') IS NOT NULL AND COL_LENGTH('dbo.booths', 'created_by') IS NULL
         ALTER TABLE dbo.booths ADD created_by VARCHAR(128) NULL;
 
-      IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL AND COL_LENGTH('dbo.voters', 'created_by') IS NULL
-        ALTER TABLE dbo.voters ADD created_by VARCHAR(128) NULL;
+      IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL
+      BEGIN
+        IF COL_LENGTH('dbo.voters', 'created_by') IS NULL
+          ALTER TABLE dbo.voters ADD created_by VARCHAR(128) NULL;
+        IF COL_LENGTH('dbo.voters', 'aadhar_number') IS NULL
+          ALTER TABLE dbo.voters ADD aadhar_number VARCHAR(50) NULL;
+        IF COL_LENGTH('dbo.voters', 'dob') IS NULL
+          ALTER TABLE dbo.voters ADD dob VARCHAR(50) NULL;
+        IF COL_LENGTH('dbo.voters', 'additional_mobile') IS NULL
+          ALTER TABLE dbo.voters ADD additional_mobile VARCHAR(50) NULL;
+        IF COL_LENGTH('dbo.voters', 'new_address') IS NULL
+          ALTER TABLE dbo.voters ADD new_address NVARCHAR(MAX) NULL;
+        IF COL_LENGTH('dbo.voters', 'education') IS NULL
+          ALTER TABLE dbo.voters ADD education VARCHAR(100) NULL;
+        IF COL_LENGTH('dbo.voters', 'vital_status') IS NULL
+          ALTER TABLE dbo.voters ADD vital_status VARCHAR(50) DEFAULT 'Active';
+        IF COL_LENGTH('dbo.voters', 'death_date') IS NULL
+          ALTER TABLE dbo.voters ADD death_date VARCHAR(50) NULL;
+        IF COL_LENGTH('dbo.voters', 'death_notes') IS NULL
+          ALTER TABLE dbo.voters ADD death_notes NVARCHAR(MAX) NULL;
+        IF COL_LENGTH('dbo.voters', 'physical_profile') IS NULL
+          ALTER TABLE dbo.voters ADD physical_profile VARCHAR(50) DEFAULT 'General';
+        IF COL_LENGTH('dbo.voters', 'disability_category') IS NULL
+          ALTER TABLE dbo.voters ADD disability_category VARCHAR(50) DEFAULT 'None';
+        IF COL_LENGTH('dbo.voters', 'eci_assistance_needed') IS NULL
+          ALTER TABLE dbo.voters ADD eci_assistance_needed BIT DEFAULT 0;
+        IF COL_LENGTH('dbo.voters', 'economic_category') IS NULL
+          ALTER TABLE dbo.voters ADD economic_category VARCHAR(50) DEFAULT 'APL';
+        IF COL_LENGTH('dbo.voters', 'income_range') IS NULL
+          ALTER TABLE dbo.voters ADD income_range VARCHAR(50) DEFAULT '₹15,000 - ₹30,000';
+        IF COL_LENGTH('dbo.voters', 'land_ownership') IS NULL
+          ALTER TABLE dbo.voters ADD land_ownership VARCHAR(100) DEFAULT 'Small Farmer';
+        IF COL_LENGTH('dbo.voters', 'ration_card_type') IS NULL
+          ALTER TABLE dbo.voters ADD ration_card_type VARCHAR(50) NULL;
+        IF COL_LENGTH('dbo.voters', 'ration_card_no') IS NULL
+          ALTER TABLE dbo.voters ADD ration_card_no VARCHAR(50) NULL;
+        IF COL_LENGTH('dbo.voters', 'panchayat_id') IS NULL
+          ALTER TABLE dbo.voters ADD panchayat_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.voters', 'panchayat_name') IS NULL
+          ALTER TABLE dbo.voters ADD panchayat_name NVARCHAR(255) NULL;
+        IF COL_LENGTH('dbo.voters', 'ward_id') IS NULL
+          ALTER TABLE dbo.voters ADD ward_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.voters', 'ward_name') IS NULL
+          ALTER TABLE dbo.voters ADD ward_name NVARCHAR(255) NULL;
+      END
 
-      IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL AND COL_LENGTH('dbo.voters', 'aadhar_number') IS NULL
-        ALTER TABLE dbo.voters ADD aadhar_number VARCHAR(50) NULL;
+      -- Panchayats / MC / ULBs Table
+      IF OBJECT_ID(N'dbo.panchayats', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.panchayats (
+          id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          name NVARCHAR(255) NOT NULL,
+          code NVARCHAR(50) NULL,
+          type NVARCHAR(50) DEFAULT 'Gram Panchayat',
+          mandal_id INT NULL,
+          constituency_id INT NULL,
+          district_id INT NULL,
+          state_id INT NULL,
+          population INT NULL DEFAULT 0,
+          created_by VARCHAR(128) NULL,
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME()
+        );
+      END
+
+      -- Wards / Villages Table
+      IF OBJECT_ID(N'dbo.wards', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.wards (
+          id INT IDENTITY(1,1) NOT NULL PRIMARY KEY,
+          name NVARCHAR(255) NOT NULL,
+          ward_number NVARCHAR(50) NULL,
+          type NVARCHAR(50) DEFAULT 'Ward',
+          panchayat_id INT NULL,
+          mandal_id INT NULL,
+          constituency_id INT NULL,
+          district_id INT NULL,
+          state_id INT NULL,
+          population INT NULL DEFAULT 0,
+          total_voters INT NULL DEFAULT 0,
+          created_by VARCHAR(128) NULL,
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME()
+        );
+      END
+
+      IF OBJECT_ID(N'dbo.booths', N'U') IS NOT NULL
+      BEGIN
+        IF COL_LENGTH('dbo.booths', 'panchayat_id') IS NULL
+          ALTER TABLE dbo.booths ADD panchayat_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.booths', 'ward_id') IS NULL
+          ALTER TABLE dbo.booths ADD ward_id VARCHAR(64) NULL;
+        IF COL_LENGTH('dbo.booths', 'booth_label') IS NULL
+          ALTER TABLE dbo.booths ADD booth_label NVARCHAR(100) NULL;
+      END
+
+      IF OBJECT_ID(N'dbo.states', N'U') IS NOT NULL
+      BEGIN
+        IF COL_LENGTH('dbo.states', 'population') IS NULL
+          ALTER TABLE dbo.states ADD population INT NULL DEFAULT 0;
+      END
+
+      IF OBJECT_ID(N'dbo.districts', N'U') IS NOT NULL
+      BEGIN
+        IF COL_LENGTH('dbo.districts', 'population') IS NULL
+          ALTER TABLE dbo.districts ADD population INT NULL DEFAULT 0;
+      END
+
+      IF OBJECT_ID(N'dbo.constituencies', N'U') IS NOT NULL
+      BEGIN
+        IF COL_LENGTH('dbo.constituencies', 'population') IS NULL
+          ALTER TABLE dbo.constituencies ADD population INT NULL DEFAULT 0;
+        IF COL_LENGTH('dbo.constituencies', 'category') IS NULL
+          ALTER TABLE dbo.constituencies ADD category NVARCHAR(50) NULL DEFAULT 'General';
+      END
+
+      -- Dedicated Table for Voter Health & Economy (Linked with DB Voter ID, EPIC NO, and Aadhar Number)
+      IF OBJECT_ID(N'dbo.voter_health_economy', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.voter_health_economy (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          voter_doc_id VARCHAR(64) NOT NULL,
+          voter_epic VARCHAR(64) NULL,
+          aadhar_number VARCHAR(64) NULL,
+          vital_status VARCHAR(64) DEFAULT 'Active',
+          death_date VARCHAR(64) NULL,
+          death_notes NVARCHAR(MAX) NULL,
+          physical_profile VARCHAR(64) DEFAULT 'General',
+          disability_category VARCHAR(64) DEFAULT 'None',
+          disability_percent VARCHAR(64) NULL,
+          eci_assistance_needed BIT DEFAULT 0,
+          health_notes NVARCHAR(MAX) NULL,
+          economic_category VARCHAR(64) DEFAULT 'APL',
+          income_range VARCHAR(64) DEFAULT '₹15,000 - ₹30,000',
+          land_ownership VARCHAR(100) DEFAULT 'Small Farmer',
+          ration_card_type VARCHAR(64) NULL,
+          ration_card_no VARCHAR(64) NULL,
+          housing_type VARCHAR(100) NULL,
+          occupation_detail NVARCHAR(255) NULL,
+          recorded_by VARCHAR(64) NULL,
+          recorded_by_name NVARCHAR(256) NULL,
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+          updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
+        );
+        CREATE INDEX idx_vhe_voter_doc ON dbo.voter_health_economy(voter_doc_id);
+        CREATE INDEX idx_vhe_voter_epic ON dbo.voter_health_economy(voter_epic);
+        CREATE INDEX idx_vhe_aadhar ON dbo.voter_health_economy(aadhar_number);
+      END
 
       -- Drop any legacy foreign keys on voter/survey/sentiment/volunteer tables that block column altering
       DECLARE @dropSql NVARCHAR(MAX) = N'';
@@ -899,8 +1103,26 @@ async function startServer() {
         state_id = null,
         district_id = null,
         constituency_id = null,
-        booth_id = null
+        mandal_id = null,
+        panchayat_id = null,
+        ward_id = null,
+        booth_id = null,
+        stateId = null,
+        districtId = null,
+        constituencyId = null,
+        mandalId = null,
+        panchayatId = null,
+        wardId = null,
+        boothId = null
       } = req.body;
+
+      const finalStateId = state_id || stateId || null;
+      const finalDistrictId = district_id || districtId || null;
+      const finalConstituencyId = constituency_id || constituencyId || null;
+      const finalMandalId = mandal_id || mandalId || null;
+      const finalPanchayatId = panchayat_id || panchayatId || null;
+      const finalWardId = ward_id || wardId || null;
+      const finalBoothId = booth_id || boothId || null;
 
       if (!email || !name) {
         return res.status(400).json({ error: 'Name and email are required to generate an invitation.' });
@@ -924,7 +1146,7 @@ async function startServer() {
       const token = Buffer.from(crypto.randomBytes(24)).toString('hex');
       const inviteId = `inv_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
       const rightsJson = JSON.stringify(safePermissions);
-      const assignedBoothsJson = JSON.stringify(assigned_booths || (booth_id ? [booth_id] : []));
+      const assignedBoothsJson = JSON.stringify(assigned_booths || (finalBoothId ? [finalBoothId] : []));
       const creatorIdentifier = reqUid || reqEmail || sender.uid || sender.email;
 
       // 1. Ensure user exists in Firebase Auth so password reset & invitations work seamlessly
@@ -965,8 +1187,8 @@ async function startServer() {
 
       // 2. Insert invite in SQL Server
       await execute(`
-        INSERT INTO dbo.user_invites (id, email, name, role, assigned_booths, rights, state_id, district_id, constituency_id, booth_id, token, status, created_by)
-        VALUES (@id, @email, @name, @role, @assigned_booths, @rights, @state_id, @district_id, @constituency_id, @booth_id, @token, 'pending', @created_by)
+        INSERT INTO dbo.user_invites (id, email, name, role, assigned_booths, rights, state_id, district_id, constituency_id, mandal_id, panchayat_id, ward_id, booth_id, token, status, created_by)
+        VALUES (@id, @email, @name, @role, @assigned_booths, @rights, @state_id, @district_id, @constituency_id, @mandal_id, @panchayat_id, @ward_id, @booth_id, @token, 'pending', @created_by)
       `, {
         id: inviteId,
         email: cleanEmail,
@@ -974,10 +1196,13 @@ async function startServer() {
         role: targetRole,
         assigned_booths: assignedBoothsJson,
         rights: rightsJson,
-        state_id,
-        district_id,
-        constituency_id,
-        booth_id,
+        state_id: finalStateId,
+        district_id: finalDistrictId,
+        constituency_id: finalConstituencyId,
+        mandal_id: finalMandalId,
+        panchayat_id: finalPanchayatId,
+        ward_id: finalWardId,
+        booth_id: finalBoothId,
         token,
         created_by: creatorIdentifier
       });
@@ -988,8 +1213,8 @@ async function startServer() {
 
       if (existingUser.length === 0) {
         await execute(`
-          INSERT INTO dbo.users (id, email, password_hash, name, role, assigned_booths, rights, state_id, district_id, constituency_id, created_by, disabled)
-          VALUES (@id, @email, @password_hash, @name, @role, @assigned_booths, @rights, @state_id, @district_id, @constituency_id, @created_by, 0)
+          INSERT INTO dbo.users (id, email, password_hash, name, role, assigned_booths, rights, state_id, district_id, constituency_id, mandal_id, panchayat_id, ward_id, created_by, disabled)
+          VALUES (@id, @email, @password_hash, @name, @role, @assigned_booths, @rights, @state_id, @district_id, @constituency_id, @mandal_id, @panchayat_id, @ward_id, @created_by, 0)
         `, {
           id: finalUserId,
           email: cleanEmail,
@@ -998,23 +1223,31 @@ async function startServer() {
           role: targetRole,
           assigned_booths: assignedBoothsJson,
           rights: rightsJson,
-          state_id,
-          district_id,
-          constituency_id,
+          state_id: finalStateId,
+          district_id: finalDistrictId,
+          constituency_id: finalConstituencyId,
+          mandal_id: finalMandalId,
+          panchayat_id: finalPanchayatId,
+          ward_id: finalWardId,
           created_by: creatorIdentifier
         });
       } else {
         await execute(`
           UPDATE dbo.users 
-          SET role = @role, rights = @rights, assigned_booths = @assigned_booths, state_id = @state_id, district_id = @district_id, constituency_id = @constituency_id
+          SET role = @role, rights = @rights, assigned_booths = @assigned_booths, 
+              state_id = @state_id, district_id = @district_id, constituency_id = @constituency_id,
+              mandal_id = @mandal_id, panchayat_id = @panchayat_id, ward_id = @ward_id
           WHERE LOWER(email) = @email
         `, {
           role: targetRole,
           rights: rightsJson,
           assigned_booths: assignedBoothsJson,
-          state_id,
-          district_id,
-          constituency_id,
+          state_id: finalStateId,
+          district_id: finalDistrictId,
+          constituency_id: finalConstituencyId,
+          mandal_id: finalMandalId,
+          panchayat_id: finalPanchayatId,
+          ward_id: finalWardId,
           email: cleanEmail
         });
       }
@@ -1102,11 +1335,11 @@ async function startServer() {
       let users;
       if (isSuperAdmin) {
         // Super Admin sees ALL users in the entire system
-        users = await query(`SELECT id, email, name, role, rights, assigned_booths, disabled, state_id, district_id, constituency_id, booth_id, election_settings, bio, created_by, created_at FROM dbo.users ORDER BY created_at DESC`);
+        users = await query(`SELECT id, email, name, role, rights, assigned_booths, disabled, state_id, district_id, constituency_id, mandal_id, panchayat_id, ward_id, booth_id, election_settings, bio, created_by, created_at FROM dbo.users ORDER BY created_at DESC`);
       } else {
         // Regular Admin sees users created by them OR subordinates (volunteers, managers, guests) - but not other admins/super admins
         users = await query(`
-          SELECT id, email, name, role, rights, assigned_booths, disabled, state_id, district_id, constituency_id, booth_id, election_settings, bio, created_by, created_at 
+          SELECT id, email, name, role, rights, assigned_booths, disabled, state_id, district_id, constituency_id, mandal_id, panchayat_id, ward_id, booth_id, election_settings, bio, created_by, created_at 
           FROM dbo.users 
           WHERE (id = @reqUid OR LOWER(email) = @reqEmail)
              OR (created_by = @reqUid OR LOWER(created_by) = @reqEmail)
@@ -1137,6 +1370,15 @@ async function startServer() {
           stateId: u.state_id || '',
           districtId: u.district_id || '',
           constituencyId: u.constituency_id || '',
+          mandalId: u.mandal_id || '',
+          panchayatId: u.panchayat_id || '',
+          wardId: u.ward_id || '',
+          state_id: u.state_id || '',
+          district_id: u.district_id || '',
+          constituency_id: u.constituency_id || '',
+          mandal_id: u.mandal_id || '',
+          panchayat_id: u.panchayat_id || '',
+          ward_id: u.ward_id || '',
           boothId: Array.isArray(assignedBooths) && assignedBooths.length > 0 ? assignedBooths.join(',') : (u.booth_id || u.assigned_booths || ''),
           assigned_booths: Array.isArray(assignedBooths) ? assignedBooths : [],
           election_settings: electionSettingsObj,
@@ -1180,7 +1422,12 @@ async function startServer() {
         }
       }
 
-      const { role, name, bio, permissions, rights, disabled, assigned_booths, state_id, district_id, constituency_id, booth_id, election_settings, electionSettings } = req.body;
+      const { 
+        role, name, bio, permissions, rights, disabled, assigned_booths, 
+        state_id, district_id, constituency_id, mandal_id, panchayat_id, ward_id, booth_id,
+        stateId, districtId, constituencyId, mandalId, panchayatId, wardId, boothId,
+        election_settings, electionSettings 
+      } = req.body;
       const permsData = permissions !== undefined ? permissions : rights;
       let rightsJson = null;
 
@@ -1202,20 +1449,31 @@ async function startServer() {
         rightsJson = JSON.stringify(permsObj);
       }
 
-      const boothsData = assigned_booths !== undefined ? assigned_booths : (booth_id !== undefined ? (booth_id ? String(booth_id).split(',').map((s: string) => s.trim()).filter(Boolean) : []) : undefined);
+      const rawBoothVal = booth_id !== undefined ? booth_id : boothId;
+      const boothsData = assigned_booths !== undefined ? assigned_booths : (rawBoothVal !== undefined ? (rawBoothVal ? String(rawBoothVal).split(',').map((s: string) => s.trim()).filter(Boolean) : []) : undefined);
       const assignedBoothsJson = boothsData !== undefined ? (typeof boothsData === 'string' ? boothsData : JSON.stringify(boothsData)) : null;
-      const boothIdStr = booth_id !== undefined ? (booth_id || null) : (Array.isArray(boothsData) && boothsData.length > 0 ? boothsData.join(',') : null);
+      const boothIdStr = rawBoothVal !== undefined ? (rawBoothVal || null) : (Array.isArray(boothsData) && boothsData.length > 0 ? boothsData.join(',') : null);
+
+      const finalStateVal = state_id !== undefined ? state_id : stateId;
+      const finalDistrictVal = district_id !== undefined ? district_id : districtId;
+      const finalConstVal = constituency_id !== undefined ? constituency_id : constituencyId;
+      const finalMandalVal = mandal_id !== undefined ? mandal_id : mandalId;
+      const finalPanchayatVal = panchayat_id !== undefined ? panchayat_id : panchayatId;
+      const finalWardVal = ward_id !== undefined ? ward_id : wardId;
 
       // Consolidate election settings JSON
       const rawElectSettings = election_settings !== undefined ? election_settings : electionSettings;
       let electionSettingsJson: string | null = null;
       if (rawElectSettings !== undefined) {
         electionSettingsJson = typeof rawElectSettings === 'string' ? rawElectSettings : JSON.stringify(rawElectSettings);
-      } else if (state_id !== undefined || district_id !== undefined || constituency_id !== undefined || booth_id !== undefined || assigned_booths !== undefined) {
+      } else if (finalStateVal !== undefined || finalDistrictVal !== undefined || finalConstVal !== undefined || finalMandalVal !== undefined || finalPanchayatVal !== undefined || finalWardVal !== undefined || rawBoothVal !== undefined || assigned_booths !== undefined) {
         electionSettingsJson = JSON.stringify({
-          state_id: state_id || null,
-          district_id: district_id || null,
-          constituency_id: constituency_id || null,
+          state_id: finalStateVal || null,
+          district_id: finalDistrictVal || null,
+          constituency_id: finalConstVal || null,
+          mandal_id: finalMandalVal || null,
+          panchayat_id: finalPanchayatVal || null,
+          ward_id: finalWardVal || null,
           booth_id: boothIdStr,
           assigned_booths: boothsData || []
         });
@@ -1232,6 +1490,9 @@ async function startServer() {
              state_id = CASE WHEN @has_state = 1 THEN @state_id ELSE state_id END,
              district_id = CASE WHEN @has_district = 1 THEN @district_id ELSE district_id END,
              constituency_id = CASE WHEN @has_constituency = 1 THEN @constituency_id ELSE constituency_id END,
+             mandal_id = CASE WHEN @has_mandal = 1 THEN @mandal_id ELSE mandal_id END,
+             panchayat_id = CASE WHEN @has_panchayat = 1 THEN @panchayat_id ELSE panchayat_id END,
+             ward_id = CASE WHEN @has_ward = 1 THEN @ward_id ELSE ward_id END,
              election_settings = CASE WHEN @has_election_settings = 1 THEN @election_settings ELSE election_settings END,
              disabled = CASE WHEN @has_disabled = 1 THEN @disabled ELSE disabled END
          WHERE id = @targetId`,
@@ -1247,13 +1508,19 @@ async function startServer() {
           has_rights: rightsJson !== null ? 1 : 0,
           assigned_booths: assignedBoothsJson,
           booth_id: boothIdStr,
-          has_booths: (assigned_booths !== undefined || booth_id !== undefined) ? 1 : 0,
-          state_id: state_id !== undefined ? (state_id || null) : null,
-          has_state: state_id !== undefined ? 1 : 0,
-          district_id: district_id !== undefined ? (district_id || null) : null,
-          has_district: district_id !== undefined ? 1 : 0,
-          constituency_id: constituency_id !== undefined ? (constituency_id || null) : null,
-          has_constituency: constituency_id !== undefined ? 1 : 0,
+          has_booths: (assigned_booths !== undefined || rawBoothVal !== undefined) ? 1 : 0,
+          state_id: finalStateVal !== undefined ? (finalStateVal || null) : null,
+          has_state: finalStateVal !== undefined ? 1 : 0,
+          district_id: finalDistrictVal !== undefined ? (finalDistrictVal || null) : null,
+          has_district: finalDistrictVal !== undefined ? 1 : 0,
+          constituency_id: finalConstVal !== undefined ? (finalConstVal || null) : null,
+          has_constituency: finalConstVal !== undefined ? 1 : 0,
+          mandal_id: finalMandalVal !== undefined ? (finalMandalVal || null) : null,
+          has_mandal: finalMandalVal !== undefined ? 1 : 0,
+          panchayat_id: finalPanchayatVal !== undefined ? (finalPanchayatVal || null) : null,
+          has_panchayat: finalPanchayatVal !== undefined ? 1 : 0,
+          ward_id: finalWardVal !== undefined ? (finalWardVal || null) : null,
+          has_ward: finalWardVal !== undefined ? 1 : 0,
           election_settings: electionSettingsJson,
           has_election_settings: electionSettingsJson !== null ? 1 : 0,
           disabled: disabled !== undefined ? (disabled ? 1 : 0) : 0,
@@ -1302,15 +1569,18 @@ async function startServer() {
   });
 
   // ============================================================================
-  // 2. Demographics (States, Districts, Constituencies, Booths)
+  // 2. Demographics (States, Districts, Constituencies, Panchayats, Wards, Booths)
   // ============================================================================
 
-  // States
+  // --------------------------------------------------------------------------
+  // 2.1 States
+  // --------------------------------------------------------------------------
   app.get("/api/states", optionalAuth, async (req, res) => {
     try {
       const states = await query(`
         SELECT s.*, 
-          (SELECT COUNT(1) FROM dbo.districts d WHERE d.state_id = s.id) as districtCount 
+          (SELECT COUNT(1) FROM dbo.districts d WHERE d.state_id = s.id) as districtCount,
+          (SELECT COUNT(1) FROM dbo.districts d WHERE d.state_id = s.id) as district_count
         FROM dbo.states s 
         ORDER BY s.name ASC
       `);
@@ -1322,23 +1592,52 @@ async function startServer() {
 
   app.post("/api/states", authenticateUser, async (req, res) => {
     try {
-      const { id, name, code } = req.body;
+      const { id, name, code, population } = req.body;
       if (!name || !String(name).trim()) {
         return res.status(400).json({ error: "State name is required." });
       }
       const trimmedName = String(name).trim();
       const stateCode = (code || trimmedName.substring(0, 3)).trim().toUpperCase();
+      const pop = parseInt(population, 10) || 0;
       const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
 
       if (id && !isNaN(Number(id))) {
-        await execute(`UPDATE dbo.states SET name = @name, code = @code WHERE id = @id`, { id: Number(id), name: trimmedName, code: stateCode });
-        return res.json({ id: Number(id), name: trimmedName, code: stateCode });
+        await execute(
+          `UPDATE dbo.states SET name = @name, code = @code, population = @population WHERE id = @id`, 
+          { id: Number(id), name: trimmedName, code: stateCode, population: pop }
+        );
+        return res.json({ id: Number(id), name: trimmedName, code: stateCode, population: pop });
       }
       const inserted = await query(
-        `INSERT INTO dbo.states (name, code, created_by) OUTPUT INSERTED.* VALUES (@name, @code, @created_by)`, 
-        { name: trimmedName, code: stateCode, created_by: userId }
+        `INSERT INTO dbo.states (name, code, population, created_by) OUTPUT INSERTED.* VALUES (@name, @code, @population, @created_by)`, 
+        { name: trimmedName, code: stateCode, population: pop, created_by: userId }
       );
-      res.json(inserted[0] || { name: trimmedName, code: stateCode, created_by: userId });
+      res.json(inserted[0] || { name: trimmedName, code: stateCode, population: pop, created_by: userId });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/states/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, code, population } = req.body;
+      if (!id || String(id).trim() === '') {
+        return res.status(400).json({ error: "Invalid State ID." });
+      }
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "State name is required." });
+      }
+      const trimmedName = String(name).trim();
+      const stateCode = (code || trimmedName.substring(0, 3)).trim().toUpperCase();
+      const pop = population !== undefined ? (parseInt(population, 10) || 0) : 0;
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+
+      await execute(
+        `UPDATE dbo.states SET name = @name, code = @code, population = @population WHERE id = @id`, 
+        { id: parsedId, name: trimmedName, code: stateCode, population: pop }
+      );
+      res.json({ id, name: trimmedName, code: stateCode, population: pop });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1426,7 +1725,21 @@ async function startServer() {
         )
       `, { stateId });
 
-      // 7. Delete mandal members in mandals of this state
+      // 7. Delete wards in this state
+      await execute(`
+        DELETE FROM dbo.wards WHERE state_id = @stateId OR district_id IN (
+          SELECT id FROM dbo.districts WHERE state_id = @stateId
+        )
+      `, { stateId });
+
+      // 8. Delete panchayats in this state
+      await execute(`
+        DELETE FROM dbo.panchayats WHERE state_id = @stateId OR district_id IN (
+          SELECT id FROM dbo.districts WHERE state_id = @stateId
+        )
+      `, { stateId });
+
+      // 9. Delete mandal members in mandals of this state
       await execute(`
         DELETE FROM dbo.mandal_members WHERE mandal_id IN (
           SELECT m.id FROM dbo.mandals m
@@ -1436,7 +1749,7 @@ async function startServer() {
         )
       `, { stateId });
 
-      // 8. Delete mandals in this state
+      // 10. Delete mandals in this state
       await execute(`
         DELETE FROM dbo.mandals WHERE id IN (
           SELECT m.id FROM dbo.mandals m
@@ -1446,7 +1759,7 @@ async function startServer() {
         )
       `, { stateId });
 
-      // 9. Delete constituencies in this state
+      // 11. Delete constituencies in this state
       await execute(`
         DELETE FROM dbo.constituencies WHERE id IN (
           SELECT c.id FROM dbo.constituencies c
@@ -1455,10 +1768,10 @@ async function startServer() {
         )
       `, { stateId });
 
-      // 10. Delete districts in this state
+      // 12. Delete districts in this state
       await execute(`DELETE FROM dbo.districts WHERE state_id = @stateId`, { stateId });
 
-      // 11. Finally delete the state
+      // 13. Finally delete the state
       await execute(`DELETE FROM dbo.states WHERE id = @stateId`, { stateId });
       res.json({ success: true, message: 'State and all dependent records deleted successfully' });
     } catch (error: any) {
@@ -1466,13 +1779,16 @@ async function startServer() {
     }
   });
 
-  // Districts
+  // --------------------------------------------------------------------------
+  // 2.2 Districts
+  // --------------------------------------------------------------------------
   app.get("/api/districts", optionalAuth, async (req, res) => {
     try {
-      const { stateId, stateIds } = req.query;
+      const { stateId, stateIds, search } = req.query;
       let sqlQuery = `
         SELECT d.*, s.name as state_name,
-          (SELECT COUNT(1) FROM dbo.constituencies c WHERE c.district_id = d.id) as constituencyCount
+          (SELECT COUNT(1) FROM dbo.constituencies c WHERE c.district_id = d.id) as constituencyCount,
+          (SELECT COUNT(1) FROM dbo.constituencies c WHERE c.district_id = d.id) as constituency_count
         FROM dbo.districts d 
         LEFT JOIN dbo.states s ON d.state_id = s.id
         WHERE 1=1
@@ -1481,6 +1797,10 @@ async function startServer() {
       const stClause = buildSafeInClause(stateId || stateIds, 'dst_st', ['d.state_id', 's.id'], params);
       if (stClause) {
         sqlQuery += ` AND ${stClause}`;
+      }
+      if (search && String(search).trim()) {
+        sqlQuery += ` AND (d.name LIKE @search OR s.name LIKE @search)`;
+        params.search = `%${String(search).trim()}%`;
       }
       sqlQuery += ` ORDER BY d.name ASC`;
       const districts = await query(sqlQuery, params);
@@ -1492,27 +1812,61 @@ async function startServer() {
 
   app.post("/api/districts", authenticateUser, async (req, res) => {
     try {
-      const { id, name, state_id, stateId } = req.body;
+      const { id, name, state_id, stateId, population } = req.body;
       if (!name || !String(name).trim()) {
         return res.status(400).json({ error: "District name is required." });
       }
       const rawStateId = state_id !== undefined ? state_id : stateId;
-      if (!rawStateId || isNaN(Number(rawStateId))) {
+      if (!rawStateId || String(rawStateId).trim() === '') {
         return res.status(400).json({ error: "Please select a valid parent state for this district." });
       }
-      const numStateId = Number(rawStateId);
+      const numStateId = !isNaN(Number(rawStateId)) ? Number(rawStateId) : String(rawStateId);
       const trimmedName = String(name).trim();
+      const pop = parseInt(population, 10) || 0;
       const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
 
-      if (id && !isNaN(Number(id))) {
-        await execute(`UPDATE dbo.districts SET name = @name, state_id = @state_id WHERE id = @id`, { id: Number(id), name: trimmedName, state_id: numStateId });
-        return res.json({ id: Number(id), name: trimmedName, state_id: numStateId });
+      if (id && String(id).trim() !== '') {
+        const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+        await execute(
+          `UPDATE dbo.districts SET name = @name, state_id = @state_id, population = @population WHERE id = @id`, 
+          { id: parsedId, name: trimmedName, state_id: numStateId, population: pop }
+        );
+        return res.json({ id, name: trimmedName, state_id: numStateId, population: pop });
       }
       const inserted = await query(
-        `INSERT INTO dbo.districts (name, state_id, created_by) OUTPUT INSERTED.* VALUES (@name, @state_id, @created_by)`,
-        { name: trimmedName, state_id: numStateId, created_by: userId }
+        `INSERT INTO dbo.districts (name, state_id, population, created_by) OUTPUT INSERTED.* VALUES (@name, @state_id, @population, @created_by)`,
+        { name: trimmedName, state_id: numStateId, population: pop, created_by: userId }
       );
-      res.json(inserted[0] || { name: trimmedName, state_id: numStateId, created_by: userId });
+      res.json(inserted[0] || { name: trimmedName, state_id: numStateId, population: pop, created_by: userId });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/districts/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, state_id, stateId, population } = req.body;
+      if (!id || String(id).trim() === '') {
+        return res.status(400).json({ error: "Invalid District ID." });
+      }
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "District name is required." });
+      }
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      if (!rawStateId || String(rawStateId).trim() === '') {
+        return res.status(400).json({ error: "Please select a valid parent state for this district." });
+      }
+      const numStateId = !isNaN(Number(rawStateId)) ? Number(rawStateId) : String(rawStateId);
+      const trimmedName = String(name).trim();
+      const pop = population !== undefined ? (parseInt(population, 10) || 0) : 0;
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+
+      await execute(
+        `UPDATE dbo.districts SET name = @name, state_id = @state_id, population = @population WHERE id = @id`, 
+        { id: parsedId, name: trimmedName, state_id: numStateId, population: pop }
+      );
+      res.json({ id, name: trimmedName, state_id: numStateId, population: pop });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1591,7 +1945,13 @@ async function startServer() {
         )
       `, { districtId });
 
-      // 7. Delete mandal members
+      // 7. Delete wards in this district
+      await execute(`DELETE FROM dbo.wards WHERE district_id = @districtId`, { districtId });
+
+      // 8. Delete panchayats in this district
+      await execute(`DELETE FROM dbo.panchayats WHERE district_id = @districtId`, { districtId });
+
+      // 9. Delete mandal members
       await execute(`
         DELETE FROM dbo.mandal_members WHERE mandal_id IN (
           SELECT m.id FROM dbo.mandals m
@@ -1600,7 +1960,7 @@ async function startServer() {
         )
       `, { districtId });
 
-      // 8. Delete mandals
+      // 10. Delete mandals
       await execute(`
         DELETE FROM dbo.mandals WHERE id IN (
           SELECT m.id FROM dbo.mandals m
@@ -1609,10 +1969,10 @@ async function startServer() {
         )
       `, { districtId });
 
-      // 9. Delete constituencies
+      // 11. Delete constituencies
       await execute(`DELETE FROM dbo.constituencies WHERE district_id = @districtId`, { districtId });
 
-      // 10. Delete district
+      // 12. Delete district
       await execute(`DELETE FROM dbo.districts WHERE id = @districtId`, { districtId });
       res.json({ success: true, message: 'District and all dependent records deleted successfully' });
     } catch (error: any) {
@@ -1620,13 +1980,17 @@ async function startServer() {
     }
   });
 
-  // Constituencies
+  // --------------------------------------------------------------------------
+  // 2.3 Constituencies
+  // --------------------------------------------------------------------------
   app.get("/api/constituencies", optionalAuth, async (req, res) => {
     try {
-      const { districtId, districtIds, stateId, stateIds } = req.query;
+      const { districtId, districtIds, stateId, stateIds, search } = req.query;
       let sqlQuery = `
         SELECT c.*, ISNULL(c.category, 'General') as category, d.name as district_name, s.name as state_name,
-          (SELECT COUNT(1) FROM dbo.booths b WHERE b.constituency_id = c.id) as boothCount
+          (SELECT COUNT(1) FROM dbo.mandals m WHERE m.constituency_id = c.id) as blockCount,
+          (SELECT COUNT(1) FROM dbo.booths b WHERE b.constituency_id = c.id) as boothCount,
+          (SELECT COUNT(1) FROM dbo.booths b WHERE b.constituency_id = c.id) as booth_count
         FROM dbo.constituencies c 
         LEFT JOIN dbo.districts d ON c.district_id = d.id
         LEFT JOIN dbo.states s ON c.state_id = s.id OR d.state_id = s.id
@@ -1641,6 +2005,10 @@ async function startServer() {
       if (stClause) {
         sqlQuery += ` AND ${stClause}`;
       }
+      if (search && String(search).trim()) {
+        sqlQuery += ` AND (c.name LIKE @search OR d.name LIKE @search OR c.category LIKE @search)`;
+        params.search = `%${String(search).trim()}%`;
+      }
       sqlQuery += ` ORDER BY c.name ASC`;
       const constituencies = await query(sqlQuery, params);
       res.json(constituencies);
@@ -1651,7 +2019,7 @@ async function startServer() {
 
   app.post("/api/constituencies", authenticateUser, async (req, res) => {
     try {
-      const { id, name, district_id, state_id, districtId, stateId, category, seat_type, reservation } = req.body;
+      const { id, name, district_id, state_id, districtId, stateId, category, seat_type, reservation, population } = req.body;
       if (!name || !String(name).trim()) {
         return res.status(400).json({ error: "Constituency name is required." });
       }
@@ -1673,22 +2041,23 @@ async function startServer() {
 
       const trimmedName = String(name).trim();
       const seatCategory = String(category || seat_type || reservation || 'General').trim();
+      const pop = parseInt(population, 10) || 0;
       const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
       const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
 
       if (targetId) {
         const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
         await execute(
-          `UPDATE dbo.constituencies SET name = @name, district_id = @district_id, state_id = @state_id, category = @category WHERE id = @id`,
-          { id: parsedId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory }
+          `UPDATE dbo.constituencies SET name = @name, district_id = @district_id, state_id = @state_id, category = @category, population = @population WHERE id = @id`,
+          { id: parsedId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, population: pop }
         );
-        return res.json({ id: targetId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory });
+        return res.json({ id: targetId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, population: pop });
       }
       const inserted = await query(
-        `INSERT INTO dbo.constituencies (name, district_id, state_id, category, created_by) OUTPUT INSERTED.* VALUES (@name, @district_id, @state_id, @category, @created_by)`, 
-        { name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, created_by: userId }
+        `INSERT INTO dbo.constituencies (name, district_id, state_id, category, population, created_by) OUTPUT INSERTED.* VALUES (@name, @district_id, @state_id, @category, @population, @created_by)`, 
+        { name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, population: pop, created_by: userId }
       );
-      res.json(inserted[0] || { name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, created_by: userId });
+      res.json(inserted[0] || { name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, population: pop, created_by: userId });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1697,7 +2066,7 @@ async function startServer() {
   app.put("/api/constituencies/:id", authenticateUser, async (req, res) => {
     try {
       const id = req.params.id;
-      const { name, district_id, state_id, districtId, stateId, category, seat_type, reservation } = req.body;
+      const { name, district_id, state_id, districtId, stateId, category, seat_type, reservation, population } = req.body;
       if (!id || String(id).trim() === '') {
         return res.status(400).json({ error: "Invalid constituency ID." });
       }
@@ -1721,13 +2090,14 @@ async function startServer() {
 
       const trimmedName = String(name).trim();
       const seatCategory = String(category || seat_type || reservation || 'General').trim();
+      const pop = population !== undefined ? (parseInt(population, 10) || 0) : 0;
       const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
 
       await execute(
-        `UPDATE dbo.constituencies SET name = @name, district_id = @district_id, state_id = @state_id, category = @category WHERE id = @id`,
-        { id: parsedId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory }
+        `UPDATE dbo.constituencies SET name = @name, district_id = @district_id, state_id = @state_id, category = @category, population = @population WHERE id = @id`,
+        { id: parsedId, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, population: pop }
       );
-      res.json({ id, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory });
+      res.json({ id, name: trimmedName, district_id: finalDistrictId, state_id: finalStateId, category: seatCategory, population: pop });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1780,7 +2150,13 @@ async function startServer() {
       // 6. Delete booths
       await execute(`DELETE FROM dbo.booths WHERE constituency_id = @constituencyId`, { constituencyId });
 
-      // 7. Delete mandal members & mandals
+      // 7. Delete wards under this constituency
+      await execute(`DELETE FROM dbo.wards WHERE constituency_id = @constituencyId`, { constituencyId });
+
+      // 8. Delete panchayats under this constituency
+      await execute(`DELETE FROM dbo.panchayats WHERE constituency_id = @constituencyId`, { constituencyId });
+
+      // 9. Delete mandal members & mandals
       await execute(`
         DELETE FROM dbo.mandal_members WHERE mandal_id IN (
           SELECT id FROM dbo.mandals WHERE constituency_id = @constituencyId
@@ -1789,7 +2165,7 @@ async function startServer() {
 
       await execute(`DELETE FROM dbo.mandals WHERE constituency_id = @constituencyId`, { constituencyId });
 
-      // 8. Delete constituency
+      // 10. Delete constituency
       await execute(`DELETE FROM dbo.constituencies WHERE id = @constituencyId`, { constituencyId });
       res.json({ success: true, message: 'Constituency and all dependent records deleted successfully' });
     } catch (error: any) {
@@ -1797,24 +2173,462 @@ async function startServer() {
     }
   });
 
-  // Booths
+  // --------------------------------------------------------------------------
+  // 2.4 Panchayats / MC / ULBs (Local Bodies)
+  // --------------------------------------------------------------------------
+  app.get("/api/panchayats", optionalAuth, async (req, res) => {
+    try {
+      const { mandalId, mandalIds, constituencyId, constituencyIds, districtId, districtIds, stateId, stateIds, search } = req.query;
+      let sqlQuery = `
+        SELECT p.*,
+               m.name as mandal_name,
+               m.mandal_code as mandal_code,
+               c.name as constituency_name,
+               d.name as district_name,
+               s.name as state_name,
+               (SELECT COUNT(1) FROM dbo.wards w WHERE w.panchayat_id = p.id) as wardCount,
+               (SELECT COUNT(1) FROM dbo.wards w WHERE w.panchayat_id = p.id) as ward_count,
+               (SELECT COUNT(1) FROM dbo.booths b WHERE b.panchayat_id = p.id OR b.panchayat_id = CAST(p.id AS NVARCHAR(64))) as boothCount,
+               (SELECT COUNT(1) FROM dbo.booths b WHERE b.panchayat_id = p.id OR b.panchayat_id = CAST(p.id AS NVARCHAR(64))) as booth_count
+        FROM dbo.panchayats p
+        LEFT JOIN dbo.mandals m ON p.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON p.constituency_id = c.id OR m.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON p.district_id = d.id OR c.district_id = d.id OR m.district_id = d.id
+        LEFT JOIN dbo.states s ON p.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id OR m.state_id = s.id
+        WHERE 1=1
+      `;
+      const params: Record<string, any> = {};
+      const mndClause = buildSafeInClause(mandalId || mandalIds, 'pan_mnd', ['p.mandal_id', 'm.id'], params);
+      if (mndClause) sqlQuery += ` AND ${mndClause}`;
+      const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'pan_cst', ['p.constituency_id', 'm.constituency_id', 'c.id'], params);
+      if (cstClause) sqlQuery += ` AND ${cstClause}`;
+      const dstClause = buildSafeInClause(districtId || districtIds, 'pan_dst', ['p.district_id', 'c.district_id', 'd.id'], params);
+      if (dstClause) sqlQuery += ` AND ${dstClause}`;
+      const stClause = buildSafeInClause(stateId || stateIds, 'pan_st', ['p.state_id', 'd.state_id', 'c.state_id', 's.id'], params);
+      if (stClause) sqlQuery += ` AND ${stClause}`;
+      if (search && String(search).trim()) {
+        sqlQuery += ` AND (p.name LIKE @search OR p.code LIKE @search OR p.type LIKE @search)`;
+        params.search = `%${String(search).trim()}%`;
+      }
+      sqlQuery += ` ORDER BY p.name ASC`;
+      const rows = await query(sqlQuery, params);
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.post("/api/panchayats", authenticateUser, async (req, res) => {
+    try {
+      const { id, name, code, type, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Panchayat / Local Body name is required." });
+      }
+      const rawMid = mandal_id !== undefined ? mandal_id : mandalId;
+      const finalMid = rawMid && String(rawMid).trim() !== '' ? (!isNaN(Number(rawMid)) ? Number(rawMid) : String(rawMid)) : null;
+
+      const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
+      let finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
+
+      const rawDid = district_id !== undefined ? district_id : districtId;
+      let finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : null;
+
+      const rawSid = state_id !== undefined ? state_id : stateId;
+      let finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
+      // Auto-lookup hierarchy if missing
+      if (finalMid && (!finalCid || !finalDid || !finalSid)) {
+        const mRow = await query(`SELECT constituency_id, district_id, state_id FROM dbo.mandals WHERE id = @mid`, { mid: finalMid });
+        if (mRow && mRow[0]) {
+          if (!finalCid) finalCid = mRow[0].constituency_id;
+          if (!finalDid) finalDid = mRow[0].district_id;
+          if (!finalSid) finalSid = mRow[0].state_id;
+        }
+      }
+      if (finalCid && (!finalDid || !finalSid)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalCid });
+        if (cRow && cRow[0]) {
+          if (!finalDid) finalDid = cRow[0].district_id;
+          if (!finalSid) finalSid = cRow[0].state_id;
+        }
+      }
+      if (finalDid && !finalSid) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDid });
+        if (dRow && dRow[0]) finalSid = dRow[0].state_id;
+      }
+
+      const trimmedName = String(name).trim();
+      const pCode = (code || '').trim();
+      const pType = (type || 'Gram Panchayat').trim();
+      const pop = parseInt(population, 10) || 0;
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+      const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
+
+      if (targetId) {
+        const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
+        await execute(
+          `UPDATE dbo.panchayats
+           SET name = @name, code = @code, type = @type, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population
+           WHERE id = @id`,
+          { id: parsedId, name: trimmedName, code: pCode, type: pType, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop }
+        );
+        return res.json({ id: targetId, name: trimmedName, code: pCode, type: pType, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.panchayats (name, code, type, mandal_id, constituency_id, district_id, state_id, population, created_by)
+         OUTPUT INSERTED.*
+         VALUES (@name, @code, @type, @mandal_id, @constituency_id, @district_id, @state_id, @population, @created_by)`,
+        { name: trimmedName, code: pCode, type: pType, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, created_by: userId }
+      );
+      res.json(inserted[0] || { name: trimmedName, code: pCode, type: pType, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, created_by: userId });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/panchayats/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, code, type, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population } = req.body;
+      if (!id || String(id).trim() === '') {
+        return res.status(400).json({ error: "Invalid Panchayat ID." });
+      }
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Panchayat / Local Body name is required." });
+      }
+      const rawMid = mandal_id !== undefined ? mandal_id : mandalId;
+      const finalMid = rawMid && String(rawMid).trim() !== '' ? (!isNaN(Number(rawMid)) ? Number(rawMid) : String(rawMid)) : null;
+
+      const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
+      let finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
+
+      const rawDid = district_id !== undefined ? district_id : districtId;
+      let finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : null;
+
+      const rawSid = state_id !== undefined ? state_id : stateId;
+      let finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
+      if (finalMid && (!finalCid || !finalDid || !finalSid)) {
+        const mRow = await query(`SELECT constituency_id, district_id, state_id FROM dbo.mandals WHERE id = @mid`, { mid: finalMid });
+        if (mRow && mRow[0]) {
+          if (!finalCid) finalCid = mRow[0].constituency_id;
+          if (!finalDid) finalDid = mRow[0].district_id;
+          if (!finalSid) finalSid = mRow[0].state_id;
+        }
+      }
+      if (finalCid && (!finalDid || !finalSid)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalCid });
+        if (cRow && cRow[0]) {
+          if (!finalDid) finalDid = cRow[0].district_id;
+          if (!finalSid) finalSid = cRow[0].state_id;
+        }
+      }
+      if (finalDid && !finalSid) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDid });
+        if (dRow && dRow[0]) finalSid = dRow[0].state_id;
+      }
+
+      const trimmedName = String(name).trim();
+      const pCode = (code || '').trim();
+      const pType = (type || 'Gram Panchayat').trim();
+      const pop = population !== undefined ? (parseInt(population, 10) || 0) : 0;
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+
+      await execute(
+        `UPDATE dbo.panchayats
+         SET name = @name, code = @code, type = @type, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population
+         WHERE id = @id`,
+        { id: parsedId, name: trimmedName, code: pCode, type: pType, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop }
+      );
+      res.json({ id, name: trimmedName, code: pCode, type: pType, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.delete("/api/panchayats/:id", authenticateUser, async (req, res) => {
+    try {
+      const panchayatId = req.params.id;
+      const parsedId = !isNaN(Number(panchayatId)) ? Number(panchayatId) : String(panchayatId);
+
+      // Unlink booths and voters
+      await execute(`UPDATE dbo.booths SET panchayat_id = NULL WHERE panchayat_id = @panchayatId OR panchayat_id = CAST(@panchayatId AS NVARCHAR(64))`, { panchayatId: parsedId });
+      await execute(`UPDATE dbo.voters SET panchayat_id = NULL WHERE panchayat_id = @panchayatId OR panchayat_id = CAST(@panchayatId AS NVARCHAR(64))`, { panchayatId: parsedId });
+      
+      // Delete wards under this panchayat
+      await execute(`DELETE FROM dbo.wards WHERE panchayat_id = @panchayatId OR panchayat_id = CAST(@panchayatId AS INT)`, { panchayatId: parsedId });
+      
+      // Delete panchayat
+      await execute(`DELETE FROM dbo.panchayats WHERE id = @panchayatId`, { panchayatId: parsedId });
+      res.json({ success: true, message: 'Panchayat / Local Body deleted successfully' });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 2.5 Wards / Villages
+  // --------------------------------------------------------------------------
+  app.get("/api/wards", optionalAuth, async (req, res) => {
+    try {
+      const { panchayatId, panchayatIds, mandalId, mandalIds, constituencyId, constituencyIds, districtId, districtIds, stateId, stateIds, search } = req.query;
+      let sqlQuery = `
+        SELECT w.*,
+               p.name as panchayat_name,
+               p.type as panchayat_type,
+               m.name as mandal_name,
+               c.name as constituency_name,
+               d.name as district_name,
+               s.name as state_name,
+               (SELECT COUNT(1) FROM dbo.booths b WHERE b.ward_id = w.id OR b.ward_id = CAST(w.id AS NVARCHAR(64))) as boothCount,
+               (SELECT COUNT(1) FROM dbo.booths b WHERE b.ward_id = w.id OR b.ward_id = CAST(w.id AS NVARCHAR(64))) as booth_count
+        FROM dbo.wards w
+        LEFT JOIN dbo.panchayats p ON w.panchayat_id = p.id
+        LEFT JOIN dbo.mandals m ON w.mandal_id = m.id OR p.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON w.constituency_id = c.id OR p.constituency_id = c.id OR m.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON w.district_id = d.id OR p.district_id = d.id OR c.district_id = d.id OR m.district_id = d.id
+        LEFT JOIN dbo.states s ON w.state_id = s.id OR p.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id
+        WHERE 1=1
+      `;
+      const params: Record<string, any> = {};
+      const panClause = buildSafeInClause(panchayatId || panchayatIds, 'wrd_pan', ['w.panchayat_id', 'p.id'], params);
+      if (panClause) sqlQuery += ` AND ${panClause}`;
+      const mndClause = buildSafeInClause(mandalId || mandalIds, 'wrd_mnd', ['w.mandal_id', 'p.mandal_id', 'm.id'], params);
+      if (mndClause) sqlQuery += ` AND ${mndClause}`;
+      const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'wrd_cst', ['w.constituency_id', 'p.constituency_id', 'c.id'], params);
+      if (cstClause) sqlQuery += ` AND ${cstClause}`;
+      const dstClause = buildSafeInClause(districtId || districtIds, 'wrd_dst', ['w.district_id', 'd.id'], params);
+      if (dstClause) sqlQuery += ` AND ${dstClause}`;
+      const stClause = buildSafeInClause(stateId || stateIds, 'wrd_st', ['w.state_id', 's.id'], params);
+      if (stClause) sqlQuery += ` AND ${stClause}`;
+      if (search && String(search).trim()) {
+        sqlQuery += ` AND (w.name LIKE @search OR w.ward_number LIKE @search OR w.type LIKE @search)`;
+        params.search = `%${String(search).trim()}%`;
+      }
+      sqlQuery += ` ORDER BY w.ward_number ASC, w.name ASC`;
+      const rows = await query(sqlQuery, params);
+      res.json(rows);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.post("/api/wards", authenticateUser, async (req, res) => {
+    try {
+      const { id, name, ward_number, wardNumber, type, panchayat_id, panchayatId, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population, total_voters, totalVoters } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Ward / Village name is required." });
+      }
+      const rawPid = panchayat_id !== undefined ? panchayat_id : panchayatId;
+      const finalPid = rawPid && String(rawPid).trim() !== '' ? (!isNaN(Number(rawPid)) ? Number(rawPid) : String(rawPid)) : null;
+
+      const rawMid = mandal_id !== undefined ? mandal_id : mandalId;
+      let finalMid = rawMid && String(rawMid).trim() !== '' ? (!isNaN(Number(rawMid)) ? Number(rawMid) : String(rawMid)) : null;
+
+      const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
+      let finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
+
+      const rawDid = district_id !== undefined ? district_id : districtId;
+      let finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : null;
+
+      const rawSid = state_id !== undefined ? state_id : stateId;
+      let finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
+      // Auto-lookup hierarchy from parent panchayat if available
+      if (finalPid && (!finalMid || !finalCid || !finalDid || !finalSid)) {
+        const pRow = await query(`SELECT mandal_id, constituency_id, district_id, state_id FROM dbo.panchayats WHERE id = @pid`, { pid: finalPid });
+        if (pRow && pRow[0]) {
+          if (!finalMid) finalMid = pRow[0].mandal_id;
+          if (!finalCid) finalCid = pRow[0].constituency_id;
+          if (!finalDid) finalDid = pRow[0].district_id;
+          if (!finalSid) finalSid = pRow[0].state_id;
+        }
+      }
+      if (finalMid && (!finalCid || !finalDid || !finalSid)) {
+        const mRow = await query(`SELECT constituency_id, district_id, state_id FROM dbo.mandals WHERE id = @mid`, { mid: finalMid });
+        if (mRow && mRow[0]) {
+          if (!finalCid) finalCid = mRow[0].constituency_id;
+          if (!finalDid) finalDid = mRow[0].district_id;
+          if (!finalSid) finalSid = mRow[0].state_id;
+        }
+      }
+      if (finalCid && (!finalDid || !finalSid)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalCid });
+        if (cRow && cRow[0]) {
+          if (!finalDid) finalDid = cRow[0].district_id;
+          if (!finalSid) finalSid = cRow[0].state_id;
+        }
+      }
+      if (finalDid && !finalSid) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDid });
+        if (dRow && dRow[0]) finalSid = dRow[0].state_id;
+      }
+
+      const trimmedName = String(name).trim();
+      const wNum = String(ward_number !== undefined ? ward_number : (wardNumber || '')).trim();
+      const wType = (type || 'Ward').trim();
+      const pop = parseInt(population, 10) || 0;
+      const vTot = total_voters !== undefined ? parseInt(total_voters, 10) : (totalVoters !== undefined ? parseInt(totalVoters, 10) : pop);
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+      const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
+
+      if (targetId) {
+        const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
+        await execute(
+          `UPDATE dbo.wards
+           SET name = @name, ward_number = @ward_number, type = @type, panchayat_id = @panchayat_id, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population, total_voters = @total_voters
+           WHERE id = @id`,
+          { id: parsedId, name: trimmedName, ward_number: wNum, type: wType, panchayat_id: finalPid, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, total_voters: vTot }
+        );
+        return res.json({ id: targetId, name: trimmedName, ward_number: wNum, type: wType, panchayat_id: finalPid, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, total_voters: vTot });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.wards (name, ward_number, type, panchayat_id, mandal_id, constituency_id, district_id, state_id, population, total_voters, created_by)
+         OUTPUT INSERTED.*
+         VALUES (@name, @ward_number, @type, @panchayat_id, @mandal_id, @constituency_id, @district_id, @state_id, @population, @total_voters, @created_by)`,
+        { name: trimmedName, ward_number: wNum, type: wType, panchayat_id: finalPid, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, total_voters: vTot, created_by: userId }
+      );
+      res.json(inserted[0] || { name: trimmedName, ward_number: wNum, type: wType, panchayat_id: finalPid, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, total_voters: vTot, created_by: userId });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/wards/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, ward_number, wardNumber, type, panchayat_id, panchayatId, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population, total_voters, totalVoters } = req.body;
+      if (!id || String(id).trim() === '') {
+        return res.status(400).json({ error: "Invalid Ward ID." });
+      }
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Ward / Village name is required." });
+      }
+      const rawPid = panchayat_id !== undefined ? panchayat_id : panchayatId;
+      const finalPid = rawPid && String(rawPid).trim() !== '' ? (!isNaN(Number(rawPid)) ? Number(rawPid) : String(rawPid)) : null;
+
+      const rawMid = mandal_id !== undefined ? mandal_id : mandalId;
+      let finalMid = rawMid && String(rawMid).trim() !== '' ? (!isNaN(Number(rawMid)) ? Number(rawMid) : String(rawMid)) : null;
+
+      const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
+      let finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
+
+      const rawDid = district_id !== undefined ? district_id : districtId;
+      let finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : null;
+
+      const rawSid = state_id !== undefined ? state_id : stateId;
+      let finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+
+      if (finalPid && (!finalMid || !finalCid || !finalDid || !finalSid)) {
+        const pRow = await query(`SELECT mandal_id, constituency_id, district_id, state_id FROM dbo.panchayats WHERE id = @pid`, { pid: finalPid });
+        if (pRow && pRow[0]) {
+          if (!finalMid) finalMid = pRow[0].mandal_id;
+          if (!finalCid) finalCid = pRow[0].constituency_id;
+          if (!finalDid) finalDid = pRow[0].district_id;
+          if (!finalSid) finalSid = pRow[0].state_id;
+        }
+      }
+      if (finalMid && (!finalCid || !finalDid || !finalSid)) {
+        const mRow = await query(`SELECT constituency_id, district_id, state_id FROM dbo.mandals WHERE id = @mid`, { mid: finalMid });
+        if (mRow && mRow[0]) {
+          if (!finalCid) finalCid = mRow[0].constituency_id;
+          if (!finalDid) finalDid = mRow[0].district_id;
+          if (!finalSid) finalSid = mRow[0].state_id;
+        }
+      }
+      if (finalCid && (!finalDid || !finalSid)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalCid });
+        if (cRow && cRow[0]) {
+          if (!finalDid) finalDid = cRow[0].district_id;
+          if (!finalSid) finalSid = cRow[0].state_id;
+        }
+      }
+      if (finalDid && !finalSid) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDid });
+        if (dRow && dRow[0]) finalSid = dRow[0].state_id;
+      }
+
+      const trimmedName = String(name).trim();
+      const wNum = String(ward_number !== undefined ? ward_number : (wardNumber || '')).trim();
+      const wType = (type || 'Ward').trim();
+      const pop = population !== undefined ? (parseInt(population, 10) || 0) : 0;
+      const vTot = total_voters !== undefined ? parseInt(total_voters, 10) : (totalVoters !== undefined ? parseInt(totalVoters, 10) : pop);
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+
+      await execute(
+        `UPDATE dbo.wards
+         SET name = @name, ward_number = @ward_number, type = @type, panchayat_id = @panchayat_id, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population, total_voters = @total_voters
+         WHERE id = @id`,
+        { id: parsedId, name: trimmedName, ward_number: wNum, type: wType, panchayat_id: finalPid, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, total_voters: vTot }
+      );
+      res.json({ id, name: trimmedName, ward_number: wNum, type: wType, panchayat_id: finalPid, mandal_id: finalMid, constituency_id: finalCid, district_id: finalDid, state_id: finalSid, population: pop, total_voters: vTot });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.delete("/api/wards/:id", authenticateUser, async (req, res) => {
+    try {
+      const wardId = req.params.id;
+      const parsedId = !isNaN(Number(wardId)) ? Number(wardId) : String(wardId);
+
+      // Unlink booths and voters
+      await execute(`UPDATE dbo.booths SET ward_id = NULL WHERE ward_id = @wardId OR ward_id = CAST(@wardId AS NVARCHAR(64))`, { wardId: parsedId });
+      await execute(`UPDATE dbo.voters SET ward_id = NULL WHERE ward_id = @wardId OR ward_id = CAST(@wardId AS NVARCHAR(64))`, { wardId: parsedId });
+      
+      // Delete ward
+      await execute(`DELETE FROM dbo.wards WHERE id = @wardId`, { wardId: parsedId });
+      res.json({ success: true, message: 'Ward / Village deleted successfully' });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // --------------------------------------------------------------------------
+  // 2.6 Booths
+  // --------------------------------------------------------------------------
   app.get("/api/booths", optionalAuth, async (req, res) => {
     try {
-      const { constituencyId, constituencyIds, mandalId, mandalIds, districtId, districtIds, stateId, stateIds } = req.query;
-      let sqlQuery = `SELECT b.*, c.name as constituency_name, m.name as mandal_name, c.district_id, c.state_id 
-                      FROM dbo.booths b 
-                      LEFT JOIN dbo.constituencies c ON b.constituency_id = c.id
-                      LEFT JOIN dbo.districts d ON c.district_id = d.id
-                      LEFT JOIN dbo.mandals m ON b.mandal_id = m.id WHERE 1=1`;
+      const { constituencyId, constituencyIds, mandalId, mandalIds, panchayatId, panchayatIds, wardId, wardIds, districtId, districtIds, stateId, stateIds, search } = req.query;
+      let sqlQuery = `
+        SELECT b.*, 
+               c.name as constituency_name, 
+               m.name as mandal_name, 
+               p.name as panchayat_name,
+               w.name as ward_name,
+               c.district_id, 
+               c.state_id,
+               d.name as district_name,
+               s.name as state_name,
+               COALESCE((SELECT COUNT(1) FROM dbo.voters v WHERE v.booth_id = b.id OR v.booth_id = CAST(b.id as nvarchar(64)) OR v.booth_id = b.booth_number), b.total_voters, 0) as voter_count
+        FROM dbo.booths b 
+        LEFT JOIN dbo.constituencies c ON b.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON c.district_id = d.id
+        LEFT JOIN dbo.states s ON c.state_id = s.id OR d.state_id = s.id
+        LEFT JOIN dbo.mandals m ON b.mandal_id = m.id
+        LEFT JOIN dbo.panchayats p ON b.panchayat_id = p.id OR b.panchayat_id = CAST(p.id AS NVARCHAR(64))
+        LEFT JOIN dbo.wards w ON b.ward_id = w.id OR b.ward_id = CAST(w.id AS NVARCHAR(64))
+        WHERE 1=1
+      `;
       const params: Record<string, any> = {};
       const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'bth_cst', ['b.constituency_id', 'c.id'], params);
       if (cstClause) sqlQuery += ` AND ${cstClause}`;
       const mndClause = buildSafeInClause(mandalId || mandalIds, 'bth_mnd', ['b.mandal_id', 'm.id'], params);
       if (mndClause) sqlQuery += ` AND ${mndClause}`;
+      const panClause = buildSafeInClause(panchayatId || panchayatIds, 'bth_pan', ['b.panchayat_id', 'p.id'], params);
+      if (panClause) sqlQuery += ` AND ${panClause}`;
+      const wrdClause = buildSafeInClause(wardId || wardIds, 'bth_wrd', ['b.ward_id', 'w.id'], params);
+      if (wrdClause) sqlQuery += ` AND ${wrdClause}`;
       const dstClause = buildSafeInClause(districtId || districtIds, 'bth_dst', ['c.district_id', 'd.id'], params);
       if (dstClause) sqlQuery += ` AND ${dstClause}`;
-      const stClause = buildSafeInClause(stateId || stateIds, 'bth_st', ['c.state_id', 'd.state_id'], params);
+      const stClause = buildSafeInClause(stateId || stateIds, 'bth_st', ['c.state_id', 'd.state_id', 's.id'], params);
       if (stClause) sqlQuery += ` AND ${stClause}`;
+      if (search && String(search).trim()) {
+        sqlQuery += ` AND (b.name LIKE @search OR b.booth_number LIKE @search OR b.booth_label LIKE @search OR b.address LIKE @search)`;
+        params.search = `%${String(search).trim()}%`;
+      }
       
       sqlQuery += ` ORDER BY b.booth_number ASC, b.name ASC`;
       const booths = await query(sqlQuery, params);
@@ -1826,7 +2640,7 @@ async function startServer() {
 
   app.post("/api/booths", authenticateUser, async (req, res) => {
     try {
-      const { id, booth_number, boothNumber, name, constituency_id, constituencyId, mandal_id, mandalId, total_voters, totalVoters, address } = req.body;
+      const { id, booth_number, boothNumber, booth_label, boothLabel, name, constituency_id, constituencyId, mandal_id, mandalId, panchayat_id, panchayatId, ward_id, wardId, total_voters, totalVoters, population, address } = req.body;
       const cid = constituency_id !== undefined ? constituency_id : constituencyId;
       if (!cid || String(cid).trim() === '') {
         return res.status(400).json({ error: "Please select a valid parent constituency for this booth." });
@@ -1834,9 +2648,15 @@ async function startServer() {
       const finalConstituencyId = !isNaN(Number(cid)) ? Number(cid) : String(cid);
       const mid = mandal_id !== undefined ? mandal_id : mandalId;
       const finalMandalId = mid && String(mid).trim() !== '' ? (!isNaN(Number(mid)) ? Number(mid) : String(mid)) : null;
+      const pid = panchayat_id !== undefined ? panchayat_id : panchayatId;
+      const finalPanchayatId = pid && String(pid).trim() !== '' ? (!isNaN(Number(pid)) ? Number(pid) : String(pid)) : null;
+      const wid = ward_id !== undefined ? ward_id : wardId;
+      const finalWardId = wid && String(wid).trim() !== '' ? (!isNaN(Number(wid)) ? Number(wid) : String(wid)) : null;
+
       const bnum = String(booth_number !== undefined ? booth_number : (boothNumber || '1')).trim();
+      const blabel = String(booth_label !== undefined ? booth_label : (boothLabel || '')).trim();
       const bname = String(name || `Booth #${bnum}`).trim();
-      const vtotal = total_voters !== undefined ? Number(total_voters) : (Number(totalVoters) || 0);
+      const vtotal = total_voters !== undefined ? Number(total_voters) : (Number(totalVoters) || Number(population) || 0);
       const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
       const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
 
@@ -1844,20 +2664,20 @@ async function startServer() {
         const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
         await execute(
           `UPDATE dbo.booths 
-           SET booth_number = @booth_number, name = @name, constituency_id = @constituency_id, mandal_id = @mandal_id, total_voters = @total_voters, address = @address 
+           SET booth_number = @booth_number, booth_label = @booth_label, name = @name, constituency_id = @constituency_id, mandal_id = @mandal_id, panchayat_id = @panchayat_id, ward_id = @ward_id, total_voters = @total_voters, address = @address 
            WHERE id = @id`,
-          { id: parsedId, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address: address || '' }
+          { id: parsedId, booth_number: bnum, booth_label: blabel, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, panchayat_id: finalPanchayatId, ward_id: finalWardId, total_voters: vtotal, address: address || '' }
         );
-        return res.json({ id: targetId, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address });
+        return res.json({ id: targetId, booth_number: bnum, booth_label: blabel, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, panchayat_id: finalPanchayatId, ward_id: finalWardId, total_voters: vtotal, address });
       }
 
       const inserted = await query(
-        `INSERT INTO dbo.booths (booth_number, name, constituency_id, mandal_id, total_voters, address, created_by)
+        `INSERT INTO dbo.booths (booth_number, booth_label, name, constituency_id, mandal_id, panchayat_id, ward_id, total_voters, address, created_by)
          OUTPUT INSERTED.*
-         VALUES (@booth_number, @name, @constituency_id, @mandal_id, @total_voters, @address, @created_by)`,
-        { booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address: address || '', created_by: userId }
+         VALUES (@booth_number, @booth_label, @name, @constituency_id, @mandal_id, @panchayat_id, @ward_id, @total_voters, @address, @created_by)`,
+        { booth_number: bnum, booth_label: blabel, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, panchayat_id: finalPanchayatId, ward_id: finalWardId, total_voters: vtotal, address: address || '', created_by: userId }
       );
-      res.json(inserted[0] || { booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address, created_by: userId });
+      res.json(inserted[0] || { booth_number: bnum, booth_label: blabel, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, panchayat_id: finalPanchayatId, ward_id: finalWardId, total_voters: vtotal, address, created_by: userId });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -1866,7 +2686,7 @@ async function startServer() {
   app.put("/api/booths/:id", authenticateUser, async (req, res) => {
     try {
       const id = req.params.id;
-      const { booth_number, boothNumber, name, constituency_id, constituencyId, mandal_id, mandalId, total_voters, totalVoters, address } = req.body;
+      const { booth_number, boothNumber, booth_label, boothLabel, name, constituency_id, constituencyId, mandal_id, mandalId, panchayat_id, panchayatId, ward_id, wardId, total_voters, totalVoters, population, address } = req.body;
       if (!id || String(id).trim() === '') {
         return res.status(400).json({ error: "Invalid booth ID." });
       }
@@ -1877,18 +2697,24 @@ async function startServer() {
       const finalConstituencyId = !isNaN(Number(cid)) ? Number(cid) : String(cid);
       const mid = mandal_id !== undefined ? mandal_id : mandalId;
       const finalMandalId = mid && String(mid).trim() !== '' ? (!isNaN(Number(mid)) ? Number(mid) : String(mid)) : null;
+      const pid = panchayat_id !== undefined ? panchayat_id : panchayatId;
+      const finalPanchayatId = pid && String(pid).trim() !== '' ? (!isNaN(Number(pid)) ? Number(pid) : String(pid)) : null;
+      const wid = ward_id !== undefined ? ward_id : wardId;
+      const finalWardId = wid && String(wid).trim() !== '' ? (!isNaN(Number(wid)) ? Number(wid) : String(wid)) : null;
+
       const bnum = String(booth_number !== undefined ? booth_number : (boothNumber || '1')).trim();
+      const blabel = String(booth_label !== undefined ? booth_label : (boothLabel || '')).trim();
       const bname = String(name || `Booth #${bnum}`).trim();
-      const vtotal = total_voters !== undefined ? Number(total_voters) : (Number(totalVoters) || 0);
+      const vtotal = total_voters !== undefined ? Number(total_voters) : (Number(totalVoters) || Number(population) || 0);
       const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
 
       await execute(
         `UPDATE dbo.booths 
-         SET booth_number = @booth_number, name = @name, constituency_id = @constituency_id, mandal_id = @mandal_id, total_voters = @total_voters, address = @address 
+         SET booth_number = @booth_number, booth_label = @booth_label, name = @name, constituency_id = @constituency_id, mandal_id = @mandal_id, panchayat_id = @panchayat_id, ward_id = @ward_id, total_voters = @total_voters, address = @address 
          WHERE id = @id`,
-        { id: parsedId, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address: address || '' }
+        { id: parsedId, booth_number: bnum, booth_label: blabel, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, panchayat_id: finalPanchayatId, ward_id: finalWardId, total_voters: vtotal, address: address || '' }
       );
-      res.json({ id, booth_number: bnum, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, total_voters: vtotal, address });
+      res.json({ id, booth_number: bnum, booth_label: blabel, name: bname, constituency_id: finalConstituencyId, mandal_id: finalMandalId, panchayat_id: finalPanchayatId, ward_id: finalWardId, total_voters: vtotal, address });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -2077,7 +2903,7 @@ async function startServer() {
       const caller = (req as any).user;
       const { isSuperAdmin, reqUid, userRow } = await getRequesterInfo(caller);
       const { id } = req.params;
-      const { name, mandal_code, mandalCode, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId, admin_id, adminId } = req.body;
+      const { name, mandal_code, mandalCode, code, president_name, presidentName, president_phone, presidentPhone, voter_count, voterCount, population, state_id, stateId, district_id, districtId, constituency_id, constituencyId, admin_id, adminId } = req.body;
       const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
       
       const existing = await query(`SELECT * FROM dbo.mandals WHERE id = @id`, { id: parsedId });
@@ -2087,27 +2913,43 @@ async function startServer() {
 
       const mandal = existing[0];
       const effectiveAdminId = userRow?.parent_admin_id || reqUid;
-      if (!isSuperAdmin && mandal.admin_id && mandal.admin_id !== effectiveAdminId && mandal.admin_id !== reqUid) {
+      if (!isSuperAdmin && mandal.admin_id && mandal.admin_id !== effectiveAdminId && mandal.admin_id !== reqUid && mandal.admin_id !== caller?.email) {
         return res.status(403).json({ error: 'Forbidden: You cannot modify another admin’s mandal.' });
       }
 
       const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
-      const finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : null;
+      let finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : (mandal.constituency_id || null);
 
       const rawDid = district_id !== undefined ? district_id : districtId;
-      const finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : null;
+      let finalDid = rawDid && String(rawDid).trim() !== '' ? (!isNaN(Number(rawDid)) ? Number(rawDid) : String(rawDid)) : (mandal.district_id || null);
 
       const rawSid = state_id !== undefined ? state_id : stateId;
-      const finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : null;
+      let finalSid = rawSid && String(rawSid).trim() !== '' ? (!isNaN(Number(rawSid)) ? Number(rawSid) : String(rawSid)) : (mandal.state_id || null);
 
-      const targetAdmin = isSuperAdmin ? (admin_id || adminId || mandal.admin_id) : mandal.admin_id;
+      // Auto-lookup district and state if omitted or if constituency changed
+      if (finalCid && (!finalDid || !finalSid)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalCid });
+        if (cRow && cRow[0]) {
+          if (!finalDid) finalDid = cRow[0].district_id;
+          if (!finalSid) finalSid = cRow[0].state_id;
+        }
+      }
+      if (finalDid && !finalSid) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDid });
+        if (dRow && dRow[0]) {
+          finalSid = dRow[0].state_id;
+        }
+      }
+
+      const mcode = (mandal_code || mandalCode || code) ? String(mandal_code || mandalCode || code).trim().toUpperCase() : null;
+      const targetAdmin = isSuperAdmin ? (admin_id || adminId || mandal.admin_id || effectiveAdminId) : mandal.admin_id;
 
       await execute(
         `UPDATE dbo.mandals 
          SET name = COALESCE(NULLIF(@name, ''), name),
              mandal_code = COALESCE(NULLIF(@mandal_code, ''), mandal_code),
-             president_name = @president_name,
-             president_phone = @president_phone,
+             president_name = COALESCE(@president_name, president_name),
+             president_phone = COALESCE(@president_phone, president_phone),
              voter_count = COALESCE(@voter_count, voter_count),
              population = COALESCE(@population, population),
              state_id = COALESCE(@state_id, state_id),
@@ -2118,9 +2960,9 @@ async function startServer() {
         { 
           id: parsedId, 
           name: name ? String(name).trim() : null, 
-          mandal_code: (mandal_code || mandalCode) ? String(mandal_code || mandalCode).trim().toUpperCase() : null, 
-          president_name: president_name !== undefined ? president_name : (presidentName || ''), 
-          president_phone: president_phone !== undefined ? president_phone : (presidentPhone || ''), 
+          mandal_code: mcode, 
+          president_name: president_name !== undefined ? president_name : (presidentName !== undefined ? presidentName : null), 
+          president_phone: president_phone !== undefined ? president_phone : (presidentPhone !== undefined ? presidentPhone : null), 
           voter_count: voter_count !== undefined ? parseInt(voter_count, 10) : (voterCount !== undefined ? parseInt(voterCount, 10) : null), 
           population: population !== undefined ? parseInt(population, 10) : null,
           state_id: finalSid,
@@ -2291,14 +3133,321 @@ async function startServer() {
   });
 
   // ============================================================================
+  // 3b. Panchayats / MC / ULBs & Wards / Villages
+  // ============================================================================
+
+  // Panchayats
+  app.get("/api/panchayats", optionalAuth, async (req, res) => {
+    try {
+      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      const { mandalId, mandalIds, constituencyId, constituencyIds, districtId, districtIds, stateId, stateIds } = req.query;
+      let sqlQuery = `
+        SELECT p.*,
+               m.name as mandal_name,
+               c.name as constituency_name,
+               d.name as district_name,
+               s.name as state_name,
+               COALESCE(p.constituency_id, m.constituency_id) as constituency_id,
+               COALESCE(p.district_id, c.district_id, m.district_id) as district_id,
+               COALESCE(p.state_id, d.state_id, c.state_id, m.state_id) as state_id,
+               (SELECT COUNT(1) FROM dbo.wards w WHERE w.panchayat_id = p.id OR w.panchayat_id = CAST(p.id AS VARCHAR(64))) as wardCount,
+               (SELECT COUNT(1) FROM dbo.booths b WHERE b.panchayat_id = p.id OR b.panchayat_id = CAST(p.id AS VARCHAR(64))) as boothCount
+        FROM dbo.panchayats p
+        LEFT JOIN dbo.mandals m ON p.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON p.constituency_id = c.id OR m.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON p.district_id = d.id OR c.district_id = d.id
+        LEFT JOIN dbo.states s ON p.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id
+        WHERE 1=1
+      `;
+      const params: Record<string, any> = {};
+      const mndClause = buildSafeInClause(mandalId || mandalIds, 'p_mnd', ['p.mandal_id', 'm.id'], params);
+      if (mndClause) sqlQuery += ` AND ${mndClause}`;
+      const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'p_cst', ['p.constituency_id', 'c.id', 'm.constituency_id'], params);
+      if (cstClause) sqlQuery += ` AND ${cstClause}`;
+      const dstClause = buildSafeInClause(districtId || districtIds, 'p_dst', ['p.district_id', 'd.id', 'c.district_id'], params);
+      if (dstClause) sqlQuery += ` AND ${dstClause}`;
+      const stClause = buildSafeInClause(stateId || stateIds, 'p_st', ['p.state_id', 's.id', 'd.state_id'], params);
+      if (stClause) sqlQuery += ` AND ${stClause}`;
+
+      sqlQuery += ` ORDER BY p.name ASC`;
+      const panchayats = await query(sqlQuery, params);
+      res.json(panchayats);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.post("/api/panchayats", authenticateUser, async (req, res) => {
+    try {
+      const { id, name, code, type, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Panchayat / Local body name is required." });
+      }
+      const rawMandalId = mandal_id !== undefined ? mandal_id : mandalId;
+      let finalMandalId = rawMandalId && String(rawMandalId).trim() !== '' ? (!isNaN(Number(rawMandalId)) ? Number(rawMandalId) : String(rawMandalId)) : null;
+      const rawConstId = constituency_id !== undefined ? constituency_id : constituencyId;
+      let finalConstId = rawConstId && String(rawConstId).trim() !== '' ? (!isNaN(Number(rawConstId)) ? Number(rawConstId) : String(rawConstId)) : null;
+      const rawDistId = district_id !== undefined ? district_id : districtId;
+      let finalDistId = rawDistId && String(rawDistId).trim() !== '' ? (!isNaN(Number(rawDistId)) ? Number(rawDistId) : String(rawDistId)) : null;
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      let finalStateId = rawStateId && String(rawStateId).trim() !== '' ? (!isNaN(Number(rawStateId)) ? Number(rawStateId) : String(rawStateId)) : null;
+
+      // Auto-resolve hierarchy
+      if (finalMandalId && (!finalConstId || !finalDistId || !finalStateId)) {
+        const mRow = await query(`SELECT constituency_id, district_id, state_id FROM dbo.mandals WHERE id = @mid`, { mid: finalMandalId });
+        if (mRow && mRow[0]) {
+          if (!finalConstId) finalConstId = mRow[0].constituency_id;
+          if (!finalDistId) finalDistId = mRow[0].district_id;
+          if (!finalStateId) finalStateId = mRow[0].state_id;
+        }
+      }
+      if (finalConstId && (!finalDistId || !finalStateId)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalConstId });
+        if (cRow && cRow[0]) {
+          if (!finalDistId) finalDistId = cRow[0].district_id;
+          if (!finalStateId) finalStateId = cRow[0].state_id;
+        }
+      }
+      if (finalDistId && !finalStateId) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDistId });
+        if (dRow && dRow[0]) {
+          finalStateId = dRow[0].state_id;
+        }
+      }
+
+      const trimmedName = String(name).trim();
+      const pCode = code ? String(code).trim() : null;
+      const pType = type ? String(type).trim() : 'Gram Panchayat';
+      const pop = population ? Number(population) : 0;
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+
+      const targetId = id !== undefined && id !== null && String(id).trim() !== '' ? id : null;
+      if (targetId) {
+        const parsedId = !isNaN(Number(targetId)) ? Number(targetId) : String(targetId);
+        await execute(
+          `UPDATE dbo.panchayats 
+           SET name = @name, code = @code, type = @type, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population 
+           WHERE id = @id`,
+          { id: parsedId, name: trimmedName, code: pCode, type: pType, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop }
+        );
+        return res.json({ id: targetId, name: trimmedName, code: pCode, type: pType, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.panchayats (name, code, type, mandal_id, constituency_id, district_id, state_id, population, created_by)
+         OUTPUT INSERTED.*
+         VALUES (@name, @code, @type, @mandal_id, @constituency_id, @district_id, @state_id, @population, @created_by)`,
+        { name: trimmedName, code: pCode, type: pType, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop, created_by: userId }
+      );
+      res.json(inserted[0] || { name: trimmedName, code: pCode, type: pType, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/panchayats/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, code, type, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population } = req.body;
+      if (!id || String(id).trim() === '') return res.status(400).json({ error: "Invalid Panchayat ID." });
+      if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required." });
+      const parsedId = !isNaN(Number(id)) ? Number(id) : String(id);
+
+      const rawMandalId = mandal_id !== undefined ? mandal_id : mandalId;
+      let finalMandalId = rawMandalId && String(rawMandalId).trim() !== '' ? (!isNaN(Number(rawMandalId)) ? Number(rawMandalId) : String(rawMandalId)) : null;
+      const rawConstId = constituency_id !== undefined ? constituency_id : constituencyId;
+      let finalConstId = rawConstId && String(rawConstId).trim() !== '' ? (!isNaN(Number(rawConstId)) ? Number(rawConstId) : String(rawConstId)) : null;
+      const rawDistId = district_id !== undefined ? district_id : districtId;
+      let finalDistId = rawDistId && String(rawDistId).trim() !== '' ? (!isNaN(Number(rawDistId)) ? Number(rawDistId) : String(rawDistId)) : null;
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      let finalStateId = rawStateId && String(rawStateId).trim() !== '' ? (!isNaN(Number(rawStateId)) ? Number(rawStateId) : String(rawStateId)) : null;
+
+      // Auto-resolve hierarchy
+      if (finalMandalId && (!finalConstId || !finalDistId || !finalStateId)) {
+        const mRow = await query(`SELECT constituency_id, district_id, state_id FROM dbo.mandals WHERE id = @mid`, { mid: finalMandalId });
+        if (mRow && mRow[0]) {
+          if (!finalConstId) finalConstId = mRow[0].constituency_id;
+          if (!finalDistId) finalDistId = mRow[0].district_id;
+          if (!finalStateId) finalStateId = mRow[0].state_id;
+        }
+      }
+      if (finalConstId && (!finalDistId || !finalStateId)) {
+        const cRow = await query(`SELECT district_id, state_id FROM dbo.constituencies WHERE id = @cid`, { cid: finalConstId });
+        if (cRow && cRow[0]) {
+          if (!finalDistId) finalDistId = cRow[0].district_id;
+          if (!finalStateId) finalStateId = cRow[0].state_id;
+        }
+      }
+      if (finalDistId && !finalStateId) {
+        const dRow = await query(`SELECT state_id FROM dbo.districts WHERE id = @did`, { did: finalDistId });
+        if (dRow && dRow[0]) {
+          finalStateId = dRow[0].state_id;
+        }
+      }
+
+      await execute(
+        `UPDATE dbo.panchayats 
+         SET name = @name, code = @code, type = @type, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population 
+         WHERE id = @id`,
+        { id: parsedId, name: String(name).trim(), code: code || null, type: type || 'Gram Panchayat', mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: Number(population) || 0 }
+      );
+      res.json({ id: parsedId, name: String(name).trim(), code, type, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.delete("/api/panchayats/:id", authenticateUser, async (req, res) => {
+    try {
+      const pid = req.params.id;
+      const parsedId = !isNaN(Number(pid)) ? Number(pid) : String(pid);
+      await execute(`UPDATE dbo.wards SET panchayat_id = NULL WHERE panchayat_id = @pid OR panchayat_id = CAST(@pid AS NVARCHAR(64))`, { pid: parsedId });
+      await execute(`UPDATE dbo.booths SET panchayat_id = NULL WHERE panchayat_id = @pid OR panchayat_id = CAST(@pid AS NVARCHAR(64))`, { pid: parsedId });
+      await execute(`UPDATE dbo.voters SET panchayat_id = NULL WHERE panchayat_id = @pid OR panchayat_id = CAST(@pid AS NVARCHAR(64))`, { pid: parsedId });
+      await execute(`DELETE FROM dbo.panchayats WHERE id = @pid`, { pid: parsedId });
+      res.json({ success: true, message: 'Panchayat deleted successfully' });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Wards / Villages
+  app.get("/api/wards", optionalAuth, async (req, res) => {
+    try {
+      const { panchayatId, panchayatIds, mandalId, mandalIds, constituencyId, constituencyIds, districtId, districtIds, stateId, stateIds } = req.query;
+      let sqlQuery = `
+        SELECT w.*,
+               p.name as panchayat_name,
+               m.name as mandal_name,
+               c.name as constituency_name,
+               d.name as district_name,
+               s.name as state_name,
+               (SELECT COUNT(1) FROM dbo.booths b WHERE b.ward_id = w.id OR b.ward_id = CAST(w.id AS VARCHAR(64))) as boothCount,
+               (SELECT COUNT(1) FROM dbo.voters v WHERE v.ward_id = w.id OR v.ward_id = CAST(w.id AS VARCHAR(64))) as voterCount
+        FROM dbo.wards w
+        LEFT JOIN dbo.panchayats p ON w.panchayat_id = p.id
+        LEFT JOIN dbo.mandals m ON w.mandal_id = m.id OR p.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON w.constituency_id = c.id OR p.constituency_id = c.id OR m.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON w.district_id = d.id OR c.district_id = d.id
+        LEFT JOIN dbo.states s ON w.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id
+        WHERE 1=1
+      `;
+      const params: Record<string, any> = {};
+      const pchClause = buildSafeInClause(panchayatId || panchayatIds, 'w_pch', ['w.panchayat_id', 'p.id'], params);
+      if (pchClause) sqlQuery += ` AND ${pchClause}`;
+      const mndClause = buildSafeInClause(mandalId || mandalIds, 'w_mnd', ['w.mandal_id', 'm.id', 'p.mandal_id'], params);
+      if (mndClause) sqlQuery += ` AND ${mndClause}`;
+      const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'w_cst', ['w.constituency_id', 'c.id', 'm.constituency_id'], params);
+      if (cstClause) sqlQuery += ` AND ${cstClause}`;
+      const dstClause = buildSafeInClause(districtId || districtIds, 'w_dst', ['w.district_id', 'd.id', 'c.district_id'], params);
+      if (dstClause) sqlQuery += ` AND ${dstClause}`;
+      const stClause = buildSafeInClause(stateId || stateIds, 'w_st', ['w.state_id', 's.id', 'd.state_id'], params);
+      if (stClause) sqlQuery += ` AND ${stClause}`;
+
+      sqlQuery += ` ORDER BY w.ward_number ASC, w.name ASC`;
+      const wards = await query(sqlQuery, params);
+      res.json(wards);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.post("/api/wards", authenticateUser, async (req, res) => {
+    try {
+      const { id, name, ward_number, wardNumber, type, panchayat_id, panchayatId, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population, total_voters, totalVoters } = req.body;
+      if (!name || !String(name).trim()) {
+        return res.status(400).json({ error: "Ward / Village name is required." });
+      }
+      const rawPchId = panchayat_id !== undefined ? panchayat_id : panchayatId;
+      const finalPchId = rawPchId && !isNaN(Number(rawPchId)) ? Number(rawPchId) : null;
+      const rawMandalId = mandal_id !== undefined ? mandal_id : mandalId;
+      const finalMandalId = rawMandalId && !isNaN(Number(rawMandalId)) ? Number(rawMandalId) : null;
+      const rawConstId = constituency_id !== undefined ? constituency_id : constituencyId;
+      const finalConstId = rawConstId && !isNaN(Number(rawConstId)) ? Number(rawConstId) : null;
+      const rawDistId = district_id !== undefined ? district_id : districtId;
+      const finalDistId = rawDistId && !isNaN(Number(rawDistId)) ? Number(rawDistId) : null;
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      const finalStateId = rawStateId && !isNaN(Number(rawStateId)) ? Number(rawStateId) : null;
+
+      const trimmedName = String(name).trim();
+      const wNumber = ward_number || wardNumber || '';
+      const wType = type ? String(type).trim() : 'Ward';
+      const pop = population ? Number(population) : 0;
+      const vTotal = total_voters !== undefined ? Number(total_voters) : (Number(totalVoters) || 0);
+      const userId = (req as any).user?.uid || (req as any).user?.id || (req as any).user?.email || null;
+
+      if (id && !isNaN(Number(id))) {
+        await execute(
+          `UPDATE dbo.wards 
+           SET name = @name, ward_number = @ward_number, type = @type, panchayat_id = @panchayat_id, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population, total_voters = @total_voters 
+           WHERE id = @id`,
+          { id: Number(id), name: trimmedName, ward_number: wNumber, type: wType, panchayat_id: finalPchId, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop, total_voters: vTotal }
+        );
+        return res.json({ id: Number(id), name: trimmedName, ward_number: wNumber, type: wType, panchayat_id: finalPchId, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop, total_voters: vTotal });
+      }
+
+      const inserted = await query(
+        `INSERT INTO dbo.wards (name, ward_number, type, panchayat_id, mandal_id, constituency_id, district_id, state_id, population, total_voters, created_by)
+         OUTPUT INSERTED.*
+         VALUES (@name, @ward_number, @type, @panchayat_id, @mandal_id, @constituency_id, @district_id, @state_id, @population, @total_voters, @created_by)`,
+        { name: trimmedName, ward_number: wNumber, type: wType, panchayat_id: finalPchId, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop, total_voters: vTotal, created_by: userId }
+      );
+      res.json(inserted[0] || { name: trimmedName, ward_number: wNumber, type: wType, panchayat_id: finalPchId, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: pop, total_voters: vTotal });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/wards/:id", authenticateUser, async (req, res) => {
+    try {
+      const id = req.params.id;
+      const { name, ward_number, wardNumber, type, panchayat_id, panchayatId, mandal_id, mandalId, constituency_id, constituencyId, district_id, districtId, state_id, stateId, population, total_voters, totalVoters } = req.body;
+      if (!id || String(id).trim() === '') return res.status(400).json({ error: "Invalid Ward ID." });
+      if (!name || !String(name).trim()) return res.status(400).json({ error: "Name is required." });
+      const rawPchId = panchayat_id !== undefined ? panchayat_id : panchayatId;
+      const finalPchId = rawPchId && !isNaN(Number(rawPchId)) ? Number(rawPchId) : null;
+      const rawMandalId = mandal_id !== undefined ? mandal_id : mandalId;
+      const finalMandalId = rawMandalId && !isNaN(Number(rawMandalId)) ? Number(rawMandalId) : null;
+      const rawConstId = constituency_id !== undefined ? constituency_id : constituencyId;
+      const finalConstId = rawConstId && !isNaN(Number(rawConstId)) ? Number(rawConstId) : null;
+      const rawDistId = district_id !== undefined ? district_id : districtId;
+      const finalDistId = rawDistId && !isNaN(Number(rawDistId)) ? Number(rawDistId) : null;
+      const rawStateId = state_id !== undefined ? state_id : stateId;
+      const finalStateId = rawStateId && !isNaN(Number(rawStateId)) ? Number(rawStateId) : null;
+
+      await execute(
+        `UPDATE dbo.wards 
+         SET name = @name, ward_number = @ward_number, type = @type, panchayat_id = @panchayat_id, mandal_id = @mandal_id, constituency_id = @constituency_id, district_id = @district_id, state_id = @state_id, population = @population, total_voters = @total_voters 
+         WHERE id = @id`,
+        { id: Number(id), name: String(name).trim(), ward_number: ward_number || wardNumber || '', type: type || 'Ward', panchayat_id: finalPchId, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population: Number(population) || 0, total_voters: Number(total_voters || totalVoters) || 0 }
+      );
+      res.json({ id: Number(id), name: String(name).trim(), ward_number, type, panchayat_id: finalPchId, mandal_id: finalMandalId, constituency_id: finalConstId, district_id: finalDistId, state_id: finalStateId, population, total_voters });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.delete("/api/wards/:id", authenticateUser, async (req, res) => {
+    try {
+      const wid = req.params.id;
+      await execute(`UPDATE dbo.booths SET ward_id = NULL WHERE ward_id = @wid`, { wid });
+      await execute(`UPDATE dbo.voters SET ward_id = NULL WHERE ward_id = @wid`, { wid });
+      await execute(`DELETE FROM dbo.wards WHERE id = @wid`, { wid });
+      res.json({ success: true, message: 'Ward deleted successfully' });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // ============================================================================
   // 4. Voters Directory & Roster
   // ============================================================================
 
   app.get("/api/voters", optionalAuth, async (req, res) => {
     try {
       const { 
-        boothId, mandalId, constituencyId, districtId, stateId,
-        boothIds, constituencyIds, districtIds, stateIds,
+        boothId, mandalId, panchayatId, wardId, constituencyId, districtId, stateId,
+        boothIds, mandalIds, panchayatIds, wardIds, constituencyIds, districtIds, stateIds,
         search, gender, caste, voting_status, is_karyakarta,
         page = '1', limit = '50' 
       } = req.query;
@@ -2352,7 +3501,13 @@ async function startServer() {
       const bClause = buildSafeInClause(boothId || boothIds, 'f_bth', ['v.booth_id', 'b.id'], params);
       if (bClause) whereConditions.push(bClause);
 
-      const mClause = buildSafeInClause(mandalId, 'f_mnd', ['v.mandal_id', 'b.mandal_id', 'm.id'], params);
+      const wrdClause = buildSafeInClause(wardId || wardIds, 'f_wrd', ['v.ward_id', 'b.ward_id', 'w.id'], params);
+      if (wrdClause) whereConditions.push(wrdClause);
+
+      const pchClause = buildSafeInClause(panchayatId || panchayatIds, 'f_pch', ['v.panchayat_id', 'b.panchayat_id', 'p.id'], params);
+      if (pchClause) whereConditions.push(pchClause);
+
+      const mClause = buildSafeInClause(mandalId || mandalIds, 'f_mnd', ['v.mandal_id', 'b.mandal_id', 'm.id'], params);
       if (mClause) whereConditions.push(mClause);
 
       const cClause = buildSafeInClause(constituencyId || constituencyIds, 'f_cst', ['v.constituency_id', 'b.constituency_id', 'c.id'], params);
@@ -2381,7 +3536,7 @@ async function startServer() {
         params.is_karyakarta = is_karyakarta === 'true' || is_karyakarta === '1' ? 1 : 0;
       }
       if (search && String(search).trim()) {
-        whereConditions.push(`(v.name LIKE @search OR v.voter_id LIKE @search OR v.mobile LIKE @search OR v.house_no LIKE @search OR v.village LIKE @search)`);
+        whereConditions.push(`(v.name LIKE @search OR v.voter_id LIKE @search OR v.mobile LIKE @search OR v.house_no LIKE @search OR v.village LIKE @search OR v.panchayat_name LIKE @search OR v.ward_name LIKE @search)`);
         params.search = `%${String(search).trim()}%`;
       }
 
@@ -2392,8 +3547,10 @@ async function startServer() {
         SELECT COUNT(*) as total 
         FROM dbo.voters v 
         LEFT JOIN dbo.booths b ON v.booth_id = b.id
-        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id OR b.mandal_id = m.id
-        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id OR b.constituency_id = c.id
+        LEFT JOIN dbo.wards w ON v.ward_id = w.id OR b.ward_id = w.id
+        LEFT JOIN dbo.panchayats p ON v.panchayat_id = p.id OR b.panchayat_id = p.id OR w.panchayat_id = p.id
+        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id OR b.mandal_id = m.id OR p.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id OR b.constituency_id = c.id OR m.constituency_id = c.id
         LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
         LEFT JOIN dbo.states s ON v.state_id = s.id OR c.state_id = s.id OR d.state_id = s.id
         WHERE ${whereSql}
@@ -2409,16 +3566,35 @@ async function startServer() {
 
       const sqlQuery = `
         SELECT v.*, 
+          COALESCE(he.vital_status, v.vital_status, 'Active') as vital_status,
+          COALESCE(he.death_date, v.death_date) as death_date,
+          COALESCE(he.death_notes, v.death_notes) as death_notes,
+          COALESCE(he.physical_profile, v.physical_profile, 'General') as physical_profile,
+          COALESCE(he.disability_category, v.disability_category, 'None') as disability_category,
+          COALESCE(he.disability_percent, v.disability_percent, 0) as disability_percent,
+          COALESCE(he.eci_assistance_needed, v.eci_assistance_needed, 0) as eci_assistance_needed,
+          COALESCE(he.economic_category, v.economic_category, 'APL') as economic_category,
+          COALESCE(he.income_range, v.income_range, '₹15,000 - ₹30,000') as income_range,
+          COALESCE(he.land_ownership, v.land_ownership, 'Small Farmer') as land_ownership,
+          COALESCE(he.ration_card_type, v.ration_card_type) as ration_card_type,
+          COALESCE(he.ration_card_no, v.ration_card_no) as ration_card_no,
+          COALESCE(he.housing_type, v.housing_type) as housing_type,
           b.name as booth_name, 
           b.booth_number, 
+          COALESCE(w.name, v.ward_name) as ward_name,
+          COALESCE(w.ward_number, '') as ward_number,
+          COALESCE(p.name, v.panchayat_name, v.village) as panchayat_name,
           m.name as mandal_name, 
           c.name as constituency_name,
           d.name as district_name,
           s.name as state_name
         FROM dbo.voters v
+        LEFT JOIN dbo.voter_health_economy he ON (he.voter_doc_id = CAST(v.id AS VARCHAR(64)) OR he.voter_epic = v.voter_id)
         LEFT JOIN dbo.booths b ON v.booth_id = b.id
-        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id OR b.mandal_id = m.id
-        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id OR b.constituency_id = c.id
+        LEFT JOIN dbo.wards w ON v.ward_id = w.id OR b.ward_id = w.id
+        LEFT JOIN dbo.panchayats p ON v.panchayat_id = p.id OR b.panchayat_id = p.id OR w.panchayat_id = p.id
+        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id OR b.mandal_id = m.id OR p.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id OR b.constituency_id = c.id OR m.constituency_id = c.id
         LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
         LEFT JOIN dbo.states s ON v.state_id = s.id OR c.state_id = s.id OR d.state_id = s.id
         WHERE ${whereSql}
@@ -2461,6 +3637,13 @@ async function startServer() {
       const cid = v.constituency_id !== undefined ? v.constituency_id : v.constituencyId;
       const sid = v.state_id !== undefined ? v.state_id : v.stateId;
       const did = v.district_id !== undefined ? v.district_id : v.districtId;
+      const reqUserId = (req as any).user?.uid || (req as any).user?.email || 'admin';
+      const reqUserName = (req as any).user?.name || (req as any).user?.username || 'Staff';
+
+      const pid = v.panchayat_id !== undefined ? v.panchayat_id : v.panchayatId;
+      const wid = v.ward_id !== undefined ? v.ward_id : v.wardId;
+      const pname = v.panchayat_name || v.panchayatName || null;
+      const wname = v.ward_name || v.wardName || null;
 
       if (id && String(id).trim() !== '') {
         const idParam = String(id);
@@ -2470,21 +3653,43 @@ async function startServer() {
                name = COALESCE(@name, name),
                relation_name = COALESCE(@relation_name, relation_name),
                relation_type = COALESCE(@relation_type, relation_type),
+               aadhar_number = COALESCE(@aadhar_number, aadhar_number),
                gender = COALESCE(@gender, gender),
                age = COALESCE(@age, age),
+               dob = COALESCE(@dob, dob),
                mobile = COALESCE(@mobile, mobile),
+               additional_mobile = COALESCE(@additional_mobile, additional_mobile),
                email = COALESCE(@email, email),
                address = COALESCE(@address, address),
+               new_address = COALESCE(@new_address, new_address),
                house_no = COALESCE(@house_no, house_no),
                village = COALESCE(@village, village),
                caste = COALESCE(@caste, caste),
                occupation = COALESCE(@occupation, occupation),
+               education = COALESCE(@education, education),
                is_karyakarta = COALESCE(@is_karyakarta, is_karyakarta),
                voting_status = COALESCE(@voting_status, voting_status),
                party_inclination = COALESCE(@party_inclination, party_inclination),
                booth_id = COALESCE(@booth_id, booth_id),
+               ward_id = COALESCE(@ward_id, ward_id),
+               ward_name = COALESCE(@ward_name, ward_name),
+               panchayat_id = COALESCE(@panchayat_id, panchayat_id),
+               panchayat_name = COALESCE(@panchayat_name, panchayat_name),
                mandal_id = COALESCE(@mandal_id, mandal_id),
-               constituency_id = COALESCE(@constituency_id, constituency_id)
+               constituency_id = COALESCE(@constituency_id, constituency_id),
+               vital_status = COALESCE(@vital_status, vital_status),
+               death_date = COALESCE(@death_date, death_date),
+               death_notes = COALESCE(@death_notes, death_notes),
+               physical_profile = COALESCE(@physical_profile, physical_profile),
+               disability_category = COALESCE(@disability_category, disability_category),
+               disability_percent = COALESCE(@disability_percent, disability_percent),
+               eci_assistance_needed = COALESCE(@eci_assistance_needed, eci_assistance_needed),
+               economic_category = COALESCE(@economic_category, economic_category),
+               income_range = COALESCE(@income_range, income_range),
+               land_ownership = COALESCE(@land_ownership, land_ownership),
+               ration_card_type = COALESCE(@ration_card_type, ration_card_type),
+               ration_card_no = COALESCE(@ration_card_no, ration_card_no),
+               housing_type = COALESCE(@housing_type, housing_type)
            WHERE voter_id = @idParam OR CAST(id AS VARCHAR(64)) = @idParam`,
           {
             idParam,
@@ -2492,211 +3697,801 @@ async function startServer() {
             name: v.name,
             relation_name: v.relation_name || v.relationName || '',
             relation_type: v.relation_type || v.relationType || 'Father',
+            aadhar_number: v.aadhar_number || v.aadharNumber || null,
             gender: v.gender || 'Male',
             age: v.age !== undefined && v.age !== null && v.age !== '' ? parseInt(String(v.age), 10) : null,
+            dob: v.dob || null,
             mobile: v.mobile || '',
+            additional_mobile: v.additional_mobile || v.additionalMobile || null,
             email: v.email || '',
             address: v.address || '',
+            new_address: v.new_address || v.newAddress || null,
             house_no: v.house_no || v.houseNo || '',
             village: v.village || '',
             caste: v.caste || '',
             occupation: v.occupation || '',
-            is_karyakarta: v.is_karyakarta || v.isKaryakarta ? 1 : 0,
+            education: v.education || 'Unspecified',
+            is_karyakarta: v.is_karyakarta !== undefined ? (v.is_karyakarta ? 1 : 0) : (v.isKaryakarta ? 1 : 0),
             voting_status: v.voting_status || (v.voted ? 'voted' : 'unvoted') || 'unvoted',
             party_inclination: v.party_inclination || v.partyInclination || 'Neutral',
             booth_id: bid ? String(bid) : null,
+            ward_id: wid ? String(wid) : null,
+            ward_name: wname,
+            panchayat_id: pid ? String(pid) : null,
+            panchayat_name: pname,
             mandal_id: mid ? String(mid) : null,
-            constituency_id: cid ? String(cid) : null
+            constituency_id: cid ? String(cid) : null,
+            vital_status: v.vital_status || v.vitalStatus || 'Active',
+            death_date: v.death_date || v.deathDate || null,
+            death_notes: v.death_notes || v.deathNotes || null,
+            physical_profile: v.physical_profile || v.physicalProfile || 'General',
+            disability_category: v.disability_category || v.disabilityCategory || 'None',
+            disability_percent: v.disability_percent !== undefined ? Number(v.disability_percent) : (v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : 0),
+            eci_assistance_needed: v.eci_assistance_needed !== undefined ? (v.eci_assistance_needed ? 1 : 0) : (v.eciAssistanceNeeded ? 1 : 0),
+            economic_category: v.economic_category || v.economicCategory || 'APL',
+            income_range: v.income_range || v.incomeRange || '₹15,000 - ₹30,000',
+            land_ownership: v.land_ownership || v.landOwnership || 'Small Farmer',
+            ration_card_type: v.ration_card_type || v.rationCardType || null,
+            ration_card_no: v.ration_card_no || v.rationCardNo || null,
+            housing_type: v.housing_type || v.housingType || null
           }
         );
+
+        // Upsert into dedicated dbo.voter_health_economy table
+        const voterEpicVal = v.voter_id || v.voterId || idParam;
+        const aadharVal = v.aadhar_number || v.aadharNumber || null;
+        await execute(
+          `IF EXISTS (SELECT 1 FROM dbo.voter_health_economy WHERE voter_doc_id = @idParam OR voter_epic = @voterEpicVal)
+           BEGIN
+             UPDATE dbo.voter_health_economy SET
+               voter_epic = @voterEpicVal,
+               aadhar_number = COALESCE(@aadharVal, aadhar_number),
+               vital_status = COALESCE(@vital_status, vital_status),
+               death_date = COALESCE(@death_date, death_date),
+               death_notes = COALESCE(@death_notes, death_notes),
+               physical_profile = COALESCE(@physical_profile, physical_profile),
+               disability_category = COALESCE(@disability_category, disability_category),
+               disability_percent = COALESCE(@disability_percent, disability_percent),
+               eci_assistance_needed = COALESCE(@eci_assistance_needed, eci_assistance_needed),
+               economic_category = COALESCE(@economic_category, economic_category),
+               income_range = COALESCE(@income_range, income_range),
+               land_ownership = COALESCE(@land_ownership, land_ownership),
+               ration_card_type = COALESCE(@ration_card_type, ration_card_type),
+               ration_card_no = COALESCE(@ration_card_no, ration_card_no),
+               housing_type = COALESCE(@housing_type, housing_type),
+               recorded_by = @reqUserId,
+               recorded_by_name = @reqUserName,
+               updated_at = SYSUTCDATETIME()
+             WHERE voter_doc_id = @idParam OR voter_epic = @voterEpicVal
+           END
+           ELSE
+           BEGIN
+             INSERT INTO dbo.voter_health_economy (
+               voter_doc_id, voter_epic, aadhar_number, vital_status, death_date, death_notes,
+               physical_profile, disability_category, disability_percent, eci_assistance_needed,
+               economic_category, income_range, land_ownership, ration_card_type, ration_card_no, housing_type,
+               recorded_by, recorded_by_name
+             ) VALUES (
+               @idParam, @voterEpicVal, @aadharVal, @vital_status, @death_date, @death_notes,
+               @physical_profile, @disability_category, @disability_percent, @eci_assistance_needed,
+               @economic_category, @income_range, @land_ownership, @ration_card_type, @ration_card_no, @housing_type,
+               @reqUserId, @reqUserName
+             )
+           END`,
+          {
+            idParam,
+            voterEpicVal,
+            aadharVal,
+            vital_status: v.vital_status || v.vitalStatus || 'Active',
+            death_date: v.death_date || v.deathDate || null,
+            death_notes: v.death_notes || v.deathNotes || null,
+            physical_profile: v.physical_profile || v.physicalProfile || 'General',
+            disability_category: v.disability_category || v.disabilityCategory || 'None',
+            disability_percent: v.disability_percent !== undefined ? Number(v.disability_percent) : (v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : 0),
+            eci_assistance_needed: v.eci_assistance_needed !== undefined ? (v.eci_assistance_needed ? 1 : 0) : (v.eciAssistanceNeeded ? 1 : 0),
+            economic_category: v.economic_category || v.economicCategory || 'APL',
+            income_range: v.income_range || v.incomeRange || '₹15,000 - ₹30,000',
+            land_ownership: v.land_ownership || v.landOwnership || 'Small Farmer',
+            ration_card_type: v.ration_card_type || v.rationCardType || null,
+            ration_card_no: v.ration_card_no || v.rationCardNo || null,
+            housing_type: v.housing_type || v.housingType || null,
+            reqUserId,
+            reqUserName
+          }
+        );
+
         return res.json({ id: idParam, ...v });
       }
 
+      const voterEpic = v.voter_id || v.voterId || `EPIC${Date.now()}`;
       const inserted = await query(
         `INSERT INTO dbo.voters (
-          voter_id, name, relation_name, relation_type, gender, age, 
-          part_no, sr_no, mobile, email, address, house_no, village, 
-          caste, occupation, is_karyakarta, voting_status, party_inclination, 
-          booth_id, mandal_id, constituency_id, state_id, district_id
+          voter_id, name, relation_name, relation_type, aadhar_number, gender, age, dob,
+          part_no, sr_no, mobile, additional_mobile, email, address, new_address, house_no, village, 
+          caste, occupation, education, is_karyakarta, voting_status, party_inclination, 
+          booth_id, ward_id, ward_name, panchayat_id, panchayat_name, mandal_id, constituency_id, state_id, district_id,
+          vital_status, death_date, death_notes, physical_profile, disability_category, disability_percent,
+          eci_assistance_needed, economic_category, income_range, land_ownership, ration_card_type, ration_card_no, housing_type
         ) 
         OUTPUT INSERTED.*
         VALUES (
-          @voter_id, @name, @relation_name, @relation_type, @gender, @age,
-          @part_no, @sr_no, @mobile, @email, @address, @house_no, @village,
-          @caste, @occupation, @is_karyakarta, @voting_status, @party_inclination,
-          @booth_id, @mandal_id, @constituency_id, @state_id, @district_id
+          @voter_id, @name, @relation_name, @relation_type, @aadhar_number, @gender, @age, @dob,
+          @part_no, @sr_no, @mobile, @additional_mobile, @email, @address, @new_address, @house_no, @village,
+          @caste, @occupation, @education, @is_karyakarta, @voting_status, @party_inclination,
+          @booth_id, @ward_id, @ward_name, @panchayat_id, @panchayat_name, @mandal_id, @constituency_id, @state_id, @district_id,
+          @vital_status, @death_date, @death_notes, @physical_profile, @disability_category, @disability_percent,
+          @eci_assistance_needed, @economic_category, @income_range, @land_ownership, @ration_card_type, @ration_card_no, @housing_type
         )`,
         {
-          voter_id: v.voter_id || v.voterId || `EPIC${Date.now()}`,
+          voter_id: voterEpic,
           name: v.name,
           relation_name: v.relation_name || v.relationName || '',
           relation_type: v.relation_type || v.relationType || 'Father',
+          aadhar_number: v.aadhar_number || v.aadharNumber || null,
           gender: v.gender || 'Male',
           age: v.age !== undefined && v.age !== null && v.age !== '' ? parseInt(String(v.age), 10) : null,
+          dob: v.dob || null,
           part_no: v.part_no || v.partNo || '',
           sr_no: v.sr_no || v.srNo || '',
           mobile: v.mobile || '',
+          additional_mobile: v.additional_mobile || v.additionalMobile || null,
           email: v.email || '',
           address: v.address || '',
+          new_address: v.new_address || v.newAddress || null,
           house_no: v.house_no || v.houseNo || '',
           village: v.village || '',
           caste: v.caste || '',
           occupation: v.occupation || '',
+          education: v.education || 'Unspecified',
           is_karyakarta: v.is_karyakarta || v.isKaryakarta ? 1 : 0,
           voting_status: v.voting_status || (v.voted ? 'voted' : 'unvoted') || 'unvoted',
           party_inclination: v.party_inclination || v.partyInclination || 'Neutral',
           booth_id: bid ? String(bid) : null,
+          ward_id: wid ? String(wid) : null,
+          ward_name: wname,
+          panchayat_id: pid ? String(pid) : null,
+          panchayat_name: pname,
           mandal_id: mid ? String(mid) : null,
           constituency_id: cid ? String(cid) : null,
           state_id: sid ? String(sid) : null,
-          district_id: did ? String(did) : null
+          district_id: did ? String(did) : null,
+          vital_status: v.vital_status || v.vitalStatus || 'Active',
+          death_date: v.death_date || v.deathDate || null,
+          death_notes: v.death_notes || v.deathNotes || null,
+          physical_profile: v.physical_profile || v.physicalProfile || 'General',
+          disability_category: v.disability_category || v.disabilityCategory || 'None',
+          disability_percent: v.disability_percent !== undefined ? Number(v.disability_percent) : (v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : 0),
+          eci_assistance_needed: v.eci_assistance_needed || v.eciAssistanceNeeded ? 1 : 0,
+          economic_category: v.economic_category || v.economicCategory || 'APL',
+          income_range: v.income_range || v.incomeRange || '₹15,000 - ₹30,000',
+          land_ownership: v.land_ownership || v.landOwnership || 'Small Farmer',
+          ration_card_type: v.ration_card_type || v.rationCardType || null,
+          ration_card_no: v.ration_card_no || v.rationCardNo || null,
+          housing_type: v.housing_type || v.housingType || null
         }
       );
-      res.json(inserted[0] || v);
+
+      const createdVoter = inserted[0] || v;
+      const createdId = String(createdVoter.id || voterEpic);
+
+      // Insert into dedicated dbo.voter_health_economy table
+      await execute(
+        `INSERT INTO dbo.voter_health_economy (
+           voter_doc_id, voter_epic, aadhar_number, vital_status, death_date, death_notes,
+           physical_profile, disability_category, disability_percent, eci_assistance_needed,
+           economic_category, income_range, land_ownership, ration_card_type, ration_card_no, housing_type,
+           recorded_by, recorded_by_name
+         ) VALUES (
+           @voter_doc_id, @voter_epic, @aadhar_number, @vital_status, @death_date, @death_notes,
+           @physical_profile, @disability_category, @disability_percent, @eci_assistance_needed,
+           @economic_category, @income_range, @land_ownership, @ration_card_type, @ration_card_no, @housing_type,
+           @reqUserId, @reqUserName
+         )`,
+        {
+          voter_doc_id: createdId,
+          voter_epic: voterEpic,
+          aadhar_number: v.aadhar_number || v.aadharNumber || null,
+          vital_status: v.vital_status || v.vitalStatus || 'Active',
+          death_date: v.death_date || v.deathDate || null,
+          death_notes: v.death_notes || v.deathNotes || null,
+          physical_profile: v.physical_profile || v.physicalProfile || 'General',
+          disability_category: v.disability_category || v.disabilityCategory || 'None',
+          disability_percent: v.disability_percent !== undefined ? Number(v.disability_percent) : 0,
+          eci_assistance_needed: v.eci_assistance_needed || v.eciAssistanceNeeded ? 1 : 0,
+          economic_category: v.economic_category || v.economicCategory || 'APL',
+          income_range: v.income_range || v.incomeRange || '₹15,000 - ₹30,000',
+          land_ownership: v.land_ownership || v.landOwnership || 'Small Farmer',
+          ration_card_type: v.ration_card_type || v.rationCardType || null,
+          ration_card_no: v.ration_card_no || v.rationCardNo || null,
+          housing_type: v.housing_type || v.housingType || null,
+          reqUserId,
+          reqUserName
+        }
+      ).catch(e => console.warn('Note on health_economy initial insert:', e));
+
+      res.json(createdVoter);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
-  // Bulk voter import (supports upsert, insert_only, update_only)
+  // Bulk Import Voters Endpoint
   app.post("/api/voters/bulk", authenticateUser, async (req, res) => {
     try {
-      const { voters, mode = 'upsert' } = req.body;
-      if (!Array.isArray(voters) || voters.length === 0) {
-        return res.status(400).json({ error: 'Expected non-empty array of voters' });
+      const userRole = (req as any).user?.role || 'volunteer';
+      const isSuperAdmin = (req as any).user?.isSuperAdmin || (req as any).user?.role === 'superadmin' || (req as any).user?.role === 'admin';
+      if (userRole === 'volunteer' && !isSuperAdmin) {
+        return res.status(403).json({ 
+          error: 'Karyakartas are not permitted to bulk upload voters. Only Managers and Admins can import voter lists.' 
+        });
       }
 
-      let insertedCount = 0;
-      let updatedCount = 0;
-      let skippedCount = 0;
-      let failedCount = 0;
+      const voterList: any[] = req.body.voters || [];
+      let inserted = 0;
+      let updated = 0;
 
-      for (const v of voters) {
-        try {
-          const rawEpic = v.voter_id || v.voterId || v.epic;
-          const epic = rawEpic ? String(rawEpic).trim().toUpperCase() : null;
-          if (!epic) {
-            skippedCount++;
-            continue;
-          }
+      for (const v of voterList) {
+        const voterEpic = (v.voter_id || v.voterId || v.epic || v['EPIC No'] || '').trim().toUpperCase();
+        if (!voterEpic) continue;
 
-          const bid = v.booth_id !== undefined ? v.booth_id : v.boothId;
-          const mid = v.mandal_id !== undefined ? v.mandal_id : v.mandalId;
-          const cid = v.constituency_id !== undefined ? v.constituency_id : v.constituencyId;
-          const sid = v.state_id !== undefined ? v.state_id : v.stateId;
-          const did = v.district_id !== undefined ? v.district_id : v.districtId;
+        const name = v.name || v['Voter Name'] || 'Unnamed Voter';
+        const relationName = v.relation_name || v['Relative Name'] || v.relationName || '';
+        const relationType = v.relation_type || v['Relation'] || v.relationType || 'Father';
+        const gender = v.gender || v['Gender'] || 'Male';
+        const age = parseInt(v.age || v['Age']) || 18;
+        const mobile = v.mobile || v['Mobile'] || '';
+        const houseNo = v.house_no || v['House No'] || v.houseNo || '';
+        const wardName = v.ward_name || v['Ward Name'] || v.wardName || v.village || '';
+        const village = v.village || wardName || '';
+        const address = v.address || (houseNo ? `House No ${houseNo}, ${wardName}` : wardName);
+        const partNo = v.part_no || v['Part No'] || v.partNo || '';
+        const srNo = v.sr_no || v['Serial No'] || v.srNo || '';
+        const caste = v.caste || v['Caste'] || 'General';
+        const occupation = v.occupation || v['Occupation'] || 'Service';
+        const isKaryakarta = (v.is_karyakarta || v['Is Karyakarta'] || v.isKaryakarta) ? 1 : 0;
+        const votingStatus = v.voting_status || v['Voting Status'] || v.votingStatus || 'unvoted';
+        const partyInclination = v.party_inclination || v['Favored Party'] || v.partyInclination || 'Neutral';
+        const boothId = v.booth_id || v.boothId || null;
+        const constituencyId = v.constituency_id || v.constituencyId || null;
+        const stateId = v.state_id || v.stateId || null;
+        const districtId = v.district_id || v.districtId || null;
+        const mandalId = v.mandal_id || v.mandalId || null;
+        const panchayatId = v.panchayat_id || v.panchayatId || null;
+        const panchayatName = v.panchayat_name || v.panchayatName || null;
+        const wardId = v.ward_id || v.wardId || null;
 
-          const userId = (req as any).user?.uid || (req as any).user?.email || 'bulk_import';
-          const isKarya = (
-            v.is_karyakarta === 1 || 
-            v.is_karyakarta === '1' || 
-            v.is_karyakarta === true || 
-            v.is_karyakarta === 'true' || 
-            v.is_karyakarta === 'yes' || 
-            v.is_karyakarta === 'Yes' || 
-            v.isKaryakarta === 1 || 
-            v.isKaryakarta === true
-          ) ? 1 : 0;
-
-          const params = {
-            voter_id: epic,
-            name: v.name || 'Unnamed Voter',
-            relation_name: v.relation_name || v.relationName || '',
-            relation_type: v.relation_type || v.relationType || 'Father',
-            gender: v.gender || 'Male',
-            age: v.age ? parseInt(String(v.age), 10) : null,
-            part_no: v.part_no || v.partNo || '',
-            sr_no: v.sr_no || v.srNo || '',
-            mobile: v.mobile || '',
-            email: v.email || '',
-            address: v.address || '',
-            house_no: v.house_no || v.houseNo || '',
-            village: v.village || '',
-            caste: v.caste || '',
-            occupation: v.occupation || '',
-            is_karyakarta: isKarya,
-            voting_status: v.voting_status || (v.voted ? 'voted' : 'unvoted') || 'unvoted',
-            party_inclination: v.party_inclination || v.partyInclination || 'Neutral',
-            booth_id: bid ? (parseInt(String(bid), 10) || bid) : null,
-            mandal_id: mid ? (parseInt(String(mid), 10) || mid) : null,
-            constituency_id: cid ? (parseInt(String(cid), 10) || cid) : null,
-            state_id: sid ? (parseInt(String(sid), 10) || sid) : null,
-            district_id: did ? (parseInt(String(did), 10) || did) : null,
-            created_by: userId
-          };
-
-          const existing = await query(`SELECT id FROM dbo.voters WHERE voter_id = @voter_id`, { voter_id: epic });
-
-          if (existing.length > 0) {
-            if (mode === 'insert_only') {
-              skippedCount++;
-            } else {
-              // Upsert or Update Only
-              await execute(
-                `UPDATE dbo.voters SET
-                   name = COALESCE(NULLIF(@name, ''), name),
-                   relation_name = CASE WHEN @relation_name <> '' THEN @relation_name ELSE relation_name END,
-                   relation_type = COALESCE(NULLIF(@relation_type, ''), relation_type),
-                   gender = COALESCE(NULLIF(@gender, ''), gender),
-                   age = COALESCE(@age, age),
-                   part_no = CASE WHEN @part_no <> '' THEN @part_no ELSE part_no END,
-                   sr_no = CASE WHEN @sr_no <> '' THEN @sr_no ELSE sr_no END,
-                   mobile = CASE WHEN @mobile <> '' THEN @mobile ELSE mobile END,
-                   email = CASE WHEN @email <> '' THEN @email ELSE email END,
-                   address = CASE WHEN @address <> '' THEN @address ELSE address END,
-                   house_no = CASE WHEN @house_no <> '' THEN @house_no ELSE house_no END,
-                   village = CASE WHEN @village <> '' THEN @village ELSE village END,
-                   caste = CASE WHEN @caste <> '' THEN @caste ELSE caste END,
-                   occupation = CASE WHEN @occupation <> '' THEN @occupation ELSE occupation END,
-                   is_karyakarta = CASE WHEN @is_karyakarta IS NOT NULL THEN @is_karyakarta ELSE is_karyakarta END,
-                   voting_status = COALESCE(NULLIF(@voting_status, ''), voting_status),
-                   party_inclination = COALESCE(NULLIF(@party_inclination, ''), party_inclination),
-                   booth_id = COALESCE(@booth_id, booth_id),
-                   mandal_id = COALESCE(@mandal_id, mandal_id),
-                   constituency_id = COALESCE(@constituency_id, constituency_id),
-                   state_id = COALESCE(@state_id, state_id),
-                   district_id = COALESCE(@district_id, district_id),
-                   updated_at = SYSUTCDATETIME()
-                 WHERE voter_id = @voter_id`,
-                params
-              );
-              updatedCount++;
+        // Check if voter with this voter_id (EPIC) exists
+        const existingRows = await query<any>(`SELECT id FROM dbo.voters WHERE voter_id = @voterEpic`, { voterEpic });
+        const existing = existingRows && existingRows.length > 0 ? existingRows[0] : null;
+        if (existing && existing.id) {
+          await execute(
+            `UPDATE dbo.voters SET
+              name = COALESCE(@name, name),
+              relation_name = COALESCE(@relationName, relation_name),
+              relation_type = COALESCE(@relationType, relation_type),
+              gender = COALESCE(@gender, gender),
+              age = COALESCE(@age, age),
+              mobile = COALESCE(@mobile, mobile),
+              house_no = COALESCE(@houseNo, house_no),
+              village = COALESCE(@village, village),
+              ward_name = COALESCE(@wardName, ward_name),
+              ward_id = COALESCE(@wardId, ward_id),
+              panchayat_id = COALESCE(@panchayatId, panchayat_id),
+              panchayat_name = COALESCE(@panchayatName, panchayat_name),
+              mandal_id = COALESCE(@mandalId, mandal_id),
+              address = COALESCE(@address, address),
+              part_no = COALESCE(@partNo, part_no),
+              sr_no = COALESCE(@srNo, sr_no),
+              caste = COALESCE(@caste, caste),
+              occupation = COALESCE(@occupation, occupation),
+              is_karyakarta = COALESCE(@isKaryakarta, is_karyakarta),
+              voting_status = COALESCE(@votingStatus, voting_status),
+              party_inclination = COALESCE(@partyInclination, party_inclination),
+              booth_id = COALESCE(@boothId, booth_id),
+              constituency_id = COALESCE(@constituencyId, constituency_id),
+              state_id = COALESCE(@stateId, state_id),
+              district_id = COALESCE(@districtId, district_id)
+            WHERE id = @id`,
+            {
+              id: existing.id,
+              name,
+              relationName,
+              relationType,
+              gender,
+              age,
+              mobile,
+              houseNo,
+              village,
+              wardName,
+              wardId,
+              panchayatId,
+              panchayatName,
+              mandalId,
+              address,
+              partNo,
+              srNo,
+              caste,
+              occupation,
+              isKaryakarta,
+              votingStatus,
+              partyInclination,
+              boothId,
+              constituencyId,
+              stateId,
+              districtId
             }
-          } else {
-            if (mode === 'update_only') {
-              skippedCount++;
-            } else {
-              // Insert new voter
-              await execute(
-                `INSERT INTO dbo.voters (
-                   voter_id, name, relation_name, relation_type, gender, age, 
-                   part_no, sr_no, mobile, email, address, house_no, village, 
-                   caste, occupation, is_karyakarta, voting_status, party_inclination, 
-                   booth_id, mandal_id, constituency_id, state_id, district_id, created_by
-                 ) VALUES (
-                   @voter_id, @name, @relation_name, @relation_type, @gender, @age,
-                   @part_no, @sr_no, @mobile, @email, @address, @house_no, @village,
-                   @caste, @occupation, @is_karyakarta, @voting_status, @party_inclination,
-                   @booth_id, @mandal_id, @constituency_id, @state_id, @district_id, @created_by
-                 )`,
-                params
-              );
-              insertedCount++;
+          );
+          updated++;
+        } else {
+          await execute(
+            `INSERT INTO dbo.voters (
+              voter_id, name, relation_name, relation_type, gender, age, mobile, 
+              house_no, village, ward_name, ward_id, panchayat_id, panchayat_name, mandal_id,
+              address, part_no, sr_no, caste, occupation, 
+              is_karyakarta, voting_status, party_inclination, booth_id, constituency_id, state_id, district_id
+            ) VALUES (
+              @voterEpic, @name, @relationName, @relationType, @gender, @age, @mobile,
+              @houseNo, @village, @wardName, @wardId, @panchayatId, @panchayatName, @mandalId,
+              @address, @partNo, @srNo, @caste, @occupation,
+              @isKaryakarta, @votingStatus, @partyInclination, @boothId, @constituencyId, @stateId, @districtId
+            )`,
+            {
+              voterEpic,
+              name,
+              relationName,
+              relationType,
+              gender,
+              age,
+              mobile,
+              houseNo,
+              village,
+              wardName,
+              wardId,
+              panchayatId,
+              panchayatName,
+              mandalId,
+              address,
+              partNo,
+              srNo,
+              caste,
+              occupation,
+              isKaryakarta,
+              votingStatus,
+              partyInclination,
+              boothId,
+              constituencyId,
+              stateId,
+              districtId
             }
-          }
-        } catch (itemErr) {
-          console.warn('Skipped voter item due to error:', itemErr);
-          failedCount++;
+          );
+          inserted++;
         }
       }
 
-      res.json({ 
-        success: true, 
-        count: insertedCount + updatedCount, 
-        inserted: insertedCount, 
-        updated: updatedCount, 
-        skipped: skippedCount,
-        failed: failedCount 
+      res.json({ success: true, count: inserted + updated, inserted, updated, total: voterList.length });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Quick vital status update (e.g. mark Active / Deceased / Migrated)
+  app.put("/api/voters/:id/status", authenticateUser, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { vitalStatus, vital_status, deathDate, death_date, deathNotes, death_notes, newAddress, new_address } = req.body;
+      const idParam = String(id);
+      const vStatus = vitalStatus || vital_status || 'Active';
+      const dDate = deathDate || death_date || null;
+      const dNotes = deathNotes || death_notes || null;
+      const nAddress = newAddress || new_address || null;
+      const reqUserId = (req as any).user?.uid || (req as any).user?.email || 'admin';
+      const reqUserName = (req as any).user?.name || (req as any).user?.username || 'Staff';
+
+      await execute(
+        `UPDATE dbo.voters SET
+           vital_status = @vStatus,
+           death_date = @dDate,
+           death_notes = @dNotes,
+           new_address = COALESCE(@nAddress, new_address),
+           updated_at = SYSUTCDATETIME()
+         WHERE id = @idParam OR voter_id = @idParam`,
+        { idParam, vStatus, dDate, dNotes, nAddress }
+      );
+
+      await execute(
+        `IF EXISTS (SELECT 1 FROM dbo.voter_health_economy WHERE voter_doc_id = @idParam OR voter_epic = @idParam)
+         BEGIN
+           UPDATE dbo.voter_health_economy SET
+             vital_status = @vStatus,
+             death_date = @dDate,
+             death_notes = @dNotes,
+             recorded_by = @reqUserId,
+             recorded_by_name = @reqUserName,
+             updated_at = SYSUTCDATETIME()
+           WHERE voter_doc_id = @idParam OR voter_epic = @idParam
+         END
+         ELSE
+         BEGIN
+           INSERT INTO dbo.voter_health_economy (
+             voter_doc_id, voter_epic, vital_status, death_date, death_notes, recorded_by, recorded_by_name
+           ) VALUES (
+             @idParam, @idParam, @vStatus, @dDate, @dNotes, @reqUserId, @reqUserName
+           )
+         END`,
+        { idParam, vStatus, dDate, dNotes, reqUserId, reqUserName }
+      );
+
+      res.json({ success: true, id: idParam, vitalStatus: vStatus, message: `Status updated to ${vStatus}` });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Get multi-admin assessments for a voter
+  app.get("/api/voters/:id/assessments", optionalAuth, async (req, res) => {
+    try {
+      const voterDocId = String(req.params.id);
+      const assessments = await query(
+        `SELECT 
+           va.*,
+           COALESCE(u.name, 'Admin (' + va.admin_id + ')') AS admin_name,
+           u.email AS admin_email,
+           u.role AS admin_role,
+           COALESCE(va.recorded_by_name, rec.name, 'Staff') AS recorded_by_display_name,
+           rec.email AS recorded_by_email,
+           rec.role AS recorded_by_role
+         FROM dbo.voter_assessments va
+         LEFT JOIN dbo.users u ON CAST(va.admin_id AS NVARCHAR(64)) = CAST(u.id AS NVARCHAR(64))
+         LEFT JOIN dbo.users rec ON CAST(va.recorded_by AS NVARCHAR(64)) = CAST(rec.id AS NVARCHAR(64))
+         WHERE va.voter_id = @voterDocId 
+            OR va.voter_epic = @voterDocId
+            OR va.id LIKE @likeDocId
+         ORDER BY va.updated_at DESC`,
+        { voterDocId, likeDocId: `%_${voterDocId}` }
+      );
+      res.json(assessments);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Get all multi-admin assessments
+  app.get("/api/voter-assessments", optionalAuth, async (req, res) => {
+    try {
+      const assessments = await query(
+        `SELECT 
+           va.*,
+           COALESCE(u.name, 'Admin (' + va.admin_id + ')') AS admin_name,
+           u.email AS admin_email,
+           u.role AS admin_role,
+           v.voter_id AS voter_epic,
+           COALESCE(v.name, va.voter_name) AS voter_full_name,
+           v.gender AS voter_gender,
+           v.age AS voter_age,
+           v.mobile AS voter_mobile,
+           v.village AS voter_village,
+           v.house_no AS voter_house_no,
+           v.booth_id AS voter_booth_id,
+           b.name AS booth_name,
+           b.booth_number,
+           v.constituency_id AS voter_constituency_id,
+           c.name AS constituency_name
+         FROM dbo.voter_assessments va
+         LEFT JOIN dbo.users u ON CAST(va.admin_id AS NVARCHAR(64)) = CAST(u.id AS NVARCHAR(64))
+         LEFT JOIN dbo.voters v ON (CAST(va.voter_id AS NVARCHAR(64)) = CAST(v.id AS NVARCHAR(64)) OR va.voter_id = v.voter_id)
+         LEFT JOIN dbo.booths b ON CAST(v.booth_id AS NVARCHAR(64)) = CAST(b.id AS NVARCHAR(64))
+         LEFT JOIN dbo.constituencies c ON (CAST(v.constituency_id AS NVARCHAR(64)) = CAST(c.id AS NVARCHAR(64)) OR CAST(b.constituency_id AS NVARCHAR(64)) = CAST(c.id AS NVARCHAR(64)))
+         ORDER BY va.updated_at DESC`
+      );
+      res.json(assessments);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // ============================================================================
+  // Broadcast Feed Links & WhatsApp Extension Feed
+  // ============================================================================
+  const inMemoryBroadcastLinks = new Map<string, any>();
+
+  async function ensureBroadcastTable() {
+    try {
+      await execute(`
+        IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'broadcast_feed_links')
+        BEGIN
+          CREATE TABLE dbo.broadcast_feed_links (
+            id NVARCHAR(64) PRIMARY KEY,
+            token NVARCHAR(128) NOT NULL UNIQUE,
+            title NVARCHAR(255) NOT NULL,
+            filter_criteria NVARCHAR(MAX) NOT NULL,
+            columns NVARCHAR(MAX) NOT NULL,
+            expiry_hours INT DEFAULT 24,
+            expires_at DATETIME2 NULL,
+            created_by NVARCHAR(128) NULL,
+            created_at DATETIME2 DEFAULT SYSUTCDATETIME()
+          );
+        END
+      `);
+    } catch (e) {
+      console.warn('Note on broadcast_feed_links table check:', e);
+    }
+  }
+
+  // Create new Broadcast Feed Link
+  app.post("/api/broadcast-links", authenticateUser, async (req, res) => {
+    try {
+      await ensureBroadcastTable();
+      const { title, filterCriteria, columns, expiryHours = 24 } = req.body;
+      const user = (req as any).user;
+      const createdBy = user?.uid || user?.email || 'admin';
+      const id = `bfl_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
+      const token = `wa_${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 8)}`;
+      
+      const expHoursNum = parseInt(String(expiryHours), 10);
+      let expiresAt: Date | null = null;
+      if (expHoursNum > 0) {
+        expiresAt = new Date(Date.now() + expHoursNum * 3600000);
+      }
+
+      const linkRecord = {
+        id,
+        token,
+        title: title || 'WhatsApp Voter Broadcast',
+        filter_criteria: typeof filterCriteria === 'string' ? filterCriteria : JSON.stringify(filterCriteria || {}),
+        columns: typeof columns === 'string' ? columns : JSON.stringify(columns || ['phone', 'name', 'relation_name', 'relation_type', 'epic_no', 'house_no', 'ward_name']),
+        expiry_hours: expHoursNum,
+        expires_at: expiresAt ? expiresAt.toISOString() : null,
+        created_by: createdBy,
+        created_at: new Date().toISOString()
+      };
+
+      inMemoryBroadcastLinks.set(token, linkRecord);
+      inMemoryBroadcastLinks.set(id, linkRecord);
+
+      try {
+        await execute(
+          `INSERT INTO dbo.broadcast_feed_links (id, token, title, filter_criteria, columns, expiry_hours, expires_at, created_by, created_at)
+           VALUES (@id, @token, @title, @filter_criteria, @columns, @expiry_hours, @expires_at, @created_by, SYSUTCDATETIME())`,
+          {
+            id,
+            token,
+            title: linkRecord.title,
+            filter_criteria: linkRecord.filter_criteria,
+            columns: linkRecord.columns,
+            expiry_hours: linkRecord.expiry_hours,
+            expires_at: expiresAt,
+            created_by: linkRecord.created_by
+          }
+        );
+      } catch (dbErr) {
+        console.warn('DB insert fallback for broadcast link:', dbErr);
+      }
+
+      res.json({
+        success: true,
+        id,
+        token,
+        title: linkRecord.title,
+        expiresAt: linkRecord.expires_at,
+        url: `/broadcast-feed/${token}`
+      });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Get active broadcast links for user
+  app.get("/api/broadcast-links", authenticateUser, async (req, res) => {
+    try {
+      await ensureBroadcastTable();
+      let links: any[] = [];
+      try {
+        links = await query(
+          `SELECT * FROM dbo.broadcast_feed_links ORDER BY created_at DESC`
+        );
+      } catch (err) {
+        links = Array.from(inMemoryBroadcastLinks.values()).filter((v, i, a) => a.findIndex(t => t.id === v.id) === i);
+      }
+
+      const activeLinks = links.map(l => {
+        const isExpired = l.expires_at ? new Date(l.expires_at).getTime() < Date.now() : false;
+        return {
+          id: l.id,
+          token: l.token,
+          title: l.title,
+          filterCriteria: typeof l.filter_criteria === 'string' ? JSON.parse(l.filter_criteria || '{}') : l.filter_criteria,
+          columns: typeof l.columns === 'string' ? JSON.parse(l.columns || '[]') : l.columns,
+          expiryHours: l.expiry_hours,
+          expiresAt: l.expires_at,
+          isExpired,
+          createdAt: l.created_at,
+          createdBy: l.created_by
+        };
+      });
+
+      res.json(activeLinks);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Revoke/Delete broadcast link
+  app.delete("/api/broadcast-links/:idOrToken", authenticateUser, async (req, res) => {
+    try {
+      const { idOrToken } = req.params;
+      inMemoryBroadcastLinks.delete(idOrToken);
+      try {
+        await execute(
+          `DELETE FROM dbo.broadcast_feed_links WHERE id = @idOrToken OR token = @idOrToken`,
+          { idOrToken }
+        );
+      } catch (err) {}
+      res.json({ success: true, message: 'Broadcast link revoked successfully.' });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Resolve Public Broadcast Feed for Extension / Webpage
+  app.get("/api/broadcast-feed/:token", optionalAuth, async (req, res) => {
+    try {
+      const { token } = req.params;
+      let link: any = inMemoryBroadcastLinks.get(token);
+
+      if (!link) {
+        await ensureBroadcastTable();
+        try {
+          const rows = await query<any>(
+            `SELECT * FROM dbo.broadcast_feed_links WHERE token = @token`,
+            { token }
+          );
+          if (rows && rows.length > 0) link = rows[0];
+        } catch (err) {}
+      }
+
+      if (!link) {
+        return res.status(404).json({ error: 'Broadcast feed link not found or invalid token.' });
+      }
+
+      if (link.expires_at && new Date(link.expires_at).getTime() < Date.now()) {
+        return res.status(410).json({ error: 'This broadcast link has expired.' });
+      }
+
+      const filters = typeof link.filter_criteria === 'string' ? JSON.parse(link.filter_criteria || '{}') : (link.filter_criteria || {});
+      const selectedColumns: string[] = typeof link.columns === 'string' ? JSON.parse(link.columns || '[]') : (link.columns || []);
+
+      // Build WHERE conditions matching the filter criteria
+      const whereConditions: string[] = ["v.mobile IS NOT NULL AND LEN(TRIM(v.mobile)) >= 8"];
+      const params: Record<string, any> = {};
+
+      if (filters.stateIds && filters.stateIds.length > 0) {
+        const clause = buildSafeInClause(filters.stateIds.join(','), 'bf_st', ['v.state_id', 'b.state_id', 'c.state_id'], params);
+        if (clause) whereConditions.push(clause);
+      }
+      if (filters.districtIds && filters.districtIds.length > 0) {
+        const clause = buildSafeInClause(filters.districtIds.join(','), 'bf_dt', ['v.district_id', 'b.district_id', 'c.district_id'], params);
+        if (clause) whereConditions.push(clause);
+      }
+      if (filters.constituencyIds && filters.constituencyIds.length > 0) {
+        const clause = buildSafeInClause(filters.constituencyIds.join(','), 'bf_cn', ['v.constituency_id', 'b.constituency_id', 'm.constituency_id'], params);
+        if (clause) whereConditions.push(clause);
+      }
+      if (filters.mandalIds && filters.mandalIds.length > 0) {
+        const clause = buildSafeInClause(filters.mandalIds.join(','), 'bf_mn', ['v.mandal_id', 'b.mandal_id'], params);
+        if (clause) whereConditions.push(clause);
+      }
+      if (filters.panchayatIds && filters.panchayatIds.length > 0) {
+        const clause = buildSafeInClause(filters.panchayatIds.join(','), 'bf_pn', ['v.panchayat_id', 'b.panchayat_id'], params);
+        if (clause) whereConditions.push(clause);
+      }
+      if (filters.wardIds && filters.wardIds.length > 0) {
+        const clause = buildSafeInClause(filters.wardIds.join(','), 'bf_wd', ['v.ward_id', 'b.ward_id'], params);
+        if (clause) whereConditions.push(clause);
+      }
+      if (filters.boothIds && filters.boothIds.length > 0) {
+        const clause = buildSafeInClause(filters.boothIds.join(','), 'bf_bt', ['v.booth_id'], params);
+        if (clause) whereConditions.push(clause);
+      }
+
+      if (filters.gender && filters.gender !== 'all') {
+        whereConditions.push("LOWER(v.gender) = LOWER(@bf_gender)");
+        params.bf_gender = filters.gender;
+      }
+      if (filters.caste && filters.caste !== 'all') {
+        whereConditions.push("LOWER(v.caste) = LOWER(@bf_caste)");
+        params.bf_caste = filters.caste;
+      }
+      if (filters.vitalStatus && filters.vitalStatus !== 'all') {
+        whereConditions.push("LOWER(COALESCE(v.vital_status, 'active')) = LOWER(@bf_vital)");
+        params.bf_vital = filters.vitalStatus;
+      }
+      if (filters.sentiment && filters.sentiment !== 'all') {
+        whereConditions.push("LOWER(COALESCE(v.party_inclination, 'neutral')) = LOWER(@bf_sentiment)");
+        params.bf_sentiment = filters.sentiment;
+      }
+      if (filters.isKaryakarta && filters.isKaryakarta !== 'all') {
+        whereConditions.push(filters.isKaryakarta === 'yes' ? "v.is_karyakarta = 1" : "(v.is_karyakarta = 0 OR v.is_karyakarta IS NULL)");
+      }
+      if (filters.search && String(filters.search).trim()) {
+        whereConditions.push("(v.name LIKE @bf_search OR v.voter_id LIKE @bf_search OR v.mobile LIKE @bf_search OR v.house_no LIKE @bf_search OR v.village LIKE @bf_search)");
+        params.bf_search = `%${String(filters.search).trim()}%`;
+      }
+
+      const whereSql = whereConditions.join(" AND ");
+
+      const voters = await query<any>(`
+        SELECT 
+          v.id,
+          v.voter_id,
+          v.name,
+          v.relation_name,
+          v.relation_type,
+          v.gender,
+          v.age,
+          v.mobile,
+          v.additional_mobile,
+          v.house_no,
+          COALESCE(v.ward_name, v.village) AS ward_name,
+          v.village,
+          v.address,
+          v.part_no,
+          v.sr_no,
+          v.caste,
+          v.occupation,
+          v.voting_status,
+          v.party_inclination,
+          v.is_karyakarta,
+          b.name AS booth_name,
+          b.booth_number,
+          c.name AS constituency_name
+        FROM dbo.voters v
+        LEFT JOIN dbo.booths b ON v.booth_id = b.id
+        LEFT JOIN dbo.wards w ON v.ward_id = w.id OR b.ward_id = w.id
+        LEFT JOIN dbo.panchayats p ON v.panchayat_id = p.id OR b.panchayat_id = p.id OR w.panchayat_id = p.id
+        LEFT JOIN dbo.mandals m ON v.mandal_id = m.id OR b.mandal_id = m.id OR p.mandal_id = m.id
+        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id OR b.constituency_id = c.id OR m.constituency_id = c.id
+        LEFT JOIN dbo.districts d ON v.district_id = d.id OR c.district_id = d.id
+        LEFT JOIN dbo.states s ON v.state_id = s.id OR c.state_id = s.id OR d.state_id = s.id
+        WHERE ${whereSql}
+        ORDER BY v.name ASC
+      `, params);
+
+      // Clean, format, and structure records specifically for WhatsApp extension automation
+      const recipients = voters.map(v => {
+        let cleanPhone = String(v.mobile || '').replace(/\D/g, '');
+        if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
+        else if (cleanPhone.length > 10 && cleanPhone.startsWith('0')) cleanPhone = `91${cleanPhone.substring(1)}`;
+
+        return {
+          phone: cleanPhone,
+          name: v.name || '',
+          relation_name: v.relation_name || '',
+          relation_type: v.relation_type || 'Father',
+          epic_no: v.voter_id || '',
+          house_no: v.house_no || '',
+          ward_name: v.ward_name || v.village || '',
+          booth_name: v.booth_name ? `${v.booth_number ? `#${v.booth_number} ` : ''}${v.booth_name}` : '',
+          age: v.age || '',
+          gender: v.gender || '',
+          caste: v.caste || '',
+          part_no: v.part_no || '',
+          sr_no: v.sr_no || '',
+          occupation: v.occupation || '',
+          voting_status: v.voting_status || 'unvoted',
+          party_inclination: v.party_inclination || 'Neutral',
+          is_karyakarta: v.is_karyakarta === 1 ? 'Yes' : 'No'
+        };
+      }).filter(r => r.phone && r.phone.length >= 10);
+
+      res.json({
+        success: true,
+        title: link.title,
+        token,
+        totalCount: recipients.length,
+        columns: selectedColumns.length > 0 ? selectedColumns : ['phone', 'name', 'relation_name', 'relation_type', 'epic_no', 'house_no', 'ward_name'],
+        expiresAt: link.expires_at,
+        createdAt: link.created_at,
+        recipients
       });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -2708,37 +4503,233 @@ async function startServer() {
       const { id } = req.params;
       const v = req.body;
       const idParam = String(id);
+      const reqUserId = (req as any).user?.uid || (req as any).user?.email || 'admin';
+      const reqUserName = (req as any).user?.name || (req as any).user?.username || 'Staff';
+
       await execute(
         `UPDATE dbo.voters 
          SET name = COALESCE(@name, name),
              relation_name = COALESCE(@relation_name, relation_name),
+             relation_type = COALESCE(@relation_type, relation_type),
+             aadhar_number = COALESCE(@aadhar_number, aadhar_number),
              gender = COALESCE(@gender, gender),
              age = COALESCE(@age, age),
+             dob = COALESCE(@dob, dob),
              mobile = COALESCE(@mobile, mobile),
+             additional_mobile = COALESCE(@additional_mobile, additional_mobile),
+             email = COALESCE(@email, email),
+             address = COALESCE(@address, address),
+             new_address = COALESCE(@new_address, new_address),
              house_no = COALESCE(@house_no, house_no),
+             village = COALESCE(@village, village),
              caste = COALESCE(@caste, caste),
+             occupation = COALESCE(@occupation, occupation),
+             education = COALESCE(@education, education),
              is_karyakarta = COALESCE(@is_karyakarta, is_karyakarta),
              voting_status = COALESCE(@voting_status, voting_status),
              party_inclination = COALESCE(@party_inclination, party_inclination),
              booth_id = COALESCE(@booth_id, booth_id),
-             mandal_id = COALESCE(@mandal_id, mandal_id)
+             ward_id = COALESCE(@ward_id, ward_id),
+             ward_name = COALESCE(@ward_name, ward_name),
+             panchayat_id = COALESCE(@panchayat_id, panchayat_id),
+             panchayat_name = COALESCE(@panchayat_name, panchayat_name),
+             mandal_id = COALESCE(@mandal_id, mandal_id),
+             constituency_id = COALESCE(@constituency_id, constituency_id),
+             vital_status = COALESCE(@vital_status, vital_status),
+             death_date = COALESCE(@death_date, death_date),
+             death_notes = COALESCE(@death_notes, death_notes),
+             physical_profile = COALESCE(@physical_profile, physical_profile),
+             disability_category = COALESCE(@disability_category, disability_category),
+             disability_percent = COALESCE(@disability_percent, disability_percent),
+             eci_assistance_needed = COALESCE(@eci_assistance_needed, eci_assistance_needed),
+             economic_category = COALESCE(@economic_category, economic_category),
+             income_range = COALESCE(@income_range, income_range),
+             land_ownership = COALESCE(@land_ownership, land_ownership),
+             ration_card_type = COALESCE(@ration_card_type, ration_card_type),
+             ration_card_no = COALESCE(@ration_card_no, ration_card_no),
+             housing_type = COALESCE(@housing_type, housing_type),
+             updated_at = SYSUTCDATETIME()
          WHERE voter_id = @idParam OR CAST(id AS VARCHAR(64)) = @idParam`,
         {
           idParam,
           name: v.name,
           relation_name: v.relation_name || v.relationName,
+          relation_type: v.relation_type || v.relationType,
+          aadhar_number: v.aadhar_number || v.aadharNumber || null,
           gender: v.gender,
           age: v.age !== undefined && v.age !== null && v.age !== '' ? parseInt(String(v.age), 10) : null,
+          dob: v.dob || null,
           mobile: v.mobile,
+          additional_mobile: v.additional_mobile || v.additionalMobile || null,
+          email: v.email,
+          address: v.address,
+          new_address: v.new_address || v.newAddress || null,
           house_no: v.house_no || v.houseNo,
+          village: v.village,
           caste: v.caste,
+          occupation: v.occupation,
+          education: v.education || null,
           is_karyakarta: v.is_karyakarta !== undefined ? (v.is_karyakarta ? 1 : 0) : (v.isKaryakarta !== undefined ? (v.isKaryakarta ? 1 : 0) : null),
           voting_status: v.voting_status || (v.voted !== undefined ? (v.voted ? 'voted' : 'unvoted') : null),
           party_inclination: v.party_inclination || v.partyInclination,
           booth_id: v.booth_id ? String(v.booth_id) : (v.boothId ? String(v.boothId) : null),
-          mandal_id: v.mandal_id ? String(v.mandal_id) : (v.mandalId ? String(v.mandalId) : null)
+          ward_id: v.ward_id ? String(v.ward_id) : (v.wardId ? String(v.wardId) : null),
+          ward_name: v.ward_name || v.wardName || null,
+          panchayat_id: v.panchayat_id ? String(v.panchayat_id) : (v.panchayatId ? String(v.panchayatId) : null),
+          panchayat_name: v.panchayat_name || v.panchayatName || null,
+          mandal_id: v.mandal_id ? String(v.mandal_id) : (v.mandalId ? String(v.mandalId) : null),
+          constituency_id: v.constituency_id ? String(v.constituency_id) : (v.constituencyId ? String(v.constituencyId) : null),
+          vital_status: v.vital_status || v.vitalStatus || null,
+          death_date: v.death_date || v.deathDate || null,
+          death_notes: v.death_notes || v.deathNotes || null,
+          physical_profile: v.physical_profile || v.physicalProfile || null,
+          disability_category: v.disability_category || v.disabilityCategory || null,
+          disability_percent: v.disability_percent !== undefined ? Number(v.disability_percent) : (v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : null),
+          eci_assistance_needed: v.eci_assistance_needed !== undefined ? (v.eci_assistance_needed ? 1 : 0) : (v.eciAssistanceNeeded !== undefined ? (v.eciAssistanceNeeded ? 1 : 0) : null),
+          economic_category: v.economic_category || v.economicCategory || null,
+          income_range: v.income_range || v.incomeRange || null,
+          land_ownership: v.land_ownership || v.landOwnership || null,
+          ration_card_type: v.ration_card_type || v.rationCardType || null,
+          ration_card_no: v.ration_card_no || v.rationCardNo || null,
+          housing_type: v.housing_type || v.housingType || null
         }
       );
+
+      // Upsert into dedicated dbo.voter_health_economy table
+      const voterEpicVal = v.voter_id || v.voterId || idParam;
+      const aadharVal = v.aadhar_number || v.aadharNumber || null;
+      await execute(
+        `IF EXISTS (SELECT 1 FROM dbo.voter_health_economy WHERE voter_doc_id = @idParam OR voter_epic = @voterEpicVal)
+         BEGIN
+           UPDATE dbo.voter_health_economy SET
+             voter_epic = @voterEpicVal,
+             aadhar_number = COALESCE(@aadharVal, aadhar_number),
+             vital_status = COALESCE(@vital_status, vital_status),
+             death_date = COALESCE(@death_date, death_date),
+             death_notes = COALESCE(@death_notes, death_notes),
+             physical_profile = COALESCE(@physical_profile, physical_profile),
+             disability_category = COALESCE(@disability_category, disability_category),
+             disability_percent = COALESCE(@disability_percent, disability_percent),
+             eci_assistance_needed = COALESCE(@eci_assistance_needed, eci_assistance_needed),
+             economic_category = COALESCE(@economic_category, economic_category),
+             income_range = COALESCE(@income_range, income_range),
+             land_ownership = COALESCE(@land_ownership, land_ownership),
+             ration_card_type = COALESCE(@ration_card_type, ration_card_type),
+             ration_card_no = COALESCE(@ration_card_no, ration_card_no),
+             housing_type = COALESCE(@housing_type, housing_type),
+             recorded_by = @reqUserId,
+             recorded_by_name = @reqUserName,
+             updated_at = SYSUTCDATETIME()
+           WHERE voter_doc_id = @idParam OR voter_epic = @voterEpicVal
+         END
+         ELSE
+         BEGIN
+           INSERT INTO dbo.voter_health_economy (
+             voter_doc_id, voter_epic, aadhar_number, vital_status, death_date, death_notes,
+             physical_profile, disability_category, disability_percent, eci_assistance_needed,
+             economic_category, income_range, land_ownership, ration_card_type, ration_card_no, housing_type,
+             recorded_by, recorded_by_name
+           ) VALUES (
+             @idParam, @voterEpicVal, @aadharVal, @vital_status, @death_date, @death_notes,
+             @physical_profile, @disability_category, @disability_percent, @eci_assistance_needed,
+             @economic_category, @income_range, @land_ownership, @ration_card_type, @ration_card_no, @housing_type,
+             @reqUserId, @reqUserName
+           )
+         END`,
+        {
+          idParam,
+          voterEpicVal,
+          aadharVal,
+          vital_status: v.vital_status || v.vitalStatus || 'Active',
+          death_date: v.death_date || v.deathDate || null,
+          death_notes: v.death_notes || v.deathNotes || null,
+          physical_profile: v.physical_profile || v.physicalProfile || 'General',
+          disability_category: v.disability_category || v.disabilityCategory || 'None',
+          disability_percent: v.disability_percent !== undefined ? Number(v.disability_percent) : (v.disabilityPercent !== undefined ? Number(v.disabilityPercent) : 0),
+          eci_assistance_needed: v.eci_assistance_needed !== undefined ? (v.eci_assistance_needed ? 1 : 0) : (v.eciAssistanceNeeded !== undefined ? (v.eciAssistanceNeeded ? 1 : 0) : 0),
+          economic_category: v.economic_category || v.economicCategory || 'APL',
+          income_range: v.income_range || v.incomeRange || '₹15,000 - ₹30,000',
+          land_ownership: v.land_ownership || v.landOwnership || 'Small Farmer',
+          ration_card_type: v.ration_card_type || v.rationCardType || null,
+          ration_card_no: v.ration_card_no || v.rationCardNo || null,
+          housing_type: v.housing_type || v.housingType || null,
+          reqUserId,
+          reqUserName
+        }
+      );
+
+      // If assessment / sentiment fields are present, upsert into dbo.voter_assessments
+      if (v.adminId || v.sentiment || v.sentimentScore !== undefined || v.notes) {
+        const targetAdmin = String(v.adminId || v.admin_id || reqUserId);
+        const assessmentId = `${targetAdmin}_${idParam}`;
+        await execute(
+          `IF EXISTS (SELECT 1 FROM dbo.voter_assessments WHERE id = @assessmentId)
+           BEGIN
+             UPDATE dbo.voter_assessments SET
+               vital_status = COALESCE(@vital_status, vital_status),
+               physical_profile = COALESCE(@physical_profile, physical_profile),
+               disability_category = COALESCE(@disability_category, disability_category),
+               eci_assistance_needed = COALESCE(@eci_assistance_needed, eci_assistance_needed),
+               economic_category = COALESCE(@economic_category, economic_category),
+               income_range = COALESCE(@income_range, income_range),
+               land_ownership = COALESCE(@land_ownership, land_ownership),
+               education = COALESCE(@education, education),
+               sentiment_score = COALESCE(@sentiment_score, sentiment_score),
+               sentiment = COALESCE(@sentiment, sentiment),
+               favored_party_id = COALESCE(@favored_party_id, favored_party_id),
+               favored_party_name = COALESCE(@favored_party_name, favored_party_name),
+               notes = COALESCE(@notes, notes),
+               is_karyakarta = COALESCE(@is_karyakarta, is_karyakarta),
+               voted = COALESCE(@voted, voted),
+               recorded_by = @reqUserId,
+               recorded_by_name = @reqUserName,
+               updated_at = SYSUTCDATETIME()
+             WHERE id = @assessmentId
+           END
+           ELSE
+           BEGIN
+             INSERT INTO dbo.voter_assessments (
+               id, admin_id, voter_id, voter_epic, aadhar_number, voter_name,
+               vital_status, physical_profile, disability_category, eci_assistance_needed,
+               economic_category, income_range, land_ownership, education,
+               sentiment_score, sentiment, favored_party_id, favored_party_name, notes,
+               is_karyakarta, voted, recorded_by, recorded_by_name
+             ) VALUES (
+               @assessmentId, @targetAdmin, @idParam, @voterEpicVal, @aadharVal, @name,
+               @vital_status, @physical_profile, @disability_category, @eci_assistance_needed,
+               @economic_category, @income_range, @land_ownership, @education,
+               @sentiment_score, @sentiment, @favored_party_id, @favored_party_name, @notes,
+               @is_karyakarta, @voted, @reqUserId, @reqUserName
+             )
+           END`,
+          {
+            assessmentId,
+            targetAdmin,
+            idParam,
+            voterEpicVal,
+            aadharVal,
+            name: v.name || '',
+            vital_status: v.vital_status || v.vitalStatus || 'Active',
+            physical_profile: v.physical_profile || v.physicalProfile || 'General',
+            disability_category: v.disability_category || v.disabilityCategory || 'None',
+            eci_assistance_needed: v.eci_assistance_needed !== undefined ? (v.eci_assistance_needed ? 1 : 0) : 0,
+            economic_category: v.economic_category || v.economicCategory || 'APL',
+            income_range: v.income_range || v.incomeRange || '₹15,000 - ₹30,000',
+            land_ownership: v.land_ownership || v.landOwnership || 'Small Farmer',
+            education: v.education || 'Unspecified',
+            sentiment_score: v.sentimentScore !== undefined ? Number(v.sentimentScore) : 3.0,
+            sentiment: v.sentiment || v.party_inclination || v.partyInclination || 'Neutral',
+            favored_party_id: v.favoredPartyId || v.favored_party_id || null,
+            favored_party_name: v.favoredPartyName || v.favored_party_name || null,
+            notes: v.notes !== undefined ? v.notes : null,
+            is_karyakarta: v.isKaryakarta !== undefined ? (v.isKaryakarta ? 1 : 0) : (v.is_karyakarta ? 1 : 0),
+            voted: v.voted !== undefined ? (v.voted ? 1 : 0) : (v.voting_status === 'voted' ? 1 : 0),
+            reqUserId,
+            reqUserName
+          }
+        ).catch(e => console.warn('Note on assessment update:', e));
+      }
+
       res.json({ success: true, message: 'Voter updated' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -2750,11 +4741,15 @@ async function startServer() {
       const voterIdParam = String(req.params.id);
       const isNum = !isNaN(Number(voterIdParam)) && /^\d+$/.test(voterIdParam);
       if (isNum) {
+        await execute(`DELETE FROM dbo.voter_health_economy WHERE voter_doc_id = @voterId OR voter_epic IN (SELECT voter_id FROM dbo.voters WHERE id = @numId)`, { voterId: voterIdParam, numId: Number(voterIdParam) });
+        await execute(`DELETE FROM dbo.voter_assessments WHERE voter_id = @voterId OR voter_epic IN (SELECT voter_id FROM dbo.voters WHERE id = @numId)`, { voterId: voterIdParam, numId: Number(voterIdParam) });
         await execute(`DELETE FROM dbo.voter_sentiments WHERE voter_id = @voterId OR voter_id IN (SELECT voter_id FROM dbo.voters WHERE id = @numId)`, { voterId: voterIdParam, numId: Number(voterIdParam) });
         await execute(`DELETE FROM dbo.benefits WHERE voter_doc_id = @voterId OR voter_id = @voterId`, { voterId: voterIdParam });
         await execute(`DELETE FROM dbo.volunteers WHERE voter_doc_id = @voterId OR voter_id = @voterId`, { voterId: voterIdParam });
         await execute(`DELETE FROM dbo.voters WHERE id = @numId`, { numId: Number(voterIdParam) });
       } else {
+        await execute(`DELETE FROM dbo.voter_health_economy WHERE voter_doc_id = @voterId OR voter_epic = @voterId`, { voterId: voterIdParam });
+        await execute(`DELETE FROM dbo.voter_assessments WHERE voter_id = @voterId OR voter_epic = @voterId`, { voterId: voterIdParam });
         await execute(`DELETE FROM dbo.voter_sentiments WHERE voter_id = @voterId`, { voterId: voterIdParam });
         await execute(`DELETE FROM dbo.benefits WHERE voter_id = @voterId`, { voterId: voterIdParam });
         await execute(`DELETE FROM dbo.volunteers WHERE voter_id = @voterId`, { voterId: voterIdParam });
@@ -4520,6 +6515,12 @@ async function startServer() {
           COALESCE(v.gender, 'Male') AS voter_gender,
           COALESCE(v.age, 35) AS voter_age,
           COALESCE(v.caste, '') AS voter_caste,
+          v.voter_id AS voter_epic,
+          v.mobile AS voter_mobile,
+          v.email AS voter_email,
+          v.village AS voter_village,
+          v.guardian_name AS voter_guardian_name,
+          v.house_no AS voter_house_no,
           COALESCE(s.booth_id, CAST(v.booth_id AS VARCHAR(64))) AS effective_booth_id,
           COALESCE(s.constituency_id, CAST(v.constituency_id AS VARCHAR(64))) AS effective_constituency_id,
           COALESCE(s.district_id, CAST(v.district_id AS VARCHAR(64))) AS effective_district_id,
@@ -4812,7 +6813,9 @@ async function startServer() {
 
   app.delete("/api/voter-sentiments/:id", authenticateUser, async (req, res) => {
     try {
-      await execute(`DELETE FROM dbo.voter_sentiments WHERE id = @id`, { id: req.params.id });
+      const id = req.params.id;
+      await execute(`DELETE FROM dbo.voter_sentiments WHERE id = @id OR voter_id = @id`, { id }).catch(() => {});
+      await execute(`DELETE FROM dbo.voter_assessments WHERE id = @id OR voter_id = @id`, { id }).catch(() => {});
       res.json({ success: true });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -4910,13 +6913,134 @@ async function startServer() {
         ALTER TABLE dbo.constituencies ADD category VARCHAR(50) DEFAULT 'General';
       END
     `);
+    await ensureDemographicAndHealthSchema();
   } catch (migErr) {
-    console.warn('[Migration] Note on category column check:', migErr);
+    console.warn('[Migration] Note on startup migration check:', migErr);
   }
 
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+}
+
+async function ensureDemographicAndHealthSchema() {
+  try {
+    // 1. Ensure columns on dbo.voters
+    await execute(`
+      IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL
+      BEGIN
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'aadhar_number')
+          ALTER TABLE dbo.voters ADD aadhar_number NVARCHAR(64) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'dob')
+          ALTER TABLE dbo.voters ADD dob NVARCHAR(32) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'education')
+          ALTER TABLE dbo.voters ADD education NVARCHAR(100) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'additional_mobile')
+          ALTER TABLE dbo.voters ADD additional_mobile NVARCHAR(64) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'new_address')
+          ALTER TABLE dbo.voters ADD new_address NVARCHAR(500) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'vital_status')
+          ALTER TABLE dbo.voters ADD vital_status NVARCHAR(50) DEFAULT 'Active';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'death_date')
+          ALTER TABLE dbo.voters ADD death_date NVARCHAR(32) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'death_notes')
+          ALTER TABLE dbo.voters ADD death_notes NVARCHAR(MAX) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'physical_profile')
+          ALTER TABLE dbo.voters ADD physical_profile NVARCHAR(100) DEFAULT 'General';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'disability_category')
+          ALTER TABLE dbo.voters ADD disability_category NVARCHAR(100) DEFAULT 'None';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'disability_percent')
+          ALTER TABLE dbo.voters ADD disability_percent INT DEFAULT 0;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'eci_assistance_needed')
+          ALTER TABLE dbo.voters ADD eci_assistance_needed BIT DEFAULT 0;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'economic_category')
+          ALTER TABLE dbo.voters ADD economic_category NVARCHAR(50) DEFAULT 'APL';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'income_range')
+          ALTER TABLE dbo.voters ADD income_range NVARCHAR(100) DEFAULT '₹15,000 - ₹30,000';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'land_ownership')
+          ALTER TABLE dbo.voters ADD land_ownership NVARCHAR(100) DEFAULT 'Small Farmer';
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'ration_card_type')
+          ALTER TABLE dbo.voters ADD ration_card_type NVARCHAR(50) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'ration_card_no')
+          ALTER TABLE dbo.voters ADD ration_card_no NVARCHAR(100) NULL;
+        IF NOT EXISTS (SELECT 1 FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_NAME = 'voters' AND COLUMN_NAME = 'housing_type')
+          ALTER TABLE dbo.voters ADD housing_type NVARCHAR(100) NULL;
+      END
+    `);
+
+    // 2. Ensure dbo.voter_health_economy table
+    await execute(`
+      IF OBJECT_ID(N'dbo.voter_health_economy', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.voter_health_economy (
+          id INT IDENTITY(1,1) PRIMARY KEY,
+          voter_doc_id VARCHAR(64) NOT NULL,
+          voter_epic VARCHAR(64) NOT NULL,
+          aadhar_number VARCHAR(64) NULL,
+          vital_status VARCHAR(50) DEFAULT 'Active',
+          death_date VARCHAR(32) NULL,
+          death_notes NVARCHAR(MAX) NULL,
+          physical_profile VARCHAR(100) DEFAULT 'General',
+          disability_category VARCHAR(100) DEFAULT 'None',
+          disability_percent INT DEFAULT 0,
+          eci_assistance_needed BIT DEFAULT 0,
+          health_notes NVARCHAR(MAX) NULL,
+          economic_category VARCHAR(50) DEFAULT 'APL',
+          income_range VARCHAR(100) DEFAULT '₹15,000 - ₹30,000',
+          land_ownership VARCHAR(100) DEFAULT 'Small Farmer',
+          ration_card_type VARCHAR(50) NULL,
+          ration_card_no VARCHAR(100) NULL,
+          housing_type VARCHAR(100) NULL,
+          occupation_detail NVARCHAR(200) NULL,
+          recorded_by VARCHAR(64) NULL,
+          recorded_by_name NVARCHAR(100) NULL,
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+          updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
+        );
+        CREATE INDEX idx_voter_health_econ_doc ON dbo.voter_health_economy(voter_doc_id);
+        CREATE INDEX idx_voter_health_econ_epic ON dbo.voter_health_economy(voter_epic);
+        CREATE INDEX idx_voter_health_econ_aadhar ON dbo.voter_health_economy(aadhar_number);
+      END
+    `);
+
+    // 3. Ensure dbo.voter_assessments table
+    await execute(`
+      IF OBJECT_ID(N'dbo.voter_assessments', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.voter_assessments (
+          id VARCHAR(128) PRIMARY KEY,
+          admin_id VARCHAR(64) NOT NULL,
+          voter_id VARCHAR(64) NOT NULL,
+          voter_epic VARCHAR(64) NULL,
+          aadhar_number VARCHAR(64) NULL,
+          voter_name NVARCHAR(200) NULL,
+          vital_status VARCHAR(50) DEFAULT 'Active',
+          physical_profile VARCHAR(100) DEFAULT 'General',
+          disability_category VARCHAR(100) DEFAULT 'None',
+          eci_assistance_needed BIT DEFAULT 0,
+          economic_category VARCHAR(50) DEFAULT 'APL',
+          income_range VARCHAR(100) DEFAULT '₹15,000 - ₹30,000',
+          land_ownership VARCHAR(100) DEFAULT 'Small Farmer',
+          education NVARCHAR(100) DEFAULT 'Unspecified',
+          sentiment_score FLOAT DEFAULT 3.0,
+          sentiment VARCHAR(50) DEFAULT 'Neutral',
+          favored_party_id VARCHAR(64) NULL,
+          favored_party_name NVARCHAR(150) NULL,
+          key_concerns NVARCHAR(MAX) NULL,
+          notes NVARCHAR(MAX) NULL,
+          is_karyakarta BIT DEFAULT 0,
+          voted BIT DEFAULT 0,
+          recorded_by VARCHAR(64) NULL,
+          recorded_by_name NVARCHAR(100) NULL,
+          created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+          updated_at DATETIME2 DEFAULT SYSUTCDATETIME()
+        );
+        CREATE INDEX idx_voter_assessments_admin_voter ON dbo.voter_assessments(admin_id, voter_id);
+      END
+    `);
+  } catch (err) {
+    console.warn('[Migration] ensureDemographicAndHealthSchema note:', err);
+  }
 }
 
 startServer();

@@ -685,15 +685,15 @@ export default function SurveyManagement() {
           ) : (
             <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm overflow-hidden">
               <div className="overflow-x-auto custom-scrollbar">
-                <table className="w-full text-left border-collapse min-w-[800px]">
+                <table className="w-full text-left border-collapse min-w-[800px] whitespace-nowrap">
                   <thead>
-                    <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-400 uppercase tracking-wider bg-zinc-50/50 dark:bg-zinc-900/35">
-                      <th className="px-6 py-4">Campaign Title & Info</th>
-                      <th className="px-6 py-4">Layout Template</th>
-                      <th className="px-6 py-4">Target Election</th>
-                      <th className="px-6 py-4">Assigned Personnel</th>
-                      <th className="px-6 py-4">Campaign Status</th>
-                      <th className="px-6 py-4 text-right">Actions</th>
+                    <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10px] font-black text-zinc-400 uppercase tracking-wider bg-zinc-50/70 dark:bg-zinc-900/50">
+                      <th className="px-4 py-2.5">Campaign Title</th>
+                      <th className="px-4 py-2.5">Layout Template</th>
+                      <th className="px-4 py-2.5">Target Election</th>
+                      <th className="px-4 py-2.5">Assigned Personnel</th>
+                      <th className="px-4 py-2.5">Campaign Status</th>
+                      <th className="px-4 py-2.5 text-right">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
@@ -704,73 +704,51 @@ export default function SurveyManagement() {
 
                   return (
                     <tr key={campaign.id} className="hover:bg-zinc-50/20 dark:hover:bg-zinc-900/40">
-                      {/* Name & desc */}
-                      <td className="px-6 py-4 max-w-sm">
-                        <div>
-                          <p className="text-sm font-bold text-zinc-900 dark:text-white capitalize">{campaign.title}</p>
-                          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-1 line-clamp-2">{campaign.description}</p>
+                      {/* Name */}
+                      <td className="px-4 py-2 max-w-xs">
+                        <div className="flex items-center gap-2 truncate">
+                          <span className="text-xs font-bold text-zinc-900 dark:text-white capitalize truncate" title={campaign.title}>{campaign.title}</span>
                           {campaign.linkedPartyIds && campaign.linkedPartyIds.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mt-2 items-center">
-                              <span className="text-[9px] font-bold text-zinc-400 dark:text-zinc-500 uppercase mr-1">Involved Parties:</span>
-                              {parties.filter(p => campaign.linkedPartyIds?.includes(p.id)).map(p => (
-                                <span 
-                                  key={p.id} 
-                                  className="text-[9px] font-bold px-1.5 py-0.5 rounded border inline-flex items-center gap-1 bg-zinc-50 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-                                  style={{ borderColor: `${p.color}40` }}
-                                >
-                                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
-                                  {p.abbreviation}
-                                </span>
-                              ))}
-                            </div>
+                            <span className="text-[9px] font-mono font-bold px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                              {parties.filter(p => campaign.linkedPartyIds?.includes(p.id)).map(p => p.abbreviation || p.code).join(', ')}
+                            </span>
                           )}
                         </div>
                       </td>
 
                       {/* Layout Template Badge */}
-                      <td className="px-6 py-4">
-                        <div>
-                          <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border inline-flex items-center gap-1 ${
-                            campaignTemplate.isSystem 
-                              ? 'bg-blue-50 text-blue-700/85 border-blue-200 dark:bg-blue-950/20 dark:text-blue-405 dark:border-blue-900/30' 
-                              : 'bg-purple-50 text-purple-705/85 border-purple-200 dark:bg-purple-950/20 dark:text-purple-405 dark:border-purple-900/30'
-                          }`}>
-                            {campaignTemplate.name}
-                          </span>
-                          <p className="text-[10px] text-zinc-400 mt-1">{campaignTemplate.fields?.length || 0} Dynamic Questions</p>
-                        </div>
+                      <td className="px-4 py-2">
+                        <span className={`text-[10px] font-semibold px-2 py-0.2 rounded border inline-flex items-center gap-1 ${
+                          campaignTemplate.isSystem 
+                            ? 'bg-blue-50 text-blue-700/85 border-blue-200 dark:bg-blue-950/20 dark:text-blue-405 dark:border-blue-900/30' 
+                            : 'bg-purple-50 text-purple-705/85 border-purple-200 dark:bg-purple-950/20 dark:text-purple-405 dark:border-purple-900/30'
+                        }`}>
+                          {campaignTemplate.name}
+                        </span>
                       </td>
 
                       {/* Targeted election */}
-                      <td className="px-6 py-4">
-                        <div>
-                          <span className="text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-700">
-                            {campaign.electionYear} Election Cycle
-                          </span>
-                          <p className="text-[10px] text-zinc-400 mt-1">{matchedElection?.title || 'Cycle Profile'}</p>
-                        </div>
+                      <td className="px-4 py-2">
+                        <span className="text-xs font-bold bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700">
+                          {campaign.electionYear || matchedElection?.year || 'Current'} Cycle
+                        </span>
                       </td>
 
                       {/* Assigned Personnel Count */}
-                      <td className="px-6 py-4">
-                        <div>
-                          {assignedStaff.length > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-bold bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 px-2.5 py-1 rounded-xl border border-blue-200 dark:border-blue-800 shadow-2xs">
-                              <Users className="w-3.5 h-3.5 text-blue-500" />
-                              <span>{assignedStaff.length} {assignedStaff.length === 1 ? 'Karyakarta' : 'Karyakartas'}</span>
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1.5 text-xs font-medium text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2.5 py-1 rounded-xl border border-amber-500/20">
-                              <Users className="w-3.5 h-3.5 text-amber-500" />
-                              <span>None Assigned (0)</span>
-                            </span>
-                          )}
-                        </div>
+                      <td className="px-4 py-2">
+                        {assignedStaff.length > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[11px] font-bold bg-blue-50 dark:bg-blue-950/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-lg border border-blue-200 dark:border-blue-800 shadow-2xs">
+                            <Users className="w-3 h-3 text-blue-500" />
+                            <span>{assignedStaff.length} {assignedStaff.length === 1 ? 'Karyakarta' : 'Karyakartas'}</span>
+                          </span>
+                        ) : (
+                          <span className="text-zinc-400 text-xs font-medium italic">Unassigned</span>
+                        )}
                       </td>
 
                       {/* Campaign Status */}
-                      <td className="px-6 py-4">
-                        <span className={`text-[10px] font-black px-2.5 py-1 rounded-full border ${
+                      <td className="px-4 py-2">
+                        <span className={`text-[10px] font-bold px-2 py-0.2 rounded-full border ${
                           campaign.status === 'Active'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/25 dark:text-emerald-400 dark:border-emerald-800'
                             : campaign.status === 'Completed'
@@ -782,28 +760,27 @@ export default function SurveyManagement() {
                       </td>
 
                       {/* Tools actions */}
-                      <td className="px-6 py-4 text-right">
+                      <td className="px-4 py-2 text-right whitespace-nowrap">
                         <div className="flex items-center justify-end gap-1.5">
                           {hasRight('survey_campaigns', 'u') && (
                             <button
                               onClick={() => handleOpenEditModal(campaign)}
-                              className="p-1.5 text-zinc-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/20 rounded-lg transition-colors"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                               title="Edit campaign settings"
                             >
-                              <Edit2 size={14} />
+                              <Edit2 size={12} />
+                              <span>Edit</span>
                             </button>
                           )}
                           {hasRight('survey_campaigns', 'd') && (
                             <button
                               onClick={() => setSurveyToDelete(campaign)}
-                              className="p-1.5 text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-lg transition-colors"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                               title="Delete campaign"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={12} />
+                              <span>Delete</span>
                             </button>
-                          )}
-                          {!hasRight('survey_campaigns', 'u') && !hasRight('survey_campaigns', 'd') && (
-                            <span className="text-[10px] text-zinc-400 italic font-medium">Read-only</span>
                           )}
                         </div>
                       </td>

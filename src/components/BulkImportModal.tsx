@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   X, 
   Upload, 
@@ -32,6 +32,7 @@ export interface IndiaDistrict {
   id: string;
   name: string;
   stateId: string;
+  stateName?: string;
 }
 
 export interface IndiaConstituency {
@@ -39,14 +40,67 @@ export interface IndiaConstituency {
   name: string;
   districtId: string;
   stateId?: string;
+  districtName?: string;
+  stateName?: string;
+}
+
+export interface IndiaMandal {
+  id: string;
+  name: string;
+  code?: string;
+  constituencyId: string;
+  districtId?: string;
+  stateId?: string;
+  constituencyName?: string;
+}
+
+export interface IndiaPanchayat {
+  id: string;
+  name: string;
+  code?: string;
+  mandalId: string;
+  constituencyId?: string;
+  districtId?: string;
+  stateId?: string;
+  type?: string;
+  mandalName?: string;
+}
+
+export interface IndiaWard {
+  id: string;
+  name: string;
+  wardNumber?: string;
+  panchayatId?: string;
+  mandalId?: string;
+  constituencyId?: string;
+  districtId?: string;
+  stateId?: string;
+  panchayatName?: string;
 }
 
 export interface IndiaBooth {
   id: string;
   name: string;
   boothNumber: string;
+  wardId?: string;
+  panchayatId?: string;
+  mandalId?: string;
   constituencyId: string;
+  districtId?: string;
+  stateId?: string;
 }
+
+const normalizeId = (id: any): string => {
+  if (id === null || id === undefined) return '';
+  return String(id).trim().replace(/\.0$/, '');
+};
+
+const unwrapList = (res: any): any[] => {
+  if (Array.isArray(res)) return res;
+  if (Array.isArray(res?.results)) return res.results;
+  if (Array.isArray(res?.data)) return res.data;
+  return [];
+};
 
 interface BulkImportModalProps {
   isOpen: boolean;
@@ -55,6 +109,9 @@ interface BulkImportModalProps {
   initialStateId?: string;
   initialDistrictId?: string;
   initialConstituencyId?: string;
+  initialMandalId?: string;
+  initialPanchayatId?: string;
+  initialWardId?: string;
   initialBoothId?: string;
   states?: IndiaState[];
 }
@@ -79,167 +136,129 @@ export interface ParsedVoterRow {
   voting_status: string;
   party_inclination: string;
   booth_id?: string;
+  ward_id?: string;
+  ward_name?: string;
+  panchayat_id?: string;
+  panchayat_name?: string;
   mandal_id?: string;
   constituency_id?: string;
-  state_id?: string;
   district_id?: string;
+  state_id?: string;
   [key: string]: any;
 }
 
-// Standard Sample Data Matching dbo.voters Table Schema
+// Standard Sample Data Matching user's primary bulk upload format
 const STANDARD_SAMPLE_VOTERS = [
   {
-    voter_id: 'HP01054001',
-    name: 'Rajesh Kumar',
-    relation_name: 'Dev Raj',
-    relation_type: 'Father',
-    gender: 'Male',
-    age: 38,
-    part_no: '1',
-    sr_no: '101',
-    mobile: '9816012345',
-    email: 'rajesh.kumar@example.com',
-    address: 'Ward No 4 Main Bazar, Nahan',
-    house_no: '14-A',
-    village: 'Nahan',
-    caste: 'General',
-    occupation: 'Business',
-    is_karyakarta: 1,
-    voting_status: 'unvoted',
-    party_inclination: 'Strong Supporter',
-    booth_id: '',
-    mandal_id: '',
-    constituency_id: '',
-    state_id: '',
-    district_id: ''
+    'Voter Name': 'Rajesh Kumar',
+    'Relative Name': 'Dev Raj',
+    'Relation': 'Father',
+    'Gender': 'Male',
+    'Age': 38,
+    'EPIC No': 'HP01054001',
+    'House No': '14-A',
+    'Ward Name': 'Ward No 4 Main Bazar',
+    'Mobile': '9816012345',
+    'Part No': '1',
+    'Serial No': '101',
+    'Caste': 'General',
+    'Occupation': 'Business',
+    'Is Karyakarta': 'No',
+    'Voting Status': 'unvoted',
+    'Favored Party': 'Strong Supporter'
   },
   {
-    voter_id: 'HP01054002',
-    name: 'Sunita Sharma',
-    relation_name: 'Rajesh Kumar',
-    relation_type: 'Husband',
-    gender: 'Female',
-    age: 34,
-    part_no: '1',
-    sr_no: '102',
-    mobile: '9816054321',
-    email: 'sunita.sharma@example.com',
-    address: 'Ward No 4 Main Bazar, Nahan',
-    house_no: '14-A',
-    village: 'Nahan',
-    caste: 'General',
-    occupation: 'Homemaker',
-    is_karyakarta: 0,
-    voting_status: 'unvoted',
-    party_inclination: 'Favorable',
-    booth_id: '',
-    mandal_id: '',
-    constituency_id: '',
-    state_id: '',
-    district_id: ''
+    'Voter Name': 'Sunita Sharma',
+    'Relative Name': 'Rajesh Kumar',
+    'Relation': 'Husband',
+    'Gender': 'Female',
+    'Age': 34,
+    'EPIC No': 'HP01054002',
+    'House No': '14-A',
+    'Ward Name': 'Ward No 4 Main Bazar',
+    'Mobile': '9816054321',
+    'Part No': '1',
+    'Serial No': '102',
+    'Caste': 'General',
+    'Occupation': 'Homemaker',
+    'Is Karyakarta': 'No',
+    'Voting Status': 'unvoted',
+    'Favored Party': 'Favorable'
   },
   {
-    voter_id: 'HP01054003',
-    name: 'Amit Singh',
-    relation_name: 'Mohan Singh',
-    relation_type: 'Father',
-    gender: 'Male',
-    age: 26,
-    part_no: '1',
-    sr_no: '103',
-    mobile: '9418011223',
-    email: 'amit.singh@example.com',
-    address: 'Green Valley Road, Chakli',
-    house_no: '52',
-    village: 'Chakli',
-    caste: 'OBC',
-    occupation: 'Govt Employee',
-    is_karyakarta: 0,
-    voting_status: 'unvoted',
-    party_inclination: 'Neutral',
-    booth_id: '',
-    mandal_id: '',
-    constituency_id: '',
-    state_id: '',
-    district_id: ''
+    'Voter Name': 'Amit Singh',
+    'Relative Name': 'Mohan Singh',
+    'Relation': 'Father',
+    'Gender': 'Male',
+    'Age': 26,
+    'EPIC No': 'HP01054003',
+    'House No': '52',
+    'Ward Name': 'Chakli',
+    'Mobile': '9418011223',
+    'Part No': '1',
+    'Serial No': '103',
+    'Caste': 'OBC',
+    'Occupation': 'Govt Employee',
+    'Is Karyakarta': 'No',
+    'Voting Status': 'unvoted',
+    'Favored Party': 'Neutral'
   },
   {
-    voter_id: 'HP01054004',
-    name: 'Pooja Devi',
-    relation_name: 'Amit Singh',
-    relation_type: 'Husband',
-    gender: 'Female',
-    age: 24,
-    part_no: '1',
-    sr_no: '104',
-    mobile: '9418099887',
-    email: 'pooja.devi@example.com',
-    address: 'Green Valley Road, Chakli',
-    house_no: '52',
-    village: 'Chakli',
-    caste: 'OBC',
-    occupation: 'Private Service',
-    is_karyakarta: 0,
-    voting_status: 'unvoted',
-    party_inclination: 'Favorable',
-    booth_id: '',
-    mandal_id: '',
-    constituency_id: '',
-    state_id: '',
-    district_id: ''
+    'Voter Name': 'Pooja Devi',
+    'Relative Name': 'Amit Singh',
+    'Relation': 'Husband',
+    'Gender': 'Female',
+    'Age': 24,
+    'EPIC No': 'HP01054004',
+    'House No': '52',
+    'Ward Name': 'Chakli',
+    'Mobile': '9418099887',
+    'Part No': '1',
+    'Serial No': '104',
+    'Caste': 'OBC',
+    'Occupation': 'Private Service',
+    'Is Karyakarta': 'No',
+    'Voting Status': 'unvoted',
+    'Favored Party': 'Favorable'
   },
   {
-    voter_id: 'HP01054005',
-    name: 'Kewal Ram',
-    relation_name: 'Ram Lal',
-    relation_type: 'Father',
-    gender: 'Male',
-    age: 61,
-    part_no: '1',
-    sr_no: '105',
-    mobile: '9805067890',
-    email: 'kewal.ram@example.com',
-    address: 'Near Old Temple, Nahan',
-    house_no: '08',
-    village: 'Nahan',
-    caste: 'SC',
-    occupation: 'Farmer',
-    is_karyakarta: 1,
-    voting_status: 'unvoted',
-    party_inclination: 'Strong Supporter',
-    booth_id: '',
-    mandal_id: '',
-    constituency_id: '',
-    state_id: '',
-    district_id: ''
+    'Voter Name': 'Kewal Ram',
+    'Relative Name': 'Ram Lal',
+    'Relation': 'Father',
+    'Gender': 'Male',
+    'Age': 61,
+    'EPIC No': 'HP01054005',
+    'House No': '08',
+    'Ward Name': 'Near Old Temple',
+    'Mobile': '9805067890',
+    'Part No': '1',
+    'Serial No': '105',
+    'Caste': 'SC',
+    'Occupation': 'Farmer',
+    'Is Karyakarta': 'Yes',
+    'Voting Status': 'unvoted',
+    'Favored Party': 'Strong Supporter'
   }
 ];
 
 // Field definitions for the in-app schema guide
 const SCHEMA_COLUMNS = [
-  { field: 'voter_id', type: 'VARCHAR(100)', req: 'Required', desc: 'Unique EPIC card number (e.g. HP01054001)' },
-  { field: 'name', type: 'VARCHAR(255)', req: 'Required', desc: 'Full Name of the voter' },
-  { field: 'relation_name', type: 'VARCHAR(255)', req: 'Optional', desc: "Father's / Husband's / Relative's Name" },
-  { field: 'relation_type', type: 'VARCHAR(50)', req: 'Optional', desc: 'Relation type: Father, Husband, Mother, Other' },
-  { field: 'gender', type: 'VARCHAR(20)', req: 'Optional', desc: 'Gender: Male, Female, Other' },
-  { field: 'age', type: 'INT', req: 'Optional', desc: 'Age in years (e.g. 38)' },
-  { field: 'part_no', type: 'VARCHAR(50)', req: 'Optional', desc: 'Voter list polling part number' },
-  { field: 'sr_no', type: 'VARCHAR(50)', req: 'Optional', desc: 'Serial number on electoral roll' },
-  { field: 'mobile', type: 'VARCHAR(50)', req: 'Optional', desc: '10-digit mobile contact number' },
-  { field: 'email', type: 'VARCHAR(255)', req: 'Optional', desc: 'Email address' },
-  { field: 'address', type: 'NVARCHAR(500)', req: 'Optional', desc: 'Residential address line' },
-  { field: 'house_no', type: 'VARCHAR(100)', req: 'Optional', desc: 'House or Flat Number' },
-  { field: 'village', type: 'VARCHAR(100)', req: 'Optional', desc: 'Village / Ward / Mohalla / Colony' },
-  { field: 'caste', type: 'VARCHAR(100)', req: 'Optional', desc: 'Category: General, OBC, SC, ST, etc.' },
-  { field: 'occupation', type: 'VARCHAR(100)', req: 'Optional', desc: 'Business, Farmer, Homemaker, Govt Employee, etc.' },
-  { field: 'is_karyakarta', type: 'BIT (0/1)', req: 'Optional', desc: '1 or Yes for Party Worker / Karyakarta, 0 or No for standard' },
-  { field: 'voting_status', type: 'VARCHAR(50)', req: 'Optional', desc: 'unvoted or voted' },
-  { field: 'party_inclination', type: 'VARCHAR(50)', req: 'Optional', desc: 'Strong Supporter, Favorable, Neutral, Opposition' },
-  { field: 'booth_id', type: 'VARCHAR(64)', req: 'Optional', desc: 'Target Booth ID (or select in modal)' },
-  { field: 'mandal_id', type: 'VARCHAR(64)', req: 'Optional', desc: 'Target Mandal ID (or auto-assigned)' },
-  { field: 'constituency_id', type: 'VARCHAR(64)', req: 'Optional', desc: 'Target Constituency ID (or select in modal)' },
-  { field: 'state_id', type: 'VARCHAR(64)', req: 'Optional', desc: 'Target State ID (or select in modal)' },
-  { field: 'district_id', type: 'VARCHAR(64)', req: 'Optional', desc: 'Target District ID (or select in modal)' }
+  { field: 'Voter Name', type: 'TEXT', req: 'Required', desc: 'Full Name of the voter (e.g. Rajesh Kumar)' },
+  { field: 'Relative Name', type: 'TEXT', req: 'Optional', desc: "Father's / Husband's / Relative's Name" },
+  { field: 'Relation', type: 'TEXT', req: 'Optional', desc: 'Relation type: Father, Husband, Mother, Guardian, Other' },
+  { field: 'Gender', type: 'TEXT', req: 'Optional', desc: 'Gender: Male, Female, Other' },
+  { field: 'Age', type: 'INT', req: 'Optional', desc: 'Age in years (e.g. 38)' },
+  { field: 'EPIC No', type: 'VARCHAR', req: 'Required', desc: 'Voter ID / EPIC card number (e.g. HP01054001)' },
+  { field: 'House No', type: 'VARCHAR', req: 'Optional', desc: 'House, Flat or Building Number (e.g. 14-A)' },
+  { field: 'Ward Name', type: 'VARCHAR', req: 'Optional', desc: 'Ward, Village, Mohalla or Area Name' },
+  { field: 'Mobile', type: 'VARCHAR', req: 'Optional', desc: '10-digit mobile contact number' },
+  { field: 'Part No', type: 'VARCHAR', req: 'Optional', desc: 'Voter list polling part number' },
+  { field: 'Serial No', type: 'VARCHAR', req: 'Optional', desc: 'Serial number on electoral roll' },
+  { field: 'Caste', type: 'VARCHAR', req: 'Optional', desc: 'Category: General, OBC, SC, ST, etc.' },
+  { field: 'Occupation', type: 'VARCHAR', req: 'Optional', desc: 'Business, Farmer, Homemaker, Service, etc.' },
+  { field: 'Is Karyakarta', type: 'Yes/No', req: 'Optional', desc: 'Yes or 1 if party karyakarta/volunteer' },
+  { field: 'Voting Status', type: 'VARCHAR', req: 'Optional', desc: 'unvoted or voted' },
+  { field: 'Favored Party', type: 'VARCHAR', req: 'Optional', desc: 'Strong Supporter, Favorable, Neutral, Opposition' }
 ];
 
 export const BulkImportModal: React.FC<BulkImportModalProps> = ({
@@ -249,23 +268,33 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
   initialStateId = '',
   initialDistrictId = '',
   initialConstituencyId = '',
+  initialMandalId = '',
+  initialPanchayatId = '',
+  initialWardId = '',
   initialBoothId = '',
   states: propStates,
 }) => {
-  // Geopolitical Hierarchy state
-  const [states, setStates] = useState<IndiaState[]>(propStates || []);
-  const [districts, setDistricts] = useState<IndiaDistrict[]>([]);
-  const [constituencies, setConstituencies] = useState<IndiaConstituency[]>([]);
-  const [booths, setBooths] = useState<IndiaBooth[]>([]);
+  // Master Demographics State (DemographicSettings reference)
+  const [allStates, setAllStates] = useState<IndiaState[]>([]);
+  const [allDistricts, setAllDistricts] = useState<IndiaDistrict[]>([]);
+  const [allConstituencies, setAllConstituencies] = useState<IndiaConstituency[]>([]);
+  const [allMandals, setAllMandals] = useState<IndiaMandal[]>([]);
+  const [allPanchayats, setAllPanchayats] = useState<IndiaPanchayat[]>([]);
+  const [allWards, setAllWards] = useState<IndiaWard[]>([]);
+  const [allBooths, setAllBooths] = useState<IndiaBooth[]>([]);
+  const [loadingDemographics, setLoadingDemographics] = useState(false);
 
   const [selectedStateId, setSelectedStateId] = useState<string>(initialStateId || '');
   const [selectedDistrictId, setSelectedDistrictId] = useState<string>(initialDistrictId || '');
   const [selectedConstituencyId, setSelectedConstituencyId] = useState<string>(initialConstituencyId || '');
+  const [selectedMandalId, setSelectedMandalId] = useState<string>(initialMandalId || '');
+  const [selectedPanchayatId, setSelectedPanchayatId] = useState<string>(initialPanchayatId || '');
+  const [selectedWardId, setSelectedWardId] = useState<string>(initialWardId || '');
   const [selectedBoothId, setSelectedBoothId] = useState<string>(initialBoothId || '');
 
-  const [loadingDistricts, setLoadingDistricts] = useState(false);
-  const [loadingConstituencies, setLoadingConstituencies] = useState(false);
-  const [loadingBooths, setLoadingBooths] = useState(false);
+  // Default Electoral Roll Indices
+  const [defaultPartNo, setDefaultPartNo] = useState<string>('');
+  const [defaultSrNo, setDefaultSrNo] = useState<string>('');
 
   // Parsing & File state
   const [uploadedFile, setUploadedFile] = useState<File | null>(null);
@@ -286,68 +315,281 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Initialize states if not passed as prop
+  // Unified Demographic Data Loader matching DemographicSettings reference
   useEffect(() => {
-    if (!propStates || propStates.length === 0) {
-      api.get<IndiaState[]>('/api/states')
-        .then(s => setStates(s.map((item: any) => ({ ...item, id: String(item.id) }))))
-        .catch(console.error);
-    } else {
-      setStates(propStates);
-    }
-  }, [propStates]);
+    if (!isOpen) return;
+    setLoadingDemographics(true);
+    Promise.all([
+      api.get<any[]>('/api/states').catch(() => []),
+      api.get<any[]>('/api/districts').catch(() => []),
+      api.get<any[]>('/api/constituencies').catch(() => []),
+      api.get<any[]>('/api/mandals').catch(() => []),
+      api.get<any[]>('/api/panchayats').catch(() => []),
+      api.get<any[]>('/api/wards').catch(() => []),
+      api.get<any[]>('/api/booths').catch(() => []),
+    ]).then(([st, dt, ct, blk, pan, wrd, bth]) => {
+      const rawSt = unwrapList(st);
+      const rawDt = unwrapList(dt);
+      const rawCt = unwrapList(ct);
+      const rawBlk = unwrapList(blk);
+      const rawPan = unwrapList(pan);
+      const rawWrd = unwrapList(wrd);
+      const rawBth = unwrapList(bth);
+
+      // 1. States Map
+      const stateList: IndiaState[] = rawSt.map((s: any) => ({
+        id: normalizeId(s.id),
+        name: s.name || '',
+        code: s.code || '',
+      }));
+      const stateMap = new Map(stateList.map((s) => [normalizeId(s.id), s]));
+
+      // 2. Districts Map
+      const districtList: IndiaDistrict[] = rawDt.map((d: any) => {
+        const sId = normalizeId(d.state_id !== undefined && d.state_id !== null ? d.state_id : d.stateId);
+        const parentState = stateMap.get(sId);
+        return {
+          id: normalizeId(d.id),
+          name: d.name || '',
+          stateId: sId,
+          stateName: d.state_name || parentState?.name || '',
+        };
+      });
+      const districtMap = new Map(districtList.map((d) => [normalizeId(d.id), d]));
+
+      // 3. Constituencies Map
+      const constList: IndiaConstituency[] = rawCt.map((c: any) => {
+        const dId = normalizeId(c.district_id !== undefined && c.district_id !== null ? c.district_id : c.districtId);
+        const parentDist = districtMap.get(dId);
+        const rawStateId = normalizeId(c.state_id !== undefined && c.state_id !== null ? c.state_id : (c.stateId || parentDist?.stateId));
+        const parentState = stateMap.get(rawStateId);
+        return {
+          id: normalizeId(c.id),
+          name: c.name || '',
+          districtId: dId,
+          stateId: rawStateId,
+          districtName: c.district_name || parentDist?.name || '',
+          stateName: c.state_name || parentState?.name || parentDist?.stateName || '',
+        };
+      });
+      const constMap = new Map(constList.map((c) => [normalizeId(c.id), c]));
+
+      // 4. Mandals (Blocks) Map
+      const blockList: IndiaMandal[] = rawBlk.map((m: any) => {
+        const cId = normalizeId(m.constituency_id !== undefined && m.constituency_id !== null ? m.constituency_id : m.constituencyId);
+        const parentConst = constMap.get(cId);
+        const rawDistId = normalizeId(m.district_id !== undefined && m.district_id !== null ? m.district_id : (m.districtId || parentConst?.districtId));
+        const parentDist = districtMap.get(rawDistId);
+        const rawStateId = normalizeId(m.state_id !== undefined && m.state_id !== null ? m.state_id : (m.stateId || parentConst?.stateId || parentDist?.stateId));
+        return {
+          id: normalizeId(m.id),
+          name: m.name || '',
+          code: m.mandal_code || m.mandalCode || m.code || '',
+          constituencyId: cId,
+          districtId: rawDistId,
+          stateId: rawStateId,
+          constituencyName: m.constituency_name || parentConst?.name || '',
+        };
+      });
+      const mandalMap = new Map(blockList.map((m) => [normalizeId(m.id), m]));
+
+      // 5. Panchayats Map
+      const panList: IndiaPanchayat[] = rawPan.map((p: any) => {
+        const mId = normalizeId(p.mandal_id !== undefined && p.mandal_id !== null ? p.mandal_id : p.mandalId);
+        const parentMandal = mandalMap.get(mId);
+        const cId = normalizeId(p.constituency_id !== undefined && p.constituency_id !== null ? p.constituency_id : (p.constituencyId || parentMandal?.constituencyId));
+        const parentConst = constMap.get(cId);
+        const dId = normalizeId(p.district_id !== undefined && p.district_id !== null ? p.district_id : (p.districtId || parentMandal?.districtId || parentConst?.districtId));
+        const sId = normalizeId(p.state_id !== undefined && p.state_id !== null ? p.state_id : (p.stateId || parentMandal?.stateId || parentConst?.stateId));
+        return {
+          id: normalizeId(p.id),
+          name: p.name || '',
+          code: p.panchayat_code || p.code || '',
+          type: p.panchayat_type || p.type || 'Gram Panchayat',
+          mandalId: mId,
+          constituencyId: cId,
+          districtId: dId,
+          stateId: sId,
+          mandalName: p.mandal_name || parentMandal?.name || '',
+        };
+      });
+      const panMap = new Map(panList.map((p) => [normalizeId(p.id), p]));
+
+      // 6. Wards Map
+      const wardList: IndiaWard[] = rawWrd.map((w: any) => {
+        const pId = normalizeId(w.panchayat_id !== undefined && w.panchayat_id !== null ? w.panchayat_id : w.panchayatId);
+        const parentPan = panMap.get(pId);
+        const mId = normalizeId(w.mandal_id !== undefined && w.mandal_id !== null ? w.mandal_id : (w.mandalId || parentPan?.mandalId));
+        const parentMandal = mandalMap.get(mId);
+        const cId = normalizeId(w.constituency_id !== undefined && w.constituency_id !== null ? w.constituency_id : (w.constituencyId || parentPan?.constituencyId || parentMandal?.constituencyId));
+        const dId = normalizeId(w.district_id !== undefined && w.district_id !== null ? w.district_id : (w.districtId || parentPan?.districtId || parentMandal?.districtId));
+        const sId = normalizeId(w.state_id !== undefined && w.state_id !== null ? w.state_id : (w.stateId || parentPan?.stateId || parentMandal?.stateId));
+        return {
+          id: normalizeId(w.id),
+          name: w.name || '',
+          wardNumber: String(w.ward_number || w.wardNumber || ''),
+          panchayatId: pId,
+          mandalId: mId,
+          constituencyId: cId,
+          districtId: dId,
+          stateId: sId,
+          panchayatName: w.panchayat_name || parentPan?.name || '',
+        };
+      });
+      const wardMap = new Map(wardList.map((w) => [normalizeId(w.id), w]));
+
+      // 7. Booths Map
+      const boothList: IndiaBooth[] = rawBth.map((b: any) => {
+        const rawWardId = normalizeId(b.ward_id !== undefined && b.ward_id !== null ? b.ward_id : b.wardId);
+        const matchedWard = wardMap.get(rawWardId);
+        const rawPanId = normalizeId(b.panchayat_id !== undefined && b.panchayat_id !== null ? b.panchayat_id : (b.panchayatId || matchedWard?.panchayatId));
+        const matchedPan = panMap.get(rawPanId);
+        const rawMandalId = normalizeId(b.mandal_id !== undefined && b.mandal_id !== null ? b.mandal_id : (b.mandalId || matchedPan?.mandalId || matchedWard?.mandalId));
+        const matchedMandal = mandalMap.get(rawMandalId);
+        const rawConstId = normalizeId(b.constituency_id !== undefined && b.constituency_id !== null ? b.constituency_id : (b.constituencyId || matchedMandal?.constituencyId || matchedPan?.constituencyId || matchedWard?.constituencyId));
+        const rawDistId = normalizeId(b.district_id !== undefined && b.district_id !== null ? b.district_id : (b.districtId || matchedMandal?.districtId || matchedPan?.districtId));
+        const rawStateId = normalizeId(b.state_id !== undefined && b.state_id !== null ? b.state_id : (b.stateId || matchedMandal?.stateId || matchedPan?.stateId));
+        return {
+          id: normalizeId(b.id),
+          name: b.name || '',
+          boothNumber: String(b.booth_number !== undefined ? b.booth_number : (b.boothNumber || '')),
+          wardId: rawWardId,
+          panchayatId: rawPanId,
+          mandalId: rawMandalId,
+          constituencyId: rawConstId,
+          districtId: rawDistId,
+          stateId: rawStateId,
+        };
+      });
+
+      setAllStates(stateList);
+      setAllDistricts(districtList);
+      setAllConstituencies(constList);
+      setAllMandals(blockList);
+      setAllPanchayats(panList);
+      setAllWards(wardList);
+      setAllBooths(boothList);
+    }).catch(console.error).finally(() => setLoadingDemographics(false));
+  }, [isOpen]);
 
   // Sync initial props when modal opens
   useEffect(() => {
     if (isOpen) {
-      if (initialStateId && initialStateId !== 'all') setSelectedStateId(initialStateId);
-      if (initialDistrictId && initialDistrictId !== 'all') setSelectedDistrictId(initialDistrictId);
-      if (initialConstituencyId && initialConstituencyId !== 'all') setSelectedConstituencyId(initialConstituencyId);
-      if (initialBoothId && initialBoothId !== 'all') setSelectedBoothId(initialBoothId);
+      if (initialStateId && initialStateId !== 'all') setSelectedStateId(normalizeId(initialStateId));
+      if (initialDistrictId && initialDistrictId !== 'all') setSelectedDistrictId(normalizeId(initialDistrictId));
+      if (initialConstituencyId && initialConstituencyId !== 'all') setSelectedConstituencyId(normalizeId(initialConstituencyId));
+      if (initialMandalId && initialMandalId !== 'all') setSelectedMandalId(normalizeId(initialMandalId));
+      if (initialPanchayatId && initialPanchayatId !== 'all') setSelectedPanchayatId(normalizeId(initialPanchayatId));
+      if (initialWardId && initialWardId !== 'all') setSelectedWardId(normalizeId(initialWardId));
+      if (initialBoothId && initialBoothId !== 'all') setSelectedBoothId(normalizeId(initialBoothId));
     }
-  }, [isOpen, initialStateId, initialDistrictId, initialConstituencyId, initialBoothId]);
+  }, [isOpen, initialStateId, initialDistrictId, initialConstituencyId, initialMandalId, initialPanchayatId, initialWardId, initialBoothId]);
 
-  // Load cascading districts
-  useEffect(() => {
-    if (!selectedStateId || selectedStateId === 'all') {
-      setDistricts([]);
-      setSelectedDistrictId('');
-      return;
-    }
-    setLoadingDistricts(true);
-    api.get<IndiaDistrict[]>(`/api/districts?stateId=${selectedStateId}`)
-      .then(dSnap => setDistricts(dSnap.map((d: any) => ({ ...d, id: String(d.id), stateId: String(d.state_id || d.stateId) }))))
-      .catch(console.error)
-      .finally(() => setLoadingDistricts(false));
-  }, [selectedStateId]);
+  // Dynamic Sequential Filtering of Demographics based on active selections
+  const availableStates = useMemo(() => {
+    return allStates;
+  }, [allStates]);
 
-  // Load cascading constituencies
-  useEffect(() => {
-    if (!selectedDistrictId || selectedDistrictId === 'all') {
-      setConstituencies([]);
-      setSelectedConstituencyId('');
-      return;
-    }
-    setLoadingConstituencies(true);
-    api.get<IndiaConstituency[]>(`/api/constituencies?districtId=${selectedDistrictId}`)
-      .then(cSnap => setConstituencies(cSnap.map((c: any) => ({ ...c, id: String(c.id), districtId: String(c.district_id || c.districtId) }))))
-      .catch(console.error)
-      .finally(() => setLoadingConstituencies(false));
-  }, [selectedDistrictId]);
+  const availableDistricts = useMemo(() => {
+    if (!selectedStateId || selectedStateId === 'all') return [];
+    return allDistricts.filter(d => normalizeId(d.stateId) === normalizeId(selectedStateId));
+  }, [allDistricts, selectedStateId]);
 
-  // Load cascading booths
-  useEffect(() => {
-    if (!selectedConstituencyId || selectedConstituencyId === 'all') {
-      setBooths([]);
-      setSelectedBoothId('');
-      return;
-    }
-    setLoadingBooths(true);
-    api.get<IndiaBooth[]>(`/api/booths?constituencyId=${selectedConstituencyId}`)
-      .then(bSnap => setBooths(bSnap.map((b: any) => ({ ...b, id: String(b.id), constituencyId: String(b.constituency_id || b.constituencyId) }))))
-      .catch(console.error)
-      .finally(() => setLoadingBooths(false));
-  }, [selectedConstituencyId]);
+  const availableConstituencies = useMemo(() => {
+    if (!selectedDistrictId || selectedDistrictId === 'all') return [];
+    return allConstituencies.filter(c => normalizeId(c.districtId) === normalizeId(selectedDistrictId));
+  }, [allConstituencies, selectedDistrictId]);
+
+  const availableMandals = useMemo(() => {
+    if (!selectedConstituencyId || selectedConstituencyId === 'all') return [];
+    return allMandals.filter(m => normalizeId(m.constituencyId) === normalizeId(selectedConstituencyId));
+  }, [allMandals, selectedConstituencyId]);
+
+  const availablePanchayats = useMemo(() => {
+    if (!selectedConstituencyId || selectedConstituencyId === 'all') return [];
+    return allPanchayats.filter(p => {
+      const matchConst = normalizeId(p.constituencyId) === normalizeId(selectedConstituencyId);
+      const matchMandal = !selectedMandalId || selectedMandalId === 'all' || normalizeId(p.mandalId) === normalizeId(selectedMandalId);
+      return matchConst && matchMandal;
+    });
+  }, [allPanchayats, selectedConstituencyId, selectedMandalId]);
+
+  const availableWards = useMemo(() => {
+    if (!selectedConstituencyId || selectedConstituencyId === 'all') return [];
+    return allWards.filter(w => {
+      const matchConst = normalizeId(w.constituencyId) === normalizeId(selectedConstituencyId);
+      const matchMandal = !selectedMandalId || selectedMandalId === 'all' || normalizeId(w.mandalId) === normalizeId(selectedMandalId);
+      const matchPan = !selectedPanchayatId || selectedPanchayatId === 'all' || normalizeId(w.panchayatId) === normalizeId(selectedPanchayatId);
+      return matchConst && matchMandal && matchPan;
+    });
+  }, [allWards, selectedConstituencyId, selectedMandalId, selectedPanchayatId]);
+
+  const availableBooths = useMemo(() => {
+    if (!selectedConstituencyId || selectedConstituencyId === 'all') return [];
+    return allBooths.filter(b => {
+      const matchConst = normalizeId(b.constituencyId) === normalizeId(selectedConstituencyId);
+      const matchMandal = !selectedMandalId || selectedMandalId === 'all' || normalizeId(b.mandalId) === normalizeId(selectedMandalId);
+      const matchPan = !selectedPanchayatId || selectedPanchayatId === 'all' || normalizeId(b.panchayatId) === normalizeId(selectedPanchayatId);
+      const matchWard = !selectedWardId || selectedWardId === 'all' || normalizeId(b.wardId) === normalizeId(selectedWardId);
+      return matchConst && matchMandal && matchPan && matchWard;
+    });
+  }, [allBooths, selectedConstituencyId, selectedMandalId, selectedPanchayatId, selectedWardId]);
+
+  // Dropdown Change Handlers with strict downward cascading reset
+  const handleStateChange = (stateId: string) => {
+    const val = normalizeId(stateId);
+    setSelectedStateId(val);
+    setSelectedDistrictId('');
+    setSelectedConstituencyId('');
+    setSelectedMandalId('');
+    setSelectedPanchayatId('');
+    setSelectedWardId('');
+    setSelectedBoothId('');
+  };
+
+  const handleDistrictChange = (districtId: string) => {
+    const val = normalizeId(districtId);
+    setSelectedDistrictId(val);
+    setSelectedConstituencyId('');
+    setSelectedMandalId('');
+    setSelectedPanchayatId('');
+    setSelectedWardId('');
+    setSelectedBoothId('');
+  };
+
+  const handleConstituencyChange = (constituencyId: string) => {
+    const val = normalizeId(constituencyId);
+    setSelectedConstituencyId(val);
+    setSelectedMandalId('');
+    setSelectedPanchayatId('');
+    setSelectedWardId('');
+    setSelectedBoothId('');
+  };
+
+  const handleMandalChange = (mandalId: string) => {
+    const val = normalizeId(mandalId);
+    setSelectedMandalId(val);
+    setSelectedPanchayatId('');
+    setSelectedWardId('');
+    setSelectedBoothId('');
+  };
+
+  const handlePanchayatChange = (panchayatId: string) => {
+    const val = normalizeId(panchayatId);
+    setSelectedPanchayatId(val);
+    setSelectedWardId('');
+    setSelectedBoothId('');
+  };
+
+  const handleWardChange = (wardId: string) => {
+    const val = normalizeId(wardId);
+    setSelectedWardId(val);
+    setSelectedBoothId('');
+  };
+
+  const handleBoothChange = (boothId: string) => {
+    setSelectedBoothId(normalizeId(boothId));
+  };
 
   // Helper to extract values from multiple possible column aliases
   const getValue = (row: Record<string, any>, keys: string[], defaultValue: string = ''): string => {
@@ -368,56 +610,42 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
   const downloadSampleExcel = () => {
     const ws = XLSX.utils.json_to_sheet(STANDARD_SAMPLE_VOTERS, {
       header: [
-        'voter_id',
-        'name',
-        'relation_name',
-        'relation_type',
-        'gender',
-        'age',
-        'part_no',
-        'sr_no',
-        'mobile',
-        'email',
-        'address',
-        'house_no',
-        'village',
-        'caste',
-        'occupation',
-        'is_karyakarta',
-        'voting_status',
-        'party_inclination',
-        'booth_id',
-        'mandal_id',
-        'constituency_id',
-        'state_id',
-        'district_id'
+        'Voter Name',
+        'Relative Name',
+        'Relation',
+        'Gender',
+        'Age',
+        'EPIC No',
+        'House No',
+        'Ward Name',
+        'Mobile',
+        'Part No',
+        'Serial No',
+        'Caste',
+        'Occupation',
+        'Is Karyakarta',
+        'Voting Status',
+        'Favored Party'
       ]
     });
 
     ws['!cols'] = [
-      { wch: 15 }, // voter_id
-      { wch: 20 }, // name
-      { wch: 18 }, // relation_name
-      { wch: 15 }, // relation_type
-      { wch: 10 }, // gender
-      { wch: 8 },  // age
-      { wch: 10 }, // part_no
-      { wch: 10 }, // sr_no
-      { wch: 15 }, // mobile
-      { wch: 25 }, // email
-      { wch: 30 }, // address
-      { wch: 12 }, // house_no
-      { wch: 15 }, // village
-      { wch: 12 }, // caste
-      { wch: 18 }, // occupation
-      { wch: 14 }, // is_karyakarta
-      { wch: 14 }, // voting_status
-      { wch: 18 }, // party_inclination
-      { wch: 12 }, // booth_id
-      { wch: 12 }, // mandal_id
-      { wch: 16 }, // constituency_id
-      { wch: 12 }, // state_id
-      { wch: 12 }  // district_id
+      { wch: 20 }, // Voter Name
+      { wch: 20 }, // Relative Name
+      { wch: 14 }, // Relation
+      { wch: 10 }, // Gender
+      { wch: 8 },  // Age
+      { wch: 16 }, // EPIC No
+      { wch: 12 }, // House No
+      { wch: 24 }, // Ward Name
+      { wch: 15 }, // Mobile
+      { wch: 10 }, // Part No
+      { wch: 10 }, // Serial No
+      { wch: 14 }, // Caste
+      { wch: 18 }, // Occupation
+      { wch: 14 }, // Is Karyakarta
+      { wch: 14 }, // Voting Status
+      { wch: 18 }  // Favored Party
     ];
 
     const wb = XLSX.utils.book_new();
@@ -449,20 +677,20 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
     const formatted: ParsedVoterRow[] = [];
     for (let i = 0; i < data.length; i++) {
       const row = data[i];
-      const rawName = getValue(row, ['name', 'voter_name', 'voter name', 'full name', 'voterName', 'voter']);
+      const rawName = getValue(row, ['Voter Name', 'voter_name', 'voter name', 'name', 'full name', 'voterName', 'voter']);
       const finalName = rawName || 'Unnamed Voter';
 
-      const rawVId = getValue(row, ['voter_id', 'voterId', 'voter id', 'epic', 'epic_no', 'epic no', 'epicId', 'id_card_no', 'voter_card_no']);
+      const rawVId = getValue(row, ['EPIC No', 'epic_no', 'epic no', 'epic', 'voter_id', 'voterId', 'voter id', 'epicId', 'id_card_no', 'voter_card_no']);
       const finalVId = rawVId ? rawVId.toUpperCase() : `EPIC-${Math.random().toString(36).substring(2, 9).toUpperCase()}`;
 
-      const rawAge = getValue(row, ['age', 'age_yrs', 'ageYrs', 'voter_age']);
+      const rawAge = getValue(row, ['Age', 'age', 'age_yrs', 'ageYrs', 'voter_age']);
       let rowAgeNum = 18;
       if (rawAge) {
         const num = parseInt(String(rawAge), 10);
         if (!isNaN(num)) rowAgeNum = num;
       }
 
-      const rawGender = getValue(row, ['gender', 'sex', 'gender_type']);
+      const rawGender = getValue(row, ['Gender', 'gender', 'sex', 'gender_type']);
       let finalGender = 'Male';
       if (rawGender) {
         const firstChar = String(rawGender).trim().charAt(0).toUpperCase();
@@ -472,14 +700,14 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
         else finalGender = String(rawGender).trim();
       }
 
-      const rawKaryakarta = getValue(row, ['is_karyakarta', 'isKaryakarta', 'is_worker', 'karyakarta', 'worker']);
+      const rawKaryakarta = getValue(row, ['Is Karyakarta', 'is_karyakarta', 'isKaryakarta', 'is_worker', 'karyakarta', 'worker']);
       let isKaryakartaNum = 0;
       if (rawKaryakarta !== '') {
         const lower = String(rawKaryakarta).trim().toLowerCase();
         if (lower === '1' || lower === 'true' || lower === 'yes' || lower === 'y') isKaryakartaNum = 1;
       }
 
-      const rawVotingStatus = getValue(row, ['voting_status', 'votingStatus', 'voting status', 'voted', 'status']);
+      const rawVotingStatus = getValue(row, ['Voting Status', 'voting_status', 'votingStatus', 'voting status', 'voted', 'status']);
       let finalVotingStatus = 'unvoted';
       if (rawVotingStatus) {
         const lower = String(rawVotingStatus).trim().toLowerCase();
@@ -491,36 +719,136 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
       }
 
       // Hierarchy IDs from file or from modal selectors
-      const rowBooth = getValue(row, ['booth_id', 'boothId', 'booth id', 'booth']) || selectedBoothId;
-      const rowMandal = getValue(row, ['mandal_id', 'mandalId', 'mandal id', 'mandal']) || '';
-      const rowConstituency = getValue(row, ['constituency_id', 'constituencyId', 'constituency id', 'constituency']) || selectedConstituencyId;
-      const rowState = getValue(row, ['state_id', 'stateId', 'state id', 'state']) || selectedStateId;
-      const rowDistrict = getValue(row, ['district_id', 'districtId', 'district id', 'district']) || selectedDistrictId;
+      const rawRowState = getValue(row, ['state_id', 'stateId', 'state id', 'state']);
+      let rowState = rawRowState ? normalizeId(rawRowState) : selectedStateId;
+
+      const rawRowDistrict = getValue(row, ['district_id', 'districtId', 'district id', 'district']);
+      let rowDistrict = rawRowDistrict ? normalizeId(rawRowDistrict) : selectedDistrictId;
+
+      const rawRowConstituency = getValue(row, ['constituency_id', 'constituencyId', 'constituency id', 'constituency']);
+      let rowConstituency = rawRowConstituency ? normalizeId(rawRowConstituency) : selectedConstituencyId;
+
+      const rawRowMandal = getValue(row, ['mandal_id', 'mandalId', 'mandal id', 'mandal']);
+      let rowMandal = rawRowMandal ? normalizeId(rawRowMandal) : selectedMandalId;
+
+      const rawRowPanchayat = getValue(row, ['panchayat_id', 'panchayatId', 'panchayat id', 'panchayat']);
+      let rowPanchayat = rawRowPanchayat ? normalizeId(rawRowPanchayat) : selectedPanchayatId;
+
+      const rawRowWardId = getValue(row, ['ward_id', 'wardId', 'ward id']);
+      let rowWardId = rawRowWardId ? normalizeId(rawRowWardId) : selectedWardId;
+
+      const rawRowBooth = getValue(row, ['booth_id', 'boothId', 'booth id', 'booth']);
+      let rowBooth = rawRowBooth ? normalizeId(rawRowBooth) : selectedBoothId;
+
+      // Auto-resolve ancestor IDs if deeper levels are present
+      if (rowBooth) {
+        const b = allBooths.find(x => normalizeId(x.id) === rowBooth || String(x.boothNumber).trim() === rowBooth);
+        if (b) {
+          if (!rowWardId && b.wardId) rowWardId = normalizeId(b.wardId);
+          if (!rowPanchayat && b.panchayatId) rowPanchayat = normalizeId(b.panchayatId);
+          if (!rowMandal && b.mandalId) rowMandal = normalizeId(b.mandalId);
+          if (!rowConstituency && b.constituencyId) rowConstituency = normalizeId(b.constituencyId);
+          if (!rowDistrict && b.districtId) rowDistrict = normalizeId(b.districtId);
+          if (!rowState && b.stateId) rowState = normalizeId(b.stateId);
+        }
+      }
+
+      if (rowWardId) {
+        const w = allWards.find(x => normalizeId(x.id) === rowWardId);
+        if (w) {
+          if (!rowPanchayat && w.panchayatId) rowPanchayat = normalizeId(w.panchayatId);
+          if (!rowMandal && w.mandalId) rowMandal = normalizeId(w.mandalId);
+          if (!rowConstituency && w.constituencyId) rowConstituency = normalizeId(w.constituencyId);
+          if (!rowDistrict && w.districtId) rowDistrict = normalizeId(w.districtId);
+          if (!rowState && w.stateId) rowState = normalizeId(w.stateId);
+        }
+      }
+
+      if (rowPanchayat) {
+        const p = allPanchayats.find(x => normalizeId(x.id) === rowPanchayat);
+        if (p) {
+          if (!rowMandal && p.mandalId) rowMandal = normalizeId(p.mandalId);
+          if (!rowConstituency && p.constituencyId) rowConstituency = normalizeId(p.constituencyId);
+          if (!rowDistrict && p.districtId) rowDistrict = normalizeId(p.districtId);
+          if (!rowState && p.stateId) rowState = normalizeId(p.stateId);
+        }
+      }
+
+      if (rowMandal) {
+        const m = allMandals.find(x => normalizeId(x.id) === rowMandal);
+        if (m) {
+          if (!rowConstituency && m.constituencyId) rowConstituency = normalizeId(m.constituencyId);
+          if (!rowDistrict && m.districtId) rowDistrict = normalizeId(m.districtId);
+          if (!rowState && m.stateId) rowState = normalizeId(m.stateId);
+        }
+      }
+
+      if (rowConstituency) {
+        const c = allConstituencies.find(x => normalizeId(x.id) === rowConstituency);
+        if (c) {
+          if (!rowDistrict && c.districtId) rowDistrict = normalizeId(c.districtId);
+          if (!rowState && c.stateId) rowState = normalizeId(c.stateId);
+        }
+      }
+
+      if (rowDistrict) {
+        const d = allDistricts.find(x => normalizeId(x.id) === rowDistrict);
+        if (d) {
+          if (!rowState && d.stateId) rowState = normalizeId(d.stateId);
+        }
+      }
+
+      const foundPanchayat = allPanchayats.find(p => normalizeId(p.id) === rowPanchayat);
+      const rowPanchayatName = getValue(row, ['panchayat_name', 'panchayatName', 'panchayat name']) || (foundPanchayat ? foundPanchayat.name : '');
+
+      const foundWard = allWards.find(w => normalizeId(w.id) === rowWardId);
+      const wardNameVal = getValue(row, ['Ward Name', 'ward_name', 'ward name', 'ward', 'village', 'area', 'colony', 'villageName', 'mohalla']) || (foundWard ? foundWard.name : '');
+
+      const houseNoVal = getValue(row, ['House No', 'house_no', 'house no', 'houseNumber', 'h no', 'h.no', 'h_no']);
+      const rawAddress = getValue(row, ['address', 'Address', 'current address', 'currentAddress', 'full_address']);
+      const finalAddress = rawAddress || ([houseNoVal ? `House No ${houseNoVal}` : '', wardNameVal].filter(Boolean).join(', '));
+
+      // Part No & Serial No
+      const rowPartNo = getValue(row, ['Part No', 'part_no', 'partNo', 'part no', 'part', 'part_number']) || defaultPartNo;
+      
+      let rowSrNo = getValue(row, ['Serial No', 'serial_no', 'serial no', 'sr_no', 'srNo', 'sr no', 'sr', 'serial']);
+      if (!rowSrNo && defaultSrNo) {
+        const startNum = parseInt(defaultSrNo, 10);
+        if (!isNaN(startNum)) {
+          rowSrNo = String(startNum + i);
+        } else {
+          rowSrNo = defaultSrNo;
+        }
+      }
 
       formatted.push({
         voter_id: finalVId,
         name: finalName,
-        relation_name: getValue(row, ['relation_name', 'relationName', 'relation name', 'fatherName', "father's name", 'father name', 'husbandName', "husband's name", 'guardian', 'relativeName']),
-        relation_type: getValue(row, ['relation_type', 'relationType', 'relation type', 'rel_type']) || 'Father',
+        relation_name: getValue(row, ['Relative Name', 'relative_name', 'relative name', 'relation_name', 'relationName', 'relation name', 'fatherName', "father's name", 'father name', 'husbandName', "husband's name", 'guardian', 'relativeName']),
+        relation_type: getValue(row, ['Relation', 'relation', 'relation_type', 'relationType', 'relation type', 'rel_type', 'relationship']) || 'Father',
         gender: finalGender,
         age: rowAgeNum,
-        part_no: getValue(row, ['part_no', 'partNo', 'part no', 'part', 'part_number']),
-        sr_no: getValue(row, ['sr_no', 'srNo', 'sr no', 'serial no', 'serial_no', 'sr', 'serial']),
-        mobile: getValue(row, ['mobile', 'phone', 'contact', 'mobileNumber', 'mobile_no']),
-        email: getValue(row, ['email', 'emailAddress', 'mail', 'email_id']),
-        address: getValue(row, ['address', 'current address', 'currentAddress', 'full_address']),
-        house_no: getValue(row, ['house_no', 'houseNo', 'house no', 'h no', 'h.no']),
-        village: getValue(row, ['village', 'area', 'colony', 'villageName', 'mohalla']),
-        caste: getValue(row, ['caste', 'category', 'casteCategory', 'caste_category']) || 'General',
-        occupation: getValue(row, ['occupation', 'work', 'job', 'profession']) || 'Private Service',
+        part_no: rowPartNo,
+        sr_no: rowSrNo || '',
+        mobile: getValue(row, ['Mobile', 'mobile', 'mobile_no', 'mobile no', 'phone', 'contact', 'mobileNumber']),
+        email: getValue(row, ['Email', 'email', 'emailAddress', 'mail', 'email_id']),
+        address: finalAddress,
+        house_no: houseNoVal,
+        village: wardNameVal,
+        caste: getValue(row, ['Caste', 'caste', 'category', 'casteCategory', 'caste_category']) || 'General',
+        occupation: getValue(row, ['Occupation', 'occupation', 'work', 'job', 'profession']) || 'Private Service',
         is_karyakarta: isKaryakartaNum,
         voting_status: finalVotingStatus,
-        party_inclination: getValue(row, ['party_inclination', 'partyInclination', 'party inclination', 'sentiment', 'inclination']) || 'Neutral',
+        party_inclination: getValue(row, ['Favored Party', 'favored_party', 'favored party', 'party_inclination', 'partyInclination', 'party inclination', 'sentiment', 'inclination']) || 'Neutral',
         state_id: rowState,
         district_id: rowDistrict,
         constituency_id: rowConstituency,
-        booth_id: rowBooth,
-        mandal_id: rowMandal
+        mandal_id: rowMandal,
+        panchayat_id: rowPanchayat,
+        panchayat_name: rowPanchayatName,
+        ward_id: rowWardId,
+        ward_name: wardNameVal,
+        booth_id: rowBooth
       });
     }
 
@@ -640,15 +968,40 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
     setProgress(0);
   };
 
-  const getTargetBoothLabel = () => {
-    const booth = booths.find(b => b.id === selectedBoothId);
-    if (!booth) return 'Not Selected';
-    return `${booth.boothNumber ? `Booth #${booth.boothNumber} - ` : ''}${booth.name}`;
+  const getTargetStateLabel = () => {
+    const st = allStates.find(s => normalizeId(s.id) === normalizeId(selectedStateId));
+    return st?.name || '';
+  };
+
+  const getTargetDistrictLabel = () => {
+    const dst = allDistricts.find(d => normalizeId(d.id) === normalizeId(selectedDistrictId));
+    return dst?.name || '';
   };
 
   const getTargetConstituencyLabel = () => {
-    const constItem = constituencies.find(c => c.id === selectedConstituencyId);
+    const constItem = allConstituencies.find(c => normalizeId(c.id) === normalizeId(selectedConstituencyId));
     return constItem?.name || 'Not Selected';
+  };
+
+  const getTargetMandalLabel = () => {
+    const mandal = allMandals.find(m => normalizeId(m.id) === normalizeId(selectedMandalId));
+    return mandal?.name || '';
+  };
+
+  const getTargetPanchayatLabel = () => {
+    const panchayat = allPanchayats.find(p => normalizeId(p.id) === normalizeId(selectedPanchayatId));
+    return panchayat?.name || '';
+  };
+
+  const getTargetWardLabel = () => {
+    const ward = allWards.find(w => normalizeId(w.id) === normalizeId(selectedWardId));
+    return ward?.name || '';
+  };
+
+  const getTargetBoothLabel = () => {
+    const booth = allBooths.find(b => normalizeId(b.id) === normalizeId(selectedBoothId));
+    if (!booth) return 'Not Selected';
+    return `${booth.boothNumber ? `Booth #${booth.boothNumber} - ` : ''}${booth.name}`;
   };
 
   if (!isOpen) return null;
@@ -667,7 +1020,7 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
         initial={{ scale: 0.96, opacity: 0, y: 15 }} 
         animate={{ scale: 1, opacity: 1, y: 0 }} 
         exit={{ scale: 0.96, opacity: 0, y: 15 }} 
-        className="relative bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col overflow-hidden z-10"
+        className="relative bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-4xl max-h-[92vh] flex flex-col overflow-hidden z-10"
       >
         {/* Modal Header */}
         <div className="p-4 sm:p-5 border-b border-zinc-200 dark:border-zinc-800 flex justify-between items-center bg-zinc-50/70 dark:bg-zinc-900/60 shrink-0">
@@ -783,8 +1136,8 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
                 </div>
               </div>
 
-              {/* Step 2: Target Location Hierarchy Selection (State, District, Constituency, Booth) */}
-              <div className="p-4 bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-3">
+              {/* Step 2: Target Location Hierarchy Selection (7 Levels + Part No + Serial No) */}
+              <div className="p-4 bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-4">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <div className="w-7 h-7 rounded-lg bg-blue-600 text-white flex items-center justify-center text-xs font-black shrink-0">
@@ -795,80 +1148,234 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
                         Default Target Hierarchy
                       </h4>
                       <p className="text-[11px] text-zinc-500">
-                        Applied if booth/constituency IDs are not specified inside your sheet
+                        Applied if booth, mandal, or ward values are not specified inside your sheet
                       </p>
                     </div>
                   </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                {/* 7-Tier Territory Hierarchy Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-1">
+                  {/* 1. State */}
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1">
-                      State
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1">
+                      1. State <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={selectedStateId}
-                      onChange={(e) => setSelectedStateId(e.target.value)}
-                      className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200"
+                      onChange={(e) => handleStateChange(e.target.value)}
+                      disabled={loadingDemographics}
+                      className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
                     >
-                      <option value="">Select State</option>
-                      {states.map(s => (
-                        <option key={s.id} value={s.id}>{s.name}</option>
+                      <option value="">{loadingDemographics ? 'Loading States...' : 'Select State'}</option>
+                      {availableStates.map(s => (
+                        <option key={s.id} value={s.id}>{s.name} {s.code ? `(${s.code})` : ''}</option>
                       ))}
                     </select>
                   </div>
 
+                  {/* 2. District */}
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1">
-                      District
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1">
+                      2. District <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={selectedDistrictId}
-                      onChange={(e) => setSelectedDistrictId(e.target.value)}
-                      disabled={!selectedStateId || loadingDistricts}
+                      onChange={(e) => handleDistrictChange(e.target.value)}
+                      disabled={!selectedStateId || loadingDemographics}
                       className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
                     >
-                      <option value="">{loadingDistricts ? 'Loading...' : 'Select District'}</option>
-                      {districts.map(d => (
+                      <option value="">
+                        {!selectedStateId 
+                          ? 'Select State first' 
+                          : (loadingDemographics ? 'Loading Districts...' : 'Select District')}
+                      </option>
+                      {availableDistricts.map(d => (
                         <option key={d.id} value={d.id}>{d.name}</option>
                       ))}
                     </select>
                   </div>
 
+                  {/* 3. Constituency */}
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1">
-                      Constituency
+                    <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1">
+                      3. Constituency <span className="text-red-500">*</span>
                     </label>
                     <select
                       value={selectedConstituencyId}
-                      onChange={(e) => setSelectedConstituencyId(e.target.value)}
-                      disabled={!selectedDistrictId || loadingConstituencies}
+                      onChange={(e) => handleConstituencyChange(e.target.value)}
+                      disabled={!selectedDistrictId || loadingDemographics}
                       className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
                     >
-                      <option value="">{loadingConstituencies ? 'Loading...' : 'Select Constituency'}</option>
-                      {constituencies.map(c => (
+                      <option value="">
+                        {!selectedDistrictId 
+                          ? 'Select District first' 
+                          : (loadingDemographics ? 'Loading Constituencies...' : 'Select Constituency')}
+                      </option>
+                      {availableConstituencies.map(c => (
                         <option key={c.id} value={c.id}>{c.name}</option>
                       ))}
                     </select>
                   </div>
 
+                  {/* 4. Block / Area (Mandal) */}
                   <div>
-                    <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-400 mb-1">
-                      Booth / Polling Station
-                    </label>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                        4. Block / Area (Mandal) <span className="text-zinc-400 font-normal">(Optional)</span>
+                      </label>
+                      {selectedConstituencyId && availableMandals.length > 0 && (
+                        <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400">
+                          {availableMandals.length} available
+                        </span>
+                      )}
+                    </div>
                     <select
-                      value={selectedBoothId}
-                      onChange={(e) => setSelectedBoothId(e.target.value)}
-                      disabled={!selectedConstituencyId || loadingBooths}
+                      value={selectedMandalId}
+                      onChange={(e) => handleMandalChange(e.target.value)}
+                      disabled={!selectedConstituencyId || loadingDemographics}
                       className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
                     >
-                      <option value="">{loadingBooths ? 'Loading...' : 'Select Booth'}</option>
-                      {booths.map(b => (
+                      <option value="">
+                        {!selectedConstituencyId 
+                          ? 'Select Constituency first' 
+                          : (loadingDemographics ? 'Loading Blocks / Mandals...' : 'Select Block / Area (Optional)')}
+                      </option>
+                      {availableMandals.map(m => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 5. Panchayat / MC / ULB */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                        5. Panchayat / MC / ULB <span className="text-zinc-400 font-normal">(Optional)</span>
+                      </label>
+                      {selectedConstituencyId && availablePanchayats.length > 0 && (
+                        <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400">
+                          {availablePanchayats.length} available
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={selectedPanchayatId}
+                      onChange={(e) => handlePanchayatChange(e.target.value)}
+                      disabled={!selectedConstituencyId || loadingDemographics}
+                      className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
+                    >
+                      <option value="">
+                        {!selectedConstituencyId 
+                          ? 'Select Constituency first' 
+                          : (loadingDemographics 
+                            ? 'Loading Local Bodies...' 
+                            : (selectedMandalId ? 'Select Local Body / Panchayat (Filtered by Block)' : 'Select Local Body / Panchayat (Optional)'))}
+                      </option>
+                      {availablePanchayats.map(p => (
+                        <option key={p.id} value={p.id}>{p.name} {p.type ? `(${p.type})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 6. Ward / Village */}
+                  <div>
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                        6. Ward / Village <span className="text-zinc-400 font-normal">(Optional)</span>
+                      </label>
+                      {selectedConstituencyId && availableWards.length > 0 && (
+                        <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400">
+                          {availableWards.length} available
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={selectedWardId}
+                      onChange={(e) => handleWardChange(e.target.value)}
+                      disabled={!selectedConstituencyId || loadingDemographics}
+                      className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
+                    >
+                      <option value="">
+                        {!selectedConstituencyId 
+                          ? 'Select Constituency first' 
+                          : (loadingDemographics 
+                            ? 'Loading Wards...' 
+                            : (selectedPanchayatId 
+                              ? 'Select Ward / Village (Filtered by Panchayat)' 
+                              : (selectedMandalId ? 'Select Ward / Village (Filtered by Block)' : 'Select Ward / Village (Optional)')))}
+                      </option>
+                      {availableWards.map(w => (
+                        <option key={w.id} value={w.id}>{w.name} {w.wardNumber ? `(Ward #${w.wardNumber})` : ''}</option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* 7. Polling Booth */}
+                  <div className="lg:col-span-3">
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-black uppercase tracking-wider text-zinc-500">
+                        7. Polling Booth <span className="text-zinc-400 font-normal">(Optional if specified in sheet)</span>
+                      </label>
+                      {selectedConstituencyId && availableBooths.length > 0 && (
+                        <span className="text-[9px] font-bold text-blue-600 dark:text-blue-400">
+                          {availableBooths.length} booths available
+                        </span>
+                      )}
+                    </div>
+                    <select
+                      value={selectedBoothId}
+                      onChange={(e) => handleBoothChange(e.target.value)}
+                      disabled={!selectedConstituencyId || loadingDemographics}
+                      className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 disabled:opacity-50"
+                    >
+                      <option value="">
+                        {!selectedConstituencyId 
+                          ? 'Select Constituency first' 
+                          : (loadingDemographics 
+                            ? 'Loading Booths...' 
+                            : (selectedWardId 
+                              ? 'Select Polling Booth (Filtered by Ward)' 
+                              : (selectedPanchayatId 
+                                ? 'Select Polling Booth (Filtered by Panchayat)' 
+                                : (selectedMandalId ? 'Select Polling Booth (Filtered by Block)' : 'Select Polling Booth (Optional)'))))}
+                      </option>
+                      {availableBooths.map(b => (
                         <option key={b.id} value={b.id}>
                           {b.boothNumber ? `Booth #${b.boothNumber} - ` : ''}{b.name}
                         </option>
                       ))}
                     </select>
+                  </div>
+                </div>
+
+                {/* Default Electoral Roll Part No & Serial No */}
+                <div className="pt-3 border-t border-zinc-200/70 dark:border-zinc-800/70">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1">
+                        Part No <span className="text-zinc-400 font-normal">(Optional default, e.g. 52)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 52"
+                        value={defaultPartNo}
+                        onChange={(e) => setDefaultPartNo(e.target.value)}
+                        className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-[10px] font-black uppercase tracking-wider text-zinc-500 mb-1">
+                        Serial No <span className="text-zinc-400 font-normal">(Starting serial, e.g. 101)</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. 101 (auto-increments if missing)"
+                        value={defaultSrNo}
+                        onChange={(e) => setDefaultSrNo(e.target.value)}
+                        className="w-full h-10 px-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950 text-xs focus:ring-1 focus:ring-blue-500 font-medium text-zinc-800 dark:text-zinc-200 placeholder:text-zinc-400"
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
@@ -884,10 +1391,10 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
                   </h4>
                 </div>
 
-                {(!selectedStateId || !selectedDistrictId || !selectedConstituencyId || !selectedBoothId) ? (
+                {(!selectedStateId || !selectedDistrictId || !selectedConstituencyId) ? (
                   <div className="p-3.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-400 text-xs font-medium flex items-center gap-2.5">
                     <AlertCircle size={16} className="shrink-0" />
-                    <span>Please select default State, District, Constituency, and Booth above to enable file upload.</span>
+                    <span>Please select at least default State, District, and Constituency above to enable file upload.</span>
                   </div>
                 ) : (
                   <div>
@@ -909,7 +1416,15 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
                         Click to select or drop <span className="text-blue-600">.xlsx</span> or <span className="text-blue-600">.csv</span> file here
                       </p>
                       <p className="text-[11px] text-zinc-400 mt-0.5">
-                        Targeting {getTargetConstituencyLabel()} &bull; {getTargetBoothLabel()}
+                        Targeting {[
+                          getTargetStateLabel(),
+                          getTargetDistrictLabel(),
+                          getTargetConstituencyLabel(),
+                          getTargetMandalLabel() ? `Block: ${getTargetMandalLabel()}` : '',
+                          getTargetPanchayatLabel() ? `Panchayat: ${getTargetPanchayatLabel()}` : '',
+                          getTargetWardLabel() ? `Ward: ${getTargetWardLabel()}` : '',
+                          getTargetBoothLabel() !== 'Not Selected' ? getTargetBoothLabel() : ''
+                        ].filter(Boolean).join(' • ')}
                       </p>
                     </div>
                   </div>
@@ -975,64 +1490,61 @@ export const BulkImportModal: React.FC<BulkImportModalProps> = ({
                   <table className="w-full text-left text-xs border-collapse whitespace-nowrap">
                     <thead className="bg-zinc-100/70 dark:bg-zinc-900 text-[10px] font-black uppercase text-zinc-500 border-b border-zinc-200 dark:border-zinc-800 sticky top-0">
                       <tr>
-                        <th className="p-2.5">EPIC / Voter ID</th>
-                        <th className="p-2.5">Full Name</th>
-                        <th className="p-2.5">Relative &amp; Relation</th>
-                        <th className="p-2.5">Gender / Age</th>
-                        <th className="p-2.5">Part # / Sr #</th>
-                        <th className="p-2.5">Contact (Mobile/Email)</th>
-                        <th className="p-2.5">Address / House / Village</th>
-                        <th className="p-2.5">Caste &amp; Job</th>
-                        <th className="p-2.5">Karyakarta?</th>
-                        <th className="p-2.5">Status &amp; Inclination</th>
+                        <th className="py-2 px-3">Voter Name</th>
+                        <th className="py-2 px-3">Relative Name (Relation)</th>
+                        <th className="py-2 px-3">Gender / Age</th>
+                        <th className="py-2 px-3">EPIC No</th>
+                        <th className="py-2 px-3">House No</th>
+                        <th className="py-2 px-3">Ward Name</th>
+                        <th className="py-2 px-3">Mobile</th>
+                        <th className="py-2 px-3">Part # / Sr #</th>
+                        <th className="py-2 px-3">Status / Party</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/80 text-[11px]">
                       {previewRows.map((voter, idx) => (
                         <tr key={idx} className="hover:bg-zinc-50 dark:hover:bg-zinc-900/40">
-                          <td className="p-2.5 font-mono font-bold text-blue-600 dark:text-blue-400">
-                            {voter.voter_id}
-                          </td>
-                          <td className="p-2.5 font-bold text-zinc-900 dark:text-white">
+                          <td className="py-1.5 px-3 font-bold text-zinc-900 dark:text-white">
                             {voter.name}
                           </td>
-                          <td className="p-2.5 text-zinc-500">
-                            {voter.relation_name ? `${voter.relation_name} (${voter.relation_type || 'Father'})` : '-'}
+                          <td className="py-1.5 px-3 text-zinc-500">
+                            {voter.relation_name ? (
+                              <div className="flex items-center gap-1.5 truncate">
+                                <span className="px-1.5 py-0.5 rounded text-[9px] font-extrabold uppercase bg-blue-50 dark:bg-blue-950 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                  {voter.relation_type || 'Father'}
+                                </span>
+                                <span className="font-semibold text-zinc-700 dark:text-zinc-300">{voter.relation_name}</span>
+                              </div>
+                            ) : '-'}
                           </td>
-                          <td className="p-2.5 text-zinc-700 dark:text-zinc-300">
-                            {voter.gender} &bull; {voter.age}y
+                          <td className="py-1.5 px-3 text-zinc-700 dark:text-zinc-300">
+                            {voter.gender || '-'} &bull; {voter.age ? `${voter.age}y` : '-'}
                           </td>
-                          <td className="p-2.5 font-mono text-zinc-500">
+                          <td className="py-1.5 px-3 font-mono font-bold text-blue-600 dark:text-blue-400">
+                            {voter.voter_id}
+                          </td>
+                          <td className="py-1.5 px-3 font-mono text-zinc-700 dark:text-zinc-300">
+                            {voter.house_no || '-'}
+                          </td>
+                          <td className="py-1.5 px-3 text-zinc-600 dark:text-zinc-400 max-w-[150px] truncate">
+                            {voter.village || voter.address || '-'}
+                          </td>
+                          <td className="py-1.5 px-3 font-mono text-zinc-600 dark:text-zinc-400">
+                            {voter.mobile || '-'}
+                          </td>
+                          <td className="py-1.5 px-3 font-mono text-zinc-500">
                             P:{voter.part_no || '-'} / S:{voter.sr_no || '-'}
                           </td>
-                          <td className="p-2.5 text-zinc-600 dark:text-zinc-400">
-                            <div>{voter.mobile || '-'}</div>
-                            {voter.email && <div className="text-[10px] text-zinc-400">{voter.email}</div>}
-                          </td>
-                          <td className="p-2.5 text-zinc-600 dark:text-zinc-400">
-                            <div>{voter.house_no ? `H.No ${voter.house_no}, ` : ''}{voter.village || ''}</div>
-                            {voter.address && <div className="text-[10px] text-zinc-400 truncate max-w-[150px]">{voter.address}</div>}
-                          </td>
-                          <td className="p-2.5 text-zinc-600 dark:text-zinc-400">
-                            {voter.caste || 'General'} &bull; {voter.occupation || 'Service'}
-                          </td>
-                          <td className="p-2.5">
-                            {voter.is_karyakarta === 1 ? (
-                              <span className="px-2 py-0.5 rounded-full text-[9px] font-bold bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 flex items-center gap-1 w-fit">
-                                <ShieldCheck size={11} /> Karyakarta
+                          <td className="py-1.5 px-3">
+                            <div className="flex items-center gap-1.5">
+                              <span className={`px-2 py-0.5 rounded-full text-[9px] font-bold ${
+                                voter.voting_status === 'voted' ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
+                              }`}>
+                                {voter.voting_status || 'unvoted'}
                               </span>
-                            ) : (
-                              <span className="text-[10px] text-zinc-400">No</span>
-                            )}
-                          </td>
-                          <td className="p-2.5 space-y-1">
-                            <span className={`inline-block px-2 py-0.5 rounded-full text-[9px] font-bold ${
-                              voter.voting_status === 'voted' ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-600' : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500'
-                            }`}>
-                              {voter.voting_status || 'unvoted'}
-                            </span>
-                            <div className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
-                              {voter.party_inclination || 'Neutral'}
+                              <span className="text-[10px] font-semibold text-blue-600 dark:text-blue-400">
+                                ({voter.party_inclination || 'Neutral'})
+                              </span>
                             </div>
                           </td>
                         </tr>

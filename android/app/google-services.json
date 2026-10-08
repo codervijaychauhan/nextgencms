@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "5082435816",
+    "project_id": "gen-lang-client-0108797473",
+    "storage_bucket": "gen-lang-client-0108797473.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:5082435816:android:806ef3da3ddcd24e15b95d",
+        "android_client_info": {
+          "package_name": "nextgencms.app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "5082435816-16fk10i0n8vv31n4sceepclp98s83gbb.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD4Crxfln4O0K2J5Pq7TnVkp-MaUM19WYY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "5082435816-16fk10i0n8vv31n4sceepclp98s83gbb.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

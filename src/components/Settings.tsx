@@ -6,7 +6,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { Bell, Monitor, Shield, CheckCircle, AlertCircle, Loader2, Save, Key, Eye, EyeOff } from 'lucide-react';
 
 export default function Settings() {
-  const { theme, toggleTheme } = useTheme();
+  const { theme, setTheme } = useTheme();
   const [isSaving, setIsSaving] = useState(false);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'success' | 'error'>('idle');
   const [activeTab, setActiveTab] = useState<'application' | 'notifications' | 'security'>('application');
@@ -153,7 +153,7 @@ export default function Settings() {
                   <label className="data-label">Interface Theme</label>
                   <div className="flex gap-4">
                     <button 
-                      onClick={() => theme !== 'light' && toggleTheme()}
+                      onClick={() => setTheme('light')}
                       className={`flex-1 p-4 rounded-xl border transition-all text-left ${
                         theme === 'light' 
                           ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/5 ring-1 ring-blue-500' 
@@ -165,7 +165,7 @@ export default function Settings() {
                       <p className="text-xs text-zinc-500">Classic high-visibility mode</p>
                     </button>
                     <button 
-                      onClick={() => theme !== 'dark' && toggleTheme()}
+                      onClick={() => setTheme('dark')}
                       className={`flex-1 p-4 rounded-xl border transition-all text-left ${
                         theme === 'dark' 
                           ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/5 ring-1 ring-blue-500' 

@@ -1,0 +1,10 @@
+<resources>
+    <style name="Theme.NextGenCMS" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">#09090b</item>
+        <item name="colorPrimaryVariant">#000000</item>
+        <item name="colorOnPrimary">#ffffff</item>
+        <item name="android:statusBarColor">#09090b</item>
+        <item name="android:navigationBarColor">#000000</item>
+        <item name="android:windowBackground">#09090b</item>
+    </style>
+</resources>

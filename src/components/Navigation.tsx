@@ -4,7 +4,7 @@ import {
   Command, Sun, Moon, ChevronUp, Settings, Users,
   ChevronLeft, ChevronRight, Database, Flag, BarChart3, ClipboardList,
   Building2, Gift, TrendingUp, UserCog, Wallet, MessageSquare, Layers,
-  Search, ShieldCheck, Sparkles, ExternalLink
+  Search, ShieldCheck, Sparkles, ExternalLink, Smartphone, Download
 } from 'lucide-react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '../AuthProvider';
@@ -12,6 +12,7 @@ import { useTheme } from '../ThemeProvider';
 import { useSidebar } from '../SidebarContext';
 import { motion, AnimatePresence } from 'motion/react';
 import Logo from './Logo';
+import MobileAppModal from './MobileAppModal';
 
 export default function Navigation() {
   const { signOut, user, isSuperAdmin, profile } = useAuth();
@@ -20,6 +21,7 @@ export default function Navigation() {
   const location = useLocation();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isUserMenuOpen, setIsUserMenuOpen] = useState(false);
+  const [isMobileAppModalOpen, setIsMobileAppModalOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -228,10 +230,24 @@ export default function Navigation() {
                   <Settings size={14} className="text-zinc-400" />
                   Preferences
                 </Link>
+                <button
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    setIsMobileMenuOpen(false);
+                    setIsMobileAppModalOpen(true);
+                  }}
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-md transition-all cursor-pointer"
+                >
+                  <span className="flex items-center gap-2.5">
+                    <Smartphone size={14} className="text-blue-500" />
+                    Download App (APK)
+                  </span>
+                  <span className="text-[9px] uppercase font-extrabold text-blue-600 dark:text-blue-400 bg-blue-500/10 border border-blue-500/20 px-1.5 py-0.5 rounded">APK</span>
+                </button>
                 <div className="h-px bg-zinc-100 dark:bg-zinc-800/80 my-1 mx-2" />
                 <button
                   onClick={toggleTheme}
-                  className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-md transition-all"
+                  className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-md transition-all cursor-pointer"
                 >
                   <span className="flex items-center gap-2.5">
                     {theme === 'light' ? <Moon size={14} className="text-zinc-400" /> : <Sun size={14} className="text-zinc-400" />}
@@ -241,7 +257,7 @@ export default function Navigation() {
                 </button>
                 <button
                   onClick={() => signOut()}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-md transition-all"
+                  className="w-full flex items-center gap-2.5 px-3 py-2 text-xs font-bold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-500/10 rounded-md transition-all cursor-pointer"
                 >
                   <LogOut size={14} />
                   Sign Out
@@ -280,23 +296,6 @@ export default function Navigation() {
 
   return (
     <>
-      {/* Desktop Top Header Bar (Vercel / Cloudflare Style) */}
-      <header className={`hidden md:flex fixed top-0 right-0 h-16 z-20 bg-white/80 dark:bg-[#050506]/80 backdrop-blur-xl border-b border-zinc-200/90 dark:border-zinc-800/80 transition-all duration-200 items-center justify-end px-6 ${isCollapsed ? 'left-20' : 'left-64'
-        }`}>
-        {/* Quick controls & actions */}
-        <div className="flex items-center gap-3">
-          {/* Theme Toggle */}
-          <button
-            onClick={toggleTheme}
-            className="w-8 h-8 rounded-md bg-zinc-100/80 dark:bg-zinc-900/80 border border-zinc-200 dark:border-zinc-800 flex items-center justify-center text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:border-zinc-300 dark:hover:border-zinc-700 transition-all active:scale-95"
-            title={`Switch to ${theme === 'light' ? 'Dark' : 'Light'} Mode`}
-            aria-label="Toggle Color Theme"
-          >
-            {theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
-          </button>
-        </div>
-      </header>
-
       {/* Desktop Sidebar */}
       <aside className={`hidden md:fixed md:inset-y-0 md:flex md:flex-col border-r border-zinc-200/90 dark:border-zinc-800/80 z-30 transition-all duration-200 ${isCollapsed ? 'md:w-20' : 'md:w-64'}`}>
         <SidebarContent />
@@ -311,15 +310,24 @@ export default function Navigation() {
 
         <div className="flex items-center gap-2">
           <button
+            onClick={() => setIsMobileAppModalOpen(true)}
+            className="text-blue-600 dark:text-blue-400 p-2 hover:bg-blue-50 dark:hover:bg-blue-900/30 rounded-md flex items-center gap-1 text-xs font-bold cursor-pointer"
+            aria-label="Download Mobile App"
+            title="Download Android APK"
+          >
+            <Smartphone size={16} />
+            <span className="hidden xs:inline text-[11px]">APK</span>
+          </button>
+          <button
             onClick={toggleTheme}
-            className="text-zinc-400 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-md"
+            className="text-zinc-400 p-2 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-md cursor-pointer"
             aria-label="Toggle Theme"
           >
             {theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
           </button>
           <button
             onClick={() => setIsMobileMenuOpen(true)}
-            className="p-2 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-md"
+            className="p-2 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-900 rounded-md cursor-pointer"
             aria-label="Open Navigation Menu"
           >
             <Menu size={18} />
@@ -355,6 +363,16 @@ export default function Navigation() {
               <SidebarContent isMobile />
             </motion.div>
           </>
+        )}
+      </AnimatePresence>
+
+      {/* Mobile App & APK Download Modal */}
+      <AnimatePresence>
+        {isMobileAppModalOpen && (
+          <MobileAppModal
+            isOpen={isMobileAppModalOpen}
+            onClose={() => setIsMobileAppModalOpen(false)}
+          />
         )}
       </AnimatePresence>
     </>

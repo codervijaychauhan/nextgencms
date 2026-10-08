@@ -818,43 +818,36 @@ export default function Benefits() {
         ) : (
           <>
             <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse min-w-[800px]">
+            <table className="w-full text-left border-collapse min-w-[800px] whitespace-nowrap">
               <thead>
-                <tr className="bg-zinc-50 dark:bg-zinc-950/50 text-[10px] font-black uppercase tracking-widest text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
-                  <th className="py-4 px-5">Citizen (Recipient)</th>
-                  <th className="py-4 px-5">Benefit (Aid Scheme)</th>
-                  <th className="py-4 px-5">Source Type</th>
-                  <th className="py-4 px-5">Allocation Date</th>
-                  <th className="py-4 px-5 text-right">Value (INR)</th>
-                  <th className="py-4 px-5 text-center">Actions</th>
+                <tr className="bg-zinc-50/70 dark:bg-zinc-950/50 text-[10px] font-black uppercase tracking-widest text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
+                  <th className="py-2 px-3">Citizen (Recipient)</th>
+                  <th className="py-2 px-3">Benefit (Aid Scheme)</th>
+                  <th className="py-2 px-3">Source Type</th>
+                  <th className="py-2 px-3">Allocation Date</th>
+                  <th className="py-2 px-3 text-right">Value (INR)</th>
+                  <th className="py-2 px-3 text-center">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 text-xs text-zinc-700 dark:text-zinc-400">
                 {paginatedBenefits.map(b => (
                   <tr key={b.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-955/30 transition-all">
                     {/* Citizen ID details */}
-                    <td className="py-3 px-5">
-                      <div>
-                        <p className="font-bold text-zinc-900 dark:text-white">{b.voterName}</p>
-                        <p className="text-[10px] text-zinc-400 dark:text-zinc-500 font-mono mt-0.5">EPIC: {b.voterId}</p>
+                    <td className="py-2 px-3">
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-zinc-900 dark:text-white truncate max-w-[160px]" title={b.voterName}>{b.voterName}</span>
+                        <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-semibold shrink-0">({b.voterId})</span>
                       </div>
                     </td>
 
                     {/* Benefit / Program */}
-                    <td className="py-3 px-5">
-                      <div>
-                        <p className="font-semibold text-zinc-800 dark:text-zinc-200">{b.benefitName}</p>
-                        {b.notes && (
-                          <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-0.5 truncate max-w-[200px]" title={b.notes}>
-                            Rem: {b.notes}
-                          </p>
-                        )}
-                      </div>
+                    <td className="py-2 px-3">
+                      <div className="font-semibold text-zinc-800 dark:text-zinc-200 truncate max-w-[180px]" title={b.benefitName}>{b.benefitName}</div>
                     </td>
 
                     {/* Source Type Tag */}
-                    <td className="py-3 px-5">
-                      <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-widest ${
+                    <td className="py-2 px-3">
+                      <span className={`inline-flex items-center gap-1 px-2 py-0.2 rounded-full text-[9px] font-bold uppercase tracking-widest ${
                         b.benefitType === 'Government' 
                           ? 'bg-purple-50 dark:bg-purple-500/10 text-purple-600 dark:text-purple-400' 
                           : 'bg-orange-50 dark:bg-orange-500/10 text-orange-600 dark:text-orange-400'
@@ -867,38 +860,40 @@ export default function Benefits() {
                     </td>
 
                     {/* Allocation Date */}
-                    <td className="py-3 px-5 font-mono text-zinc-500 dark:text-zinc-500">
+                    <td className="py-2 px-3 font-mono text-zinc-500 dark:text-zinc-500">
                       <div className="flex items-center gap-1.5">
-                        <Calendar size={12} className="opacity-70" />
+                        <Calendar size={11} className="opacity-70" />
                         {new Date(b.date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}
                       </div>
                     </td>
 
                     {/* Monetary value */}
-                    <td className="py-3 px-5 text-right font-bold text-zinc-900 dark:text-white font-mono">
+                    <td className="py-2 px-3 text-right font-bold text-zinc-900 dark:text-white font-mono">
                       ₹{b.amount.toLocaleString('en-IN')}
                     </td>
 
                     {/* Actions panel */}
-                    <td className="py-3 px-5 text-center">
-                      <div className="flex items-center justify-center gap-2">
+                    <td className="py-2 px-3 text-center whitespace-nowrap">
+                      <div className="flex items-center justify-center gap-1.5">
                         {/* Detail View Eye Trigger */}
                         <button
                           onClick={() => setDetailBenefit(b)}
-                          className="text-blue-600 hover:text-blue-850 dark:text-blue-400 dark:hover:text-blue-300 p-1.5 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded-lg transition-all"
+                          className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                           title="View entire disbursement details"
                         >
-                          <Eye size={14} />
+                          <Eye size={12} />
+                          <span>View</span>
                         </button>
 
                         {/* Edit Benefit Trigger */}
                         {hasRight('benefits', 'u') && (
                           <button
                             onClick={() => startEditBenefit(b)}
-                            className="text-amber-500 hover:text-amber-700 dark:hover:text-amber-400 p-1.5 hover:bg-amber-50 dark:hover:bg-amber-950/40 rounded-lg transition-all"
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                             title="Edit benefit record"
                           >
-                            <Edit2 size={14} />
+                            <Edit2 size={12} />
+                            <span>Edit</span>
                           </button>
                         )}
 
@@ -907,13 +902,13 @@ export default function Benefits() {
                             <div className="flex items-center gap-1 bg-red-50 dark:bg-red-950/30 p-1 rounded-lg">
                               <button
                                 onClick={() => handleDeleteBenefit(b.id)}
-                                className="bg-red-650 hover:bg-red-700 text-white font-bold text-[9px] px-2 py-1 rounded"
+                                className="bg-red-650 hover:bg-red-700 text-white font-bold text-[9px] px-2 py-1 rounded cursor-pointer"
                               >
                                 Confirm
                               </button>
                               <button
                                 onClick={() => setConfirmDeleteId(null)}
-                                className="text-zinc-500 hover:text-zinc-800 dark:hover:text-white text-[9px] px-2 py-1"
+                                className="text-zinc-500 hover:text-zinc-800 dark:hover:text-white text-[9px] px-2 py-1 cursor-pointer"
                               >
                                 Abort
                               </button>
@@ -921,10 +916,11 @@ export default function Benefits() {
                           ) : (
                             <button
                               onClick={() => setConfirmDeleteId(b.id)}
-                              className="text-red-500 hover:text-red-700 dark:hover:text-red-400 p-1.5 hover:bg-zinc-100 dark:hover:bg-zinc-850 rounded-lg transition-all"
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                               title="Delete benefit record"
                             >
-                              <Trash2 size={14} />
+                              <Trash2 size={12} />
+                              <span>Delete</span>
                             </button>
                           )
                         ) : null}

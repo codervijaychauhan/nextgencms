@@ -24,6 +24,13 @@ type UserColumnKey =
   | 'status'
   | 'role'
   | 'reporting'
+  | 'state'
+  | 'district'
+  | 'constituency'
+  | 'mandal'
+  | 'panchayat'
+  | 'ward'
+  | 'booth'
   | 'createdAt'
   | 'actions';
 
@@ -34,6 +41,16 @@ const DEFAULT_USER_COLUMNS: ColumnDef<UserColumnKey>[] = [
   { id: 'status', label: 'Status', category: 'Status', defaultVisible: true, minWidth: '100px' },
   { id: 'role', label: 'Assigned Role', category: 'Security', defaultVisible: true, minWidth: '130px' },
   { id: 'reporting', label: 'Hierarchy / Reporting', category: 'Organization', defaultVisible: false, minWidth: '150px' },
+
+  // Geographic / Demographic Scope Hierarchy Fields
+  { id: 'state', label: 'State', category: 'Election Scope', defaultVisible: false, minWidth: '120px' },
+  { id: 'district', label: 'District', category: 'Election Scope', defaultVisible: false, minWidth: '120px' },
+  { id: 'constituency', label: 'Constituency', category: 'Election Scope', defaultVisible: false, minWidth: '130px' },
+  { id: 'mandal', label: 'Block / Area', category: 'Election Scope', defaultVisible: false, minWidth: '130px' },
+  { id: 'panchayat', label: 'Panchayat / ULB', category: 'Election Scope', defaultVisible: false, minWidth: '140px' },
+  { id: 'ward', label: 'Ward / Village', category: 'Election Scope', defaultVisible: false, minWidth: '130px' },
+  { id: 'booth', label: 'Polling Booth', category: 'Election Scope', defaultVisible: false, minWidth: '140px' },
+
   { id: 'createdAt', label: 'Join Date', category: 'General', defaultVisible: true, minWidth: '120px' },
   { id: 'actions', label: 'Actions', category: 'Controls', required: true, defaultVisible: true, minWidth: '140px' },
 ];
@@ -70,10 +87,16 @@ interface UserData {
   stateId?: string;
   districtId?: string;
   constituencyId?: string;
+  mandalId?: string;
+  panchayatId?: string;
+  wardId?: string;
   boothId?: string;
   state_id?: string;
   district_id?: string;
   constituency_id?: string;
+  mandal_id?: string;
+  panchayat_id?: string;
+  ward_id?: string;
   assigned_booths?: string[];
 }
 
@@ -95,10 +118,40 @@ interface IndiaConstituency {
   stateId: string;
 }
 
+interface IndiaMandal {
+  id: string;
+  name: string;
+  constituencyId: string;
+  districtId?: string;
+  stateId?: string;
+}
+
+interface IndiaPanchayat {
+  id: string;
+  name: string;
+  mandalId: string;
+  constituencyId?: string;
+  districtId?: string;
+  stateId?: string;
+}
+
+interface IndiaWard {
+  id: string;
+  name: string;
+  panchayatId: string;
+  mandalId?: string;
+  constituencyId?: string;
+  districtId?: string;
+  stateId?: string;
+}
+
 interface IndiaBooth {
   id: string;
   name: string;
   boothNumber?: string;
+  wardId?: string;
+  panchayatId?: string;
+  mandalId?: string;
   constituencyId: string;
   districtId: string;
   stateId: string;
@@ -196,6 +249,9 @@ export default function UserManagement() {
     stateId: '',
     districtId: '',
     constituencyId: '',
+    mandalId: '',
+    panchayatId: '',
+    wardId: '',
     boothId: '',
     parentAdminId: '',
     parentManagerId: '',
@@ -231,24 +287,35 @@ export default function UserManagement() {
     return () => clearTimeout(timer);
   }, [voterQuery]);
 
-  // Hierarchy Data
+  // Hierarchy Data (All 7 Levels)
   const [states, setStates] = useState<IndiaState[]>([]);
   const [districts, setDistricts] = useState<IndiaDistrict[]>([]);
   const [constituencies, setConstituencies] = useState<IndiaConstituency[]>([]);
+  const [mandals, setMandals] = useState<IndiaMandal[]>([]);
+  const [panchayats, setPanchayats] = useState<IndiaPanchayat[]>([]);
+  const [wards, setWards] = useState<IndiaWard[]>([]);
   const [booths, setBooths] = useState<IndiaBooth[]>([]);
 
   // Open and normalize user profile edit modal
   const openEditModal = (u: UserData, tab: 'details' | 'demographics' | 'permissions' = 'details') => {
     setError('');
-    const rawState = String(u.stateId || u.state_id || '').trim();
-    const rawDistrict = String(u.districtId || u.district_id || '').trim();
-    const rawConst = String(u.constituencyId || u.constituency_id || '').trim();
+    const electSettings = u.election_settings || (u as any).electionSettings || {};
+    const rawState = String(u.stateId || u.state_id || electSettings.state_id || electSettings.stateId || '').trim();
+    const rawDistrict = String(u.districtId || u.district_id || electSettings.district_id || electSettings.districtId || '').trim();
+    const rawConst = String(u.constituencyId || u.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '').trim();
+    const rawMandal = String(u.mandalId || u.mandal_id || electSettings.mandal_id || electSettings.mandalId || '').trim();
+    const rawPanchayat = String(u.panchayatId || u.panchayat_id || electSettings.panchayat_id || electSettings.panchayatId || '').trim();
+    const rawWard = String(u.wardId || u.ward_id || electSettings.ward_id || electSettings.wardId || '').trim();
 
     let rawBoothsArr: string[] = [];
     if (Array.isArray(u.assigned_booths) && u.assigned_booths.length > 0) {
       rawBoothsArr = u.assigned_booths.map(normalizeId).filter(b => b && b !== '[]' && b !== 'null' && b !== 'undefined');
+    } else if (Array.isArray(electSettings.assigned_booths) && electSettings.assigned_booths.length > 0) {
+      rawBoothsArr = electSettings.assigned_booths.map(normalizeId).filter((b: any) => b && b !== '[]' && b !== 'null' && b !== 'undefined');
     } else if (u.boothId && u.boothId !== '[]' && u.boothId !== 'null' && u.boothId !== 'undefined') {
       rawBoothsArr = String(u.boothId).split(',').map(normalizeId).filter(b => b && b !== '[]' && b !== 'null' && b !== 'undefined');
+    } else if (electSettings.booth_id && electSettings.booth_id !== '[]' && electSettings.booth_id !== 'null' && electSettings.booth_id !== 'undefined') {
+      rawBoothsArr = String(electSettings.booth_id).split(',').map(normalizeId).filter((b: any) => b && b !== '[]' && b !== 'null' && b !== 'undefined');
     }
 
     const cleanState = (rawState && rawState !== 'null' && rawState !== 'undefined' && rawState !== '[]')
@@ -259,6 +326,15 @@ export default function UserManagement() {
       : '';
     const cleanConst = (rawConst && rawConst !== 'null' && rawConst !== 'undefined' && rawConst !== '[]')
       ? rawConst.split(',').map(normalizeId).filter(Boolean).join(',')
+      : '';
+    const cleanMandal = (rawMandal && rawMandal !== 'null' && rawMandal !== 'undefined' && rawMandal !== '[]')
+      ? rawMandal.split(',').map(normalizeId).filter(Boolean).join(',')
+      : '';
+    const cleanPanchayat = (rawPanchayat && rawPanchayat !== 'null' && rawPanchayat !== 'undefined' && rawPanchayat !== '[]')
+      ? rawPanchayat.split(',').map(normalizeId).filter(Boolean).join(',')
+      : '';
+    const cleanWard = (rawWard && rawWard !== 'null' && rawWard !== 'undefined' && rawWard !== '[]')
+      ? rawWard.split(',').map(normalizeId).filter(Boolean).join(',')
       : '';
     const cleanBoothsArr = rawBoothsArr.map(normalizeId).filter(Boolean);
     const cleanBooth = cleanBoothsArr.join(',');
@@ -281,11 +357,19 @@ export default function UserManagement() {
       stateId: cleanState,
       districtId: cleanDistrict,
       constituencyId: cleanConst,
+      mandalId: cleanMandal,
+      panchayatId: cleanPanchayat,
+      wardId: cleanWard,
       boothId: cleanBooth,
       state_id: cleanState,
       district_id: cleanDistrict,
       constituency_id: cleanConst,
+      mandal_id: cleanMandal,
+      panchayat_id: cleanPanchayat,
+      ward_id: cleanWard,
       assigned_booths: cleanBoothsArr,
+      election_settings: electSettings,
+      electionSettings: electSettings,
       permissions: u.permissions || (u as any).rights || {},
       disabled: Boolean(u.disabled)
     });
@@ -294,7 +378,7 @@ export default function UserManagement() {
     setActiveTab(tab);
   };
 
-  // Multi-select state selectors and handlers for editing user
+  // Multi-select state selectors and handlers for editing user (7 tiers)
   const selectedEditUserStates = (editingUser?.stateId || editingUser?.state_id)
     ? String(editingUser.stateId || editingUser.state_id).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')
     : [];
@@ -304,26 +388,35 @@ export default function UserManagement() {
   const selectedEditUserConstituencies = (editingUser?.constituencyId || editingUser?.constituency_id)
     ? String(editingUser.constituencyId || editingUser.constituency_id).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')
     : [];
+  const selectedEditUserMandals = (editingUser?.mandalId || editingUser?.mandal_id)
+    ? String(editingUser.mandalId || editingUser.mandal_id).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')
+    : [];
+  const selectedEditUserPanchayats = (editingUser?.panchayatId || editingUser?.panchayat_id)
+    ? String(editingUser.panchayatId || editingUser.panchayat_id).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')
+    : [];
+  const selectedEditUserWards = (editingUser?.wardId || editingUser?.ward_id)
+    ? String(editingUser.wardId || editingUser.ward_id).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')
+    : [];
   const selectedEditUserBooths = (editingUser?.boothId || (editingUser?.assigned_booths && editingUser.assigned_booths.length > 0))
     ? (editingUser.boothId
       ? String(editingUser.boothId).split(',').map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')
       : (editingUser.assigned_booths || []).map(normalizeId).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]'))
     : [];
 
-  // Cascading filtered options for Election Setting dropdowns (Edit Modal)
+  // Cascading filtered options for Election Setting dropdowns (Edit Modal - 7 Tiers)
   const availableStates = states.map(s => ({
     id: normalizeId(s.id),
     name: s.name
   }));
 
   const availableDistricts = districts.filter(d =>
-    selectedEditUserStates.length === 0 || selectedEditUserStates.includes(normalizeId(d.stateId))
+    selectedEditUserStates.length === 0 || !d.stateId || selectedEditUserStates.includes(normalizeId(d.stateId))
   ).map(d => {
     const parentState = states.find(s => normalizeId(s.id) === normalizeId(d.stateId));
     return {
       id: normalizeId(d.id),
       name: d.name,
-      detail: parentState ? parentState.name : undefined
+      detail: parentState ? `State: ${parentState.name}` : undefined
     };
   });
 
@@ -332,29 +425,104 @@ export default function UserManagement() {
     const parentDistrict = districts.find(d => normalizeId(d.id) === constDistId);
     const constStateId = normalizeId(c.stateId || parentDistrict?.stateId || '');
 
-    const matchState = selectedEditUserStates.length === 0 || selectedEditUserStates.includes(constStateId);
-    const matchDistrict = selectedEditUserDistricts.length === 0 || (constDistId && selectedEditUserDistricts.includes(constDistId));
+    const matchState = selectedEditUserStates.length === 0 || !constStateId || selectedEditUserStates.includes(constStateId);
+    const matchDistrict = selectedEditUserDistricts.length === 0 || !constDistId || selectedEditUserDistricts.includes(constDistId);
     return matchState && matchDistrict;
   }).map(c => {
     const parentDistrict = districts.find(d => normalizeId(d.id) === normalizeId(c.districtId));
     return {
       id: normalizeId(c.id),
       name: c.name,
-      detail: parentDistrict ? parentDistrict.name : undefined
+      detail: parentDistrict ? `District: ${parentDistrict.name}` : undefined
+    };
+  });
+
+  const availableMandals = mandals.filter(m => {
+    const mandalConstId = normalizeId(m.constituencyId);
+    const parentConst = constituencies.find(c => normalizeId(c.id) === mandalConstId);
+    const mandalDistId = normalizeId(m.districtId || parentConst?.districtId || '');
+    const parentDistrict = districts.find(d => normalizeId(d.id) === mandalDistId);
+    const mandalStateId = normalizeId(m.stateId || parentConst?.stateId || parentDistrict?.stateId || '');
+
+    const matchState = selectedEditUserStates.length === 0 || !mandalStateId || selectedEditUserStates.includes(mandalStateId);
+    const matchDistrict = selectedEditUserDistricts.length === 0 || !mandalDistId || selectedEditUserDistricts.includes(mandalDistId);
+    const matchConst = selectedEditUserConstituencies.length === 0 || !mandalConstId || selectedEditUserConstituencies.includes(mandalConstId);
+    return matchState && matchDistrict && matchConst;
+  }).map(m => {
+    const parentConst = constituencies.find(c => normalizeId(c.id) === normalizeId(m.constituencyId));
+    return {
+      id: normalizeId(m.id),
+      name: m.name,
+      detail: parentConst ? `Constituency: ${parentConst.name}` : undefined
+    };
+  });
+
+  const availablePanchayats = panchayats.filter(p => {
+    const pMandalId = normalizeId(p.mandalId);
+    const parentMandal = mandals.find(m => normalizeId(m.id) === pMandalId);
+    const pConstId = normalizeId(p.constituencyId || parentMandal?.constituencyId || '');
+    const parentConst = constituencies.find(c => normalizeId(c.id) === pConstId);
+    const pDistId = normalizeId(p.districtId || parentMandal?.districtId || parentConst?.districtId || '');
+    const parentDistrict = districts.find(d => normalizeId(d.id) === pDistId);
+    const pStateId = normalizeId(p.stateId || parentMandal?.stateId || parentConst?.stateId || parentDistrict?.stateId || '');
+
+    const matchState = selectedEditUserStates.length === 0 || !pStateId || selectedEditUserStates.includes(pStateId);
+    const matchDistrict = selectedEditUserDistricts.length === 0 || !pDistId || selectedEditUserDistricts.includes(pDistId);
+    const matchConst = selectedEditUserConstituencies.length === 0 || !pConstId || selectedEditUserConstituencies.includes(pConstId);
+    const matchMandal = selectedEditUserMandals.length === 0 || !pMandalId || selectedEditUserMandals.includes(pMandalId);
+    return matchState && matchDistrict && matchConst && matchMandal;
+  }).map(p => {
+    const parentMandal = mandals.find(m => normalizeId(m.id) === normalizeId(p.mandalId));
+    return {
+      id: normalizeId(p.id),
+      name: p.name,
+      detail: parentMandal ? `Block: ${parentMandal.name}` : undefined
+    };
+  });
+
+  const availableWards = wards.filter(w => {
+    const wPanchayatId = normalizeId(w.panchayatId);
+    const parentPanchayat = panchayats.find(p => normalizeId(p.id) === wPanchayatId);
+    const wMandalId = normalizeId(w.mandalId || parentPanchayat?.mandalId || '');
+    const parentMandal = mandals.find(m => normalizeId(m.id) === wMandalId);
+    const wConstId = normalizeId(w.constituencyId || parentPanchayat?.constituencyId || parentMandal?.constituencyId || '');
+    const parentConst = constituencies.find(c => normalizeId(c.id) === wConstId);
+    const wDistId = normalizeId(w.districtId || parentPanchayat?.districtId || parentMandal?.districtId || parentConst?.districtId || '');
+    const parentDistrict = districts.find(d => normalizeId(d.id) === wDistId);
+    const wStateId = normalizeId(w.stateId || parentPanchayat?.stateId || parentMandal?.stateId || parentConst?.stateId || parentDistrict?.stateId || '');
+
+    const matchState = selectedEditUserStates.length === 0 || !wStateId || selectedEditUserStates.includes(wStateId);
+    const matchDistrict = selectedEditUserDistricts.length === 0 || !wDistId || selectedEditUserDistricts.includes(wDistId);
+    const matchConst = selectedEditUserConstituencies.length === 0 || !wConstId || selectedEditUserConstituencies.includes(wConstId);
+    const matchMandal = selectedEditUserMandals.length === 0 || !wMandalId || selectedEditUserMandals.includes(wMandalId);
+    const matchPanchayat = selectedEditUserPanchayats.length === 0 || !wPanchayatId || selectedEditUserPanchayats.includes(wPanchayatId);
+    return matchState && matchDistrict && matchConst && matchMandal && matchPanchayat;
+  }).map(w => {
+    const parentPanchayat = panchayats.find(p => normalizeId(p.id) === normalizeId(w.panchayatId));
+    return {
+      id: normalizeId(w.id),
+      name: w.name,
+      detail: parentPanchayat ? `Panchayat: ${parentPanchayat.name}` : undefined
     };
   });
 
   const availableBooths = booths.filter(b => {
+    const bWardId = normalizeId(b.wardId || '');
+    const bPanchayatId = normalizeId(b.panchayatId || '');
+    const bMandalId = normalizeId(b.mandalId || '');
     const boothConstId = normalizeId(b.constituencyId);
     const parentConst = constituencies.find(c => normalizeId(c.id) === boothConstId);
     const boothDistId = normalizeId(b.districtId || parentConst?.districtId || '');
     const parentDistrict = districts.find(d => normalizeId(d.id) === boothDistId);
     const boothStateId = normalizeId(b.stateId || parentConst?.stateId || parentDistrict?.stateId || '');
 
-    const matchState = selectedEditUserStates.length === 0 || (boothStateId && selectedEditUserStates.includes(boothStateId));
-    const matchDistrict = selectedEditUserDistricts.length === 0 || (boothDistId && selectedEditUserDistricts.includes(boothDistId));
-    const matchConst = selectedEditUserConstituencies.length === 0 || (boothConstId && selectedEditUserConstituencies.includes(boothConstId));
-    return matchState && matchDistrict && matchConst;
+    const matchState = selectedEditUserStates.length === 0 || !boothStateId || selectedEditUserStates.includes(boothStateId);
+    const matchDistrict = selectedEditUserDistricts.length === 0 || !boothDistId || selectedEditUserDistricts.includes(boothDistId);
+    const matchConst = selectedEditUserConstituencies.length === 0 || !boothConstId || selectedEditUserConstituencies.includes(boothConstId);
+    const matchMandal = selectedEditUserMandals.length === 0 || !bMandalId || selectedEditUserMandals.includes(bMandalId);
+    const matchPanchayat = selectedEditUserPanchayats.length === 0 || !bPanchayatId || selectedEditUserPanchayats.includes(bPanchayatId);
+    const matchWard = selectedEditUserWards.length === 0 || !bWardId || selectedEditUserWards.includes(bWardId);
+    return matchState && matchDistrict && matchConst && matchMandal && matchPanchayat && matchWard;
   }).map(b => {
     const parentConst = constituencies.find(c => normalizeId(c.id) === normalizeId(b.constituencyId));
     const constName = b.constituencyName || parentConst?.name;
@@ -366,17 +534,20 @@ export default function UserManagement() {
     };
   });
 
-  // Multi-select state selectors and handlers for new user (Invite Modal)
+  // Multi-select state selectors and handlers for new user (Invite Modal - 7 Tiers)
   const selectedNewUserStates = newUser.stateId ? newUser.stateId.split(',').map(normalizeId).filter(Boolean) : [];
   const selectedNewUserDistricts = newUser.districtId ? newUser.districtId.split(',').map(normalizeId).filter(Boolean) : [];
   const selectedNewUserConstituencies = newUser.constituencyId ? newUser.constituencyId.split(',').map(normalizeId).filter(Boolean) : [];
+  const selectedNewUserMandals = newUser.mandalId ? newUser.mandalId.split(',').map(normalizeId).filter(Boolean) : [];
+  const selectedNewUserPanchayats = newUser.panchayatId ? newUser.panchayatId.split(',').map(normalizeId).filter(Boolean) : [];
+  const selectedNewUserWards = newUser.wardId ? newUser.wardId.split(',').map(normalizeId).filter(Boolean) : [];
   const selectedNewUserBooths = newUser.boothId ? newUser.boothId.split(',').map(normalizeId).filter(Boolean) : [];
 
   const availableNewDistricts = districts.filter(d =>
     selectedNewUserStates.length === 0 || selectedNewUserStates.includes(normalizeId(d.stateId))
   ).map(d => {
     const parentState = states.find(s => normalizeId(s.id) === normalizeId(d.stateId));
-    return { id: normalizeId(d.id), name: d.name, detail: parentState ? parentState.name : undefined };
+    return { id: normalizeId(d.id), name: d.name, detail: parentState ? `State: ${parentState.name}` : undefined };
   });
 
   const availableNewConstituencies = constituencies.filter(c => {
@@ -389,10 +560,70 @@ export default function UserManagement() {
     return matchState && matchDistrict;
   }).map(c => {
     const parentDistrict = districts.find(d => normalizeId(d.id) === normalizeId(c.districtId));
-    return { id: normalizeId(c.id), name: c.name, detail: parentDistrict ? parentDistrict.name : undefined };
+    return { id: normalizeId(c.id), name: c.name, detail: parentDistrict ? `District: ${parentDistrict.name}` : undefined };
+  });
+
+  const availableNewMandals = mandals.filter(m => {
+    const mandalConstId = normalizeId(m.constituencyId);
+    const parentConst = constituencies.find(c => normalizeId(c.id) === mandalConstId);
+    const mandalDistId = normalizeId(m.districtId || parentConst?.districtId || '');
+    const parentDistrict = districts.find(d => normalizeId(d.id) === mandalDistId);
+    const mandalStateId = normalizeId(m.stateId || parentConst?.stateId || parentDistrict?.stateId || '');
+
+    const matchState = selectedNewUserStates.length === 0 || (mandalStateId && selectedNewUserStates.includes(mandalStateId));
+    const matchDistrict = selectedNewUserDistricts.length === 0 || (mandalDistId && selectedNewUserDistricts.includes(mandalDistId));
+    const matchConst = selectedNewUserConstituencies.length === 0 || (mandalConstId && selectedNewUserConstituencies.includes(mandalConstId));
+    return matchState && matchDistrict && matchConst;
+  }).map(m => {
+    const parentConst = constituencies.find(c => normalizeId(c.id) === normalizeId(m.constituencyId));
+    return { id: normalizeId(m.id), name: m.name, detail: parentConst ? `Constituency: ${parentConst.name}` : undefined };
+  });
+
+  const availableNewPanchayats = panchayats.filter(p => {
+    const pMandalId = normalizeId(p.mandalId);
+    const parentMandal = mandals.find(m => normalizeId(m.id) === pMandalId);
+    const pConstId = normalizeId(p.constituencyId || parentMandal?.constituencyId || '');
+    const parentConst = constituencies.find(c => normalizeId(c.id) === pConstId);
+    const pDistId = normalizeId(p.districtId || parentMandal?.districtId || parentConst?.districtId || '');
+    const parentDistrict = districts.find(d => normalizeId(d.id) === pDistId);
+    const pStateId = normalizeId(p.stateId || parentMandal?.stateId || parentConst?.stateId || parentDistrict?.stateId || '');
+
+    const matchState = selectedNewUserStates.length === 0 || (pStateId && selectedNewUserStates.includes(pStateId));
+    const matchDistrict = selectedNewUserDistricts.length === 0 || (pDistId && selectedNewUserDistricts.includes(pDistId));
+    const matchConst = selectedNewUserConstituencies.length === 0 || (pConstId && selectedNewUserConstituencies.includes(pConstId));
+    const matchMandal = selectedNewUserMandals.length === 0 || (pMandalId && selectedNewUserMandals.includes(pMandalId));
+    return matchState && matchDistrict && matchConst && matchMandal;
+  }).map(p => {
+    const parentMandal = mandals.find(m => normalizeId(m.id) === normalizeId(p.mandalId));
+    return { id: normalizeId(p.id), name: p.name, detail: parentMandal ? `Block: ${parentMandal.name}` : undefined };
+  });
+
+  const availableNewWards = wards.filter(w => {
+    const wPanchayatId = normalizeId(w.panchayatId);
+    const parentPanchayat = panchayats.find(p => normalizeId(p.id) === wPanchayatId);
+    const wMandalId = normalizeId(w.mandalId || parentPanchayat?.mandalId || '');
+    const parentMandal = mandals.find(m => normalizeId(m.id) === wMandalId);
+    const wConstId = normalizeId(w.constituencyId || parentPanchayat?.constituencyId || parentMandal?.constituencyId || '');
+    const parentConst = constituencies.find(c => normalizeId(c.id) === wConstId);
+    const wDistId = normalizeId(w.districtId || parentPanchayat?.districtId || parentMandal?.districtId || parentConst?.districtId || '');
+    const parentDistrict = districts.find(d => normalizeId(d.id) === wDistId);
+    const wStateId = normalizeId(w.stateId || parentPanchayat?.stateId || parentMandal?.stateId || parentConst?.stateId || parentDistrict?.stateId || '');
+
+    const matchState = selectedNewUserStates.length === 0 || (wStateId && selectedNewUserStates.includes(wStateId));
+    const matchDistrict = selectedNewUserDistricts.length === 0 || (wDistId && selectedNewUserDistricts.includes(wDistId));
+    const matchConst = selectedNewUserConstituencies.length === 0 || (wConstId && selectedNewUserConstituencies.includes(wConstId));
+    const matchMandal = selectedNewUserMandals.length === 0 || (wMandalId && selectedNewUserMandals.includes(wMandalId));
+    const matchPanchayat = selectedNewUserPanchayats.length === 0 || (wPanchayatId && selectedNewUserPanchayats.includes(wPanchayatId));
+    return matchState && matchDistrict && matchConst && matchMandal && matchPanchayat;
+  }).map(w => {
+    const parentPanchayat = panchayats.find(p => normalizeId(p.id) === normalizeId(w.panchayatId));
+    return { id: normalizeId(w.id), name: w.name, detail: parentPanchayat ? `Panchayat: ${parentPanchayat.name}` : undefined };
   });
 
   const availableNewBooths = booths.filter(b => {
+    const bWardId = normalizeId(b.wardId || '');
+    const bPanchayatId = normalizeId(b.panchayatId || '');
+    const bMandalId = normalizeId(b.mandalId || '');
     const boothConstId = normalizeId(b.constituencyId);
     const parentConst = constituencies.find(c => normalizeId(c.id) === boothConstId);
     const boothDistId = normalizeId(b.districtId || parentConst?.districtId || '');
@@ -402,7 +633,10 @@ export default function UserManagement() {
     const matchState = selectedNewUserStates.length === 0 || (boothStateId && selectedNewUserStates.includes(boothStateId));
     const matchDistrict = selectedNewUserDistricts.length === 0 || (boothDistId && selectedNewUserDistricts.includes(boothDistId));
     const matchConst = selectedNewUserConstituencies.length === 0 || (boothConstId && selectedNewUserConstituencies.includes(boothConstId));
-    return matchState && matchDistrict && matchConst;
+    const matchMandal = selectedNewUserMandals.length === 0 || (bMandalId && selectedNewUserMandals.includes(bMandalId));
+    const matchPanchayat = selectedNewUserPanchayats.length === 0 || (bPanchayatId && selectedNewUserPanchayats.includes(bPanchayatId));
+    const matchWard = selectedNewUserWards.length === 0 || (bWardId && selectedNewUserWards.includes(bWardId));
+    return matchState && matchDistrict && matchConst && matchMandal && matchPanchayat && matchWard;
   }).map(b => {
     const parentConst = constituencies.find(c => normalizeId(c.id) === normalizeId(b.constituencyId));
     const constName = b.constituencyName || parentConst?.name;
@@ -441,6 +675,33 @@ export default function UserManagement() {
     });
   };
 
+  const handleEditUserMandalsChange = (mandalIds: string[]) => {
+    if (!editingUser) return;
+    setEditingUser({
+      ...editingUser,
+      mandalId: mandalIds.join(','),
+      mandal_id: mandalIds.join(',')
+    });
+  };
+
+  const handleEditUserPanchayatsChange = (panchayatIds: string[]) => {
+    if (!editingUser) return;
+    setEditingUser({
+      ...editingUser,
+      panchayatId: panchayatIds.join(','),
+      panchayat_id: panchayatIds.join(',')
+    });
+  };
+
+  const handleEditUserWardsChange = (wardIds: string[]) => {
+    if (!editingUser) return;
+    setEditingUser({
+      ...editingUser,
+      wardId: wardIds.join(','),
+      ward_id: wardIds.join(',')
+    });
+  };
+
   const handleEditUserBoothsChange = (boothIds: string[]) => {
     if (!editingUser) return;
     setEditingUser({
@@ -457,10 +718,16 @@ export default function UserManagement() {
       stateId: '',
       districtId: '',
       constituencyId: '',
+      mandalId: '',
+      panchayatId: '',
+      wardId: '',
       boothId: '',
       state_id: '',
       district_id: '',
       constituency_id: '',
+      mandal_id: '',
+      panchayat_id: '',
+      ward_id: '',
       assigned_booths: []
     });
   };
@@ -535,13 +802,16 @@ export default function UserManagement() {
     }
   };
 
-  // Fetch all demographic hierarchy entities upfront
+  // Fetch all demographic hierarchy entities upfront (7 Levels)
   const fetchAllDemographics = async () => {
     try {
-      const [sts, dsts, csts, bths] = await Promise.all([
+      const [sts, dsts, csts, mnds, pncs, wrds, bths] = await Promise.all([
         api.get<any[]>('/api/states').catch(() => []),
         api.get<any[]>('/api/districts').catch(() => []),
         api.get<any[]>('/api/constituencies').catch(() => []),
+        api.get<any[]>('/api/mandals').catch(() => []),
+        api.get<any[]>('/api/panchayats').catch(() => []),
+        api.get<any[]>('/api/wards').catch(() => []),
         api.get<any[]>('/api/booths').catch(() => [])
       ]);
 
@@ -574,8 +844,51 @@ export default function UserManagement() {
         return { id: cid, name: cname, districtId: rawDistId, stateId };
       });
 
+      const mandalMap = new Map<string, { name: string; constituencyId: string; districtId: string; stateId: string }>();
+      const parsedMandals: IndiaMandal[] = (mnds || []).map((m: any) => {
+        const mid = normalizeId(m.id);
+        const mname = m.name || `Block #${mid}`;
+        const rawConstId = normalizeId(m.constituency_id || m.constituencyId || '');
+        const parentConst = constMap.get(rawConstId) || (csts || []).find((c: any) => normalizeId(c.id) === rawConstId);
+        const rawDistId = normalizeId(m.district_id || m.districtId || (parentConst as any)?.districtId || '');
+        const parentDist = distMap.get(rawDistId) || (dsts || []).find((d: any) => normalizeId(d.id) === rawDistId);
+        const stateId = normalizeId(m.state_id || m.stateId || (parentConst as any)?.stateId || (parentDist as any)?.stateId || '');
+        mandalMap.set(mid, { name: mname, constituencyId: rawConstId, districtId: rawDistId, stateId });
+        return { id: mid, name: mname, constituencyId: rawConstId, districtId: rawDistId, stateId };
+      });
+
+      const panchayatMap = new Map<string, { name: string; mandalId: string; constituencyId: string; districtId: string; stateId: string }>();
+      const parsedPanchayats: IndiaPanchayat[] = (pncs || []).map((p: any) => {
+        const pid = normalizeId(p.id);
+        const pname = p.name || `Panchayat #${pid}`;
+        const rawMandalId = normalizeId(p.mandal_id || p.mandalId || '');
+        const parentMandal = mandalMap.get(rawMandalId) || (mnds || []).find((m: any) => normalizeId(m.id) === rawMandalId);
+        const rawConstId = normalizeId(p.constituency_id || p.constituencyId || (parentMandal as any)?.constituencyId || '');
+        const rawDistId = normalizeId(p.district_id || p.districtId || (parentMandal as any)?.districtId || '');
+        const stateId = normalizeId(p.state_id || p.stateId || (parentMandal as any)?.stateId || '');
+        panchayatMap.set(pid, { name: pname, mandalId: rawMandalId, constituencyId: rawConstId, districtId: rawDistId, stateId });
+        return { id: pid, name: pname, mandalId: rawMandalId, constituencyId: rawConstId, districtId: rawDistId, stateId };
+      });
+
+      const wardMap = new Map<string, { name: string; panchayatId: string; mandalId: string; constituencyId: string; districtId: string; stateId: string }>();
+      const parsedWards: IndiaWard[] = (wrds || []).map((w: any) => {
+        const wid = normalizeId(w.id);
+        const wname = w.name || `Ward #${wid}`;
+        const rawPanchayatId = normalizeId(w.panchayat_id || w.panchayatId || '');
+        const parentPanchayat = panchayatMap.get(rawPanchayatId) || (pncs || []).find((p: any) => normalizeId(p.id) === rawPanchayatId);
+        const rawMandalId = normalizeId(w.mandal_id || w.mandalId || (parentPanchayat as any)?.mandalId || '');
+        const rawConstId = normalizeId(w.constituency_id || w.constituencyId || (parentPanchayat as any)?.constituencyId || '');
+        const rawDistId = normalizeId(w.district_id || w.districtId || (parentPanchayat as any)?.districtId || '');
+        const stateId = normalizeId(w.state_id || w.stateId || (parentPanchayat as any)?.stateId || '');
+        wardMap.set(wid, { name: wname, panchayatId: rawPanchayatId, mandalId: rawMandalId, constituencyId: rawConstId, districtId: rawDistId, stateId });
+        return { id: wid, name: wname, panchayatId: rawPanchayatId, mandalId: rawMandalId, constituencyId: rawConstId, districtId: rawDistId, stateId };
+      });
+
       const parsedBooths: IndiaBooth[] = (bths || []).map((b: any) => {
         const bid = normalizeId(b.id);
+        const rawWardId = normalizeId(b.ward_id || b.wardId || '');
+        const rawPanchayatId = normalizeId(b.panchayat_id || b.panchayatId || '');
+        const rawMandalId = normalizeId(b.mandal_id || b.mandalId || '');
         const rawConstId = normalizeId(b.constituency_id || b.constituencyId || '');
         const parentConst = constMap.get(rawConstId) || (csts || []).find((c: any) => normalizeId(c.id) === rawConstId);
         const rawDistId = normalizeId(b.district_id || b.districtId || (parentConst as any)?.districtId || (parentConst as any)?.district_id || '');
@@ -590,6 +903,9 @@ export default function UserManagement() {
           id: bid,
           name: bName,
           boothNumber: bNum,
+          wardId: rawWardId,
+          panchayatId: rawPanchayatId,
+          mandalId: rawMandalId,
           constituencyId: rawConstId,
           districtId: rawDistId,
           stateId: rawStateId,
@@ -601,6 +917,9 @@ export default function UserManagement() {
       setStates(parsedStates);
       setDistricts(parsedDistricts);
       setConstituencies(parsedConstituencies);
+      setMandals(parsedMandals);
+      setPanchayats(parsedPanchayats);
+      setWards(parsedWards);
       setBooths(parsedBooths);
     } catch (err) {
       console.error('Error fetching demographics:', err);
@@ -624,6 +943,9 @@ export default function UserManagement() {
       const stateVal = (editingUser.stateId || editingUser.state_id || '').trim();
       const districtVal = (editingUser.districtId || editingUser.district_id || '').trim();
       const constVal = (editingUser.constituencyId || editingUser.constituency_id || '').trim();
+      const mandalVal = (editingUser.mandalId || editingUser.mandal_id || '').trim();
+      const panchayatVal = (editingUser.panchayatId || editingUser.panchayat_id || '').trim();
+      const wardVal = (editingUser.wardId || editingUser.ward_id || '').trim();
 
       let boothArr: string[] = [];
       if (editingUser.boothId) {
@@ -646,6 +968,9 @@ export default function UserManagement() {
         state_id: (stateVal && stateVal !== 'null' && stateVal !== 'undefined' && stateVal !== '[]') ? stateVal : null,
         district_id: (districtVal && districtVal !== 'null' && districtVal !== 'undefined' && districtVal !== '[]') ? districtVal : null,
         constituency_id: (constVal && constVal !== 'null' && constVal !== 'undefined' && constVal !== '[]') ? constVal : null,
+        mandal_id: (mandalVal && mandalVal !== 'null' && mandalVal !== 'undefined' && mandalVal !== '[]') ? mandalVal : null,
+        panchayat_id: (panchayatVal && panchayatVal !== 'null' && panchayatVal !== 'undefined' && panchayatVal !== '[]') ? panchayatVal : null,
+        ward_id: (wardVal && wardVal !== 'null' && wardVal !== 'undefined' && wardVal !== '[]') ? wardVal : null,
         booth_id: boothVal,
         assigned_booths: boothArr,
         disabled: Boolean(editingUser.disabled)
@@ -826,6 +1151,9 @@ export default function UserManagement() {
         state_id: newUser.stateId || null,
         district_id: newUser.districtId || null,
         constituency_id: newUser.constituencyId || null,
+        mandal_id: newUser.mandalId || null,
+        panchayat_id: newUser.panchayatId || null,
+        ward_id: newUser.wardId || null,
         booth_id: newUser.boothId || null,
         assigned_booths: newUser.boothId ? newUser.boothId.split(',').map(s => s.trim()).filter(Boolean) : []
       };
@@ -1070,13 +1398,13 @@ export default function UserManagement() {
 
         {/* Table View (Desktop & Tablet) */}
         <div className="overflow-x-auto custom-scrollbar hidden md:block">
-          <table className="w-full text-left border-collapse min-w-[800px]">
+          <table className="w-full text-left border-collapse min-w-[800px] whitespace-nowrap">
             <thead>
-              <tr className="bg-zinc-50 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800">
+              <tr className="bg-zinc-50/70 dark:bg-zinc-900/50 border-b border-zinc-200 dark:border-zinc-800">
                 {userColumnManager.visibleColumns.map(col => (
                   <th
                     key={col.id}
-                    className={`px-6 py-4 data-label ${col.id === 'actions' ? 'text-right' : col.id === 'status' ? 'text-center' : ''}`}
+                    className={`px-4 py-2.5 data-label whitespace-nowrap ${col.id === 'actions' ? 'text-right' : col.id === 'status' ? 'text-center' : ''}`}
                     style={{ minWidth: col.minWidth }}
                   >
                     {col.label}
@@ -1087,14 +1415,14 @@ export default function UserManagement() {
             <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/50">
               {loading ? (
                 <tr>
-                  <td colSpan={userColumnManager.visibleColumns.length || 1} className="px-6 py-20 text-center">
-                    <Loader2 className="animate-spin mx-auto text-zinc-300 dark:text-zinc-700" size={32} />
-                    <p className="mt-4 text-sm text-zinc-500">Retrieving system users...</p>
+                  <td colSpan={userColumnManager.visibleColumns.length || 1} className="px-4 py-12 text-center">
+                    <Loader2 className="animate-spin mx-auto text-zinc-300 dark:text-zinc-700" size={24} />
+                    <p className="mt-2 text-xs text-zinc-500">Retrieving system users...</p>
                   </td>
                 </tr>
               ) : filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={userColumnManager.visibleColumns.length || 1} className="px-6 py-20 text-center text-zinc-500">
+                  <td colSpan={userColumnManager.visibleColumns.length || 1} className="px-4 py-12 text-center text-zinc-500 text-xs">
                     No users found matching your criteria.
                   </td>
                 </tr>
@@ -1111,7 +1439,7 @@ export default function UserManagement() {
                       }}
                       className={`group transition-colors ${
                         isManageable
-                          ? 'hover:bg-zinc-50 dark:hover:bg-zinc-900/40 cursor-pointer'
+                          ? 'hover:bg-zinc-50/70 dark:hover:bg-zinc-900/40 cursor-pointer'
                           : 'opacity-70 cursor-not-allowed bg-zinc-50/20 dark:bg-zinc-900/10'
                       } ${u.disabled ? 'opacity-60 bg-zinc-50/50 dark:bg-zinc-900/20' : ''}`}
                     >
@@ -1119,26 +1447,19 @@ export default function UserManagement() {
                         switch (col.id) {
                           case 'profile':
                             return (
-                              <td key={col.id} className="px-6 py-4">
-                                <div className="flex items-center gap-3">
-                                  <div className="w-9 h-9 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-zinc-900 dark:text-zinc-100 text-xs border border-zinc-200 dark:border-zinc-700 shadow-xs">
+                              <td key={col.id} className="px-4 py-2">
+                                <div className="flex items-center gap-2.5">
+                                  <div className="w-7 h-7 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center font-bold text-zinc-900 dark:text-zinc-100 text-[11px] border border-zinc-200 dark:border-zinc-700 shadow-2xs shrink-0">
                                     {u.username?.[0]?.toUpperCase() || '?'}
                                   </div>
-                                  <div>
-                                    <div className="flex items-center gap-2">
-                                      <p className="text-xs font-bold text-zinc-900 dark:text-white">
-                                        {u.username || 'Unspecified Name'}
-                                      </p>
-                                      {u.uid === user?.uid && (
-                                        <span className="text-[9px] bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded-full font-bold">
-                                          You
-                                        </span>
-                                      )}
-                                    </div>
-                                    {u.designation && (
-                                      <p className="text-[10px] text-zinc-400 mt-0.5">
-                                        {u.designation}
-                                      </p>
+                                  <div className="flex items-center gap-2">
+                                    <p className="text-xs font-bold text-zinc-900 dark:text-white truncate max-w-[170px]" title={u.username || 'Unspecified Name'}>
+                                      {u.username || 'Unspecified Name'}
+                                    </p>
+                                    {u.uid === user?.uid && (
+                                      <span className="text-[9px] bg-blue-500/10 text-blue-600 dark:text-blue-400 px-1.5 py-0.2 rounded-full font-bold">
+                                        You
+                                      </span>
                                     )}
                                   </div>
                                 </div>
@@ -1146,29 +1467,29 @@ export default function UserManagement() {
                             );
                           case 'email':
                             return (
-                              <td key={col.id} className="px-6 py-4">
+                              <td key={col.id} className="px-4 py-2">
                                 <div className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400">
-                                  <Mail size={13} className="text-zinc-400 shrink-0" />
-                                  <span className="truncate">{u.email}</span>
+                                  <Mail size={12} className="text-zinc-400 shrink-0" />
+                                  <span className="truncate max-w-[200px]" title={u.email}>{u.email}</span>
                                 </div>
                               </td>
                             );
                           case 'voterId':
                             return (
-                              <td key={col.id} className="px-6 py-4">
+                              <td key={col.id} className="px-4 py-2">
                                 {(u.voterId || u.voter_id) ? (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-mono font-semibold text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-900/50">
-                                    <IdCard size={12} />
+                                    <IdCard size={11} />
                                     {u.voterId || u.voter_id}
                                   </span>
                                 ) : (
-                                  <span className="text-zinc-400 text-xs">—</span>
+                                  <span className="text-zinc-400 text-xs">-</span>
                                 )}
                               </td>
                             );
                           case 'status':
                             return (
-                              <td key={col.id} className="px-6 py-4 text-center">
+                              <td key={col.id} className="px-4 py-2 text-center">
                                 <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wide ${
                                   u.disabled
                                     ? 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
@@ -1181,8 +1502,8 @@ export default function UserManagement() {
                             );
                           case 'role':
                             return (
-                              <td key={col.id} className="px-6 py-4">
-                                <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                              <td key={col.id} className="px-4 py-2">
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold ${
                                   u.role === 'super_admin'
                                     ? 'bg-amber-50 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 border border-amber-200 dark:border-amber-800/40'
                                     : u.role === 'admin'
@@ -1191,7 +1512,7 @@ export default function UserManagement() {
                                     ? 'bg-purple-50 text-purple-800 dark:bg-purple-950/60 dark:text-purple-300 border border-purple-200 dark:border-purple-800/40'
                                     : 'bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-300'
                                 }`}>
-                                  <Shield size={12} />
+                                  <Shield size={11} />
                                   {role?.label || u.role}
                                 </span>
                               </td>
@@ -1200,33 +1521,127 @@ export default function UserManagement() {
                             const mgr = users.find(x => x.uid === (u.parentManagerId || (u as any).parent_manager_id));
                             const adm = users.find(x => x.uid === (u.adminId || (u as any).admin_id));
                             return (
-                              <td key={col.id} className="px-6 py-4 text-xs text-zinc-600 dark:text-zinc-400">
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-600 dark:text-zinc-400">
                                 {mgr ? (
                                   <span className="inline-flex items-center gap-1 text-[11px] font-medium text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-950/50 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800/40">
-                                    <UserCog size={12} />
+                                    <UserCog size={11} />
                                     {mgr.username || mgr.email}
                                   </span>
                                 ) : adm ? (
-                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-800/40">
-                                    <Shield size={12} />
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 px-2 py-0.5 rounded border border-blue-200 dark:border-blue-900/50">
+                                    <Shield size={11} />
                                     {adm.username || adm.email}
                                   </span>
                                 ) : (
-                                  <span className="text-zinc-400 italic text-[11px]">Direct Super Admin</span>
+                                  <span className="text-zinc-400 text-[11px]">Direct Super Admin</span>
                                 )}
+                              </td>
+                            );
+                          }
+                          case 'state': {
+                            const sIds = (u.stateId || u.state_id || '').split(',').map(normalizeId).filter(Boolean);
+                            const sNames = sIds.map(id => states.find(s => normalizeId(s.id) === id)?.name || id).filter(Boolean);
+                            return (
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                {sNames.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[11px] font-medium truncate max-w-[150px]" title={sNames.join(', ')}>
+                                    {sNames.join(', ')}
+                                  </span>
+                                ) : <span className="text-zinc-400 text-[11px]">Global</span>}
+                              </td>
+                            );
+                          }
+                          case 'district': {
+                            const dIds = (u.districtId || u.district_id || '').split(',').map(normalizeId).filter(Boolean);
+                            const dNames = dIds.map(id => districts.find(d => normalizeId(d.id) === id)?.name || id).filter(Boolean);
+                            return (
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                {dNames.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[11px] font-medium truncate max-w-[150px]" title={dNames.join(', ')}>
+                                    {dNames.join(', ')}
+                                  </span>
+                                ) : <span className="text-zinc-400 text-[11px]">All</span>}
+                              </td>
+                            );
+                          }
+                          case 'constituency': {
+                            const cIds = (u.constituencyId || u.constituency_id || '').split(',').map(normalizeId).filter(Boolean);
+                            const cNames = cIds.map(id => constituencies.find(c => normalizeId(c.id) === id)?.name || id).filter(Boolean);
+                            return (
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                {cNames.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[11px] font-medium truncate max-w-[150px]" title={cNames.join(', ')}>
+                                    {cNames.join(', ')}
+                                  </span>
+                                ) : <span className="text-zinc-400 text-[11px]">All</span>}
+                              </td>
+                            );
+                          }
+                          case 'mandal': {
+                            const mIds = (u.mandalId || u.mandal_id || '').split(',').map(normalizeId).filter(Boolean);
+                            const mNames = mIds.map(id => mandals.find(m => normalizeId(m.id) === id)?.name || id).filter(Boolean);
+                            return (
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                {mNames.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[11px] font-medium truncate max-w-[150px]" title={mNames.join(', ')}>
+                                    {mNames.join(', ')}
+                                  </span>
+                                ) : <span className="text-zinc-400 text-[11px]">All</span>}
+                              </td>
+                            );
+                          }
+                          case 'panchayat': {
+                            const pIds = (u.panchayatId || u.panchayat_id || '').split(',').map(normalizeId).filter(Boolean);
+                            const pNames = pIds.map(id => panchayats.find(p => normalizeId(p.id) === id)?.name || id).filter(Boolean);
+                            return (
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                {pNames.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[11px] font-medium truncate max-w-[150px]" title={pNames.join(', ')}>
+                                    {pNames.join(', ')}
+                                  </span>
+                                ) : <span className="text-zinc-400 text-[11px]">All</span>}
+                              </td>
+                            );
+                          }
+                          case 'ward': {
+                            const wIds = (u.wardId || u.ward_id || '').split(',').map(normalizeId).filter(Boolean);
+                            const wNames = wIds.map(id => wards.find(w => normalizeId(w.id) === id)?.name || id).filter(Boolean);
+                            return (
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                {wNames.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[11px] font-medium truncate max-w-[150px]" title={wNames.join(', ')}>
+                                    {wNames.join(', ')}
+                                  </span>
+                                ) : <span className="text-zinc-400 text-[11px]">All</span>}
+                              </td>
+                            );
+                          }
+                          case 'booth': {
+                            const bIds = (u.boothId ? String(u.boothId).split(',') : (u.assigned_booths || [])).map(normalizeId).filter(Boolean);
+                            const bNames = bIds.map(id => {
+                              const b = booths.find(bth => normalizeId(bth.id) === id);
+                              return b ? (b.boothNumber ? `#${b.boothNumber} ${b.name}` : b.name) : id;
+                            }).filter(Boolean);
+                            return (
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-700 dark:text-zinc-300 whitespace-nowrap">
+                                {bNames.length > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-[11px] font-medium truncate max-w-[150px]" title={bNames.join(', ')}>
+                                    {bNames.join(', ')}
+                                  </span>
+                                ) : <span className="text-zinc-400 text-[11px]">All Booths</span>}
                               </td>
                             );
                           }
                           case 'createdAt':
                             return (
-                              <td key={col.id} className="px-6 py-4 text-xs text-zinc-500 whitespace-nowrap">
-                                {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '—'}
+                              <td key={col.id} className="px-4 py-2 text-xs text-zinc-500 whitespace-nowrap">
+                                {u.createdAt ? new Date(u.createdAt).toLocaleDateString() : '-'}
                               </td>
                             );
                           case 'actions':
                             return (
-                              <td key={col.id} className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                <div className="flex items-center justify-end gap-1">
+                              <td key={col.id} className="px-4 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                                <div className="flex items-center justify-end gap-1.5">
                                   {hasRight('users', 'u') && isManageable && (
                                     <button
                                       onClick={() => {
@@ -1237,51 +1652,42 @@ export default function UserManagement() {
                                           inviteLink: `${window.location.origin}/login?email=${encodeURIComponent(u.email)}`
                                         });
                                       }}
-                                      className="p-2 text-zinc-400 hover:text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10 rounded-lg transition-all"
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-emerald-600 dark:hover:text-emerald-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                       title="Share / Copy Direct Login Link"
                                     >
-                                      <Share2 size={16} />
+                                      <Share2 size={12} />
+                                      <span>Share</span>
                                     </button>
                                   )}
                                   {hasRight('users', 'u') && isManageable && (
                                     <button
                                       onClick={() => { setError(''); setManualResetUser(u); }}
-                                      className="p-2 text-zinc-400 hover:text-blue-500 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded-lg transition-all"
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                       title="Reset User Password"
                                     >
-                                      <Key size={16} />
+                                      <Key size={12} />
+                                      <span>Reset</span>
                                     </button>
                                   )}
                                   {hasRight('users', 'u') && isManageable && (
                                     <button
-                                      onClick={() => toggleUserStatus(u.uid, u.disabled || false)}
-                                      className={`p-2 rounded-lg transition-all ${u.disabled
-                                        ? 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10'
-                                        : 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10'} ${u.uid === user?.uid || u.email === OWNER_EMAIL ? 'opacity-20 cursor-not-allowed' : ''
-                                        }`}
-                                      title={u.disabled ? "Enable Account" : "Disable Account"}
-                                      disabled={u.uid === user?.uid || u.email === OWNER_EMAIL}
+                                      onClick={() => { setEditingUser(u); setActiveTab('details'); }}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                      title="Edit User Profile"
                                     >
-                                      {u.disabled ? <UserCheck size={16} /> : <UserX size={16} />}
+                                      <Edit2 size={12} />
+                                      <span>Edit</span>
                                     </button>
                                   )}
-                                  {hasRight('users', 'd') && isManageable && (
+                                  {hasRight('users', 'd') && isManageable && u.uid !== user?.uid && (
                                     <button
                                       onClick={() => setUserToDelete(u)}
-                                      className={`p-2 rounded-lg transition-all ${u.uid === user?.uid || u.email === OWNER_EMAIL
-                                          ? 'text-zinc-200 dark:text-zinc-800 cursor-not-allowed'
-                                          : 'text-red-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10'
-                                        }`}
+                                      className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
                                       title="Delete User"
-                                      disabled={u.uid === user?.uid || u.email === OWNER_EMAIL}
                                     >
-                                      <Trash2 size={16} />
+                                      <Trash2 size={12} />
+                                      <span>Delete</span>
                                     </button>
-                                  )}
-                                  {!isManageable && (
-                                    <span className="p-2 text-zinc-300 dark:text-zinc-700" title="Protected account - Managed by Super Admin">
-                                      <Shield size={16} />
-                                    </span>
                                   )}
                                 </div>
                               </td>
@@ -1298,19 +1704,18 @@ export default function UserManagement() {
           </table>
         </div>
 
-    {/* Mobile View (Smartphones) */ }
-    < div className = "md:hidden divide-y divide-zinc-100 dark:divide-zinc-800" >
-    {
-      loading?(
-            <div className = "p-12 text-center" >
+        {/* Mobile View (Smartphones) */}
+        <div className="md:hidden divide-y divide-zinc-100 dark:divide-zinc-800">
+          {loading ? (
+            <div className="p-12 text-center">
               <Loader2 className="animate-spin mx-auto text-zinc-400 mb-2" size={24} />
               <p className="text-xs text-zinc-500">Retrieving system users...</p>
             </div>
           ) : filteredUsers.length === 0 ? (
-    <div className="p-8 text-center text-xs text-zinc-400">
-      No users found matching your criteria.
-    </div>
-  ) : (
+            <div className="p-8 text-center text-xs text-zinc-400">
+              No users found matching your criteria.
+            </div>
+          ) : (
     filteredUsers.map((u) => {
       const role = ROLES.find(r => r.id === u.role) || ROLES[4];
       const isManageable = canManageUser(u);
@@ -1855,11 +2260,11 @@ export default function UserManagement() {
                         Election Setting & Regional Scope Configuration
                       </p>
                       <p className="text-[10px] text-blue-700 dark:text-blue-300/90 font-medium">
-                        Choose assigned geographical levels. Leave blank for unrestricted Global Admin access.
+                        Choose assigned administrative levels. Leave blank for unrestricted Global Admin access.
                       </p>
                     </div>
                   </div>
-                  {(selectedEditUserStates.length > 0 || selectedEditUserDistricts.length > 0 || selectedEditUserConstituencies.length > 0 || selectedEditUserBooths.length > 0) && (
+                  {(selectedEditUserStates.length > 0 || selectedEditUserDistricts.length > 0 || selectedEditUserConstituencies.length > 0 || selectedEditUserMandals.length > 0 || selectedEditUserPanchayats.length > 0 || selectedEditUserWards.length > 0 || selectedEditUserBooths.length > 0) && (
                     <button
                       type="button"
                       onClick={handleClearAllDemographics}
@@ -1870,8 +2275,9 @@ export default function UserManagement() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-                  <div className="space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* 1. State */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned State(s)</label>
                       {selectedEditUserStates.length > 0 && (
@@ -1887,7 +2293,8 @@ export default function UserManagement() {
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  {/* 2. District */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned District(s)</label>
                       {selectedEditUserDistricts.length > 0 && (
@@ -1903,7 +2310,8 @@ export default function UserManagement() {
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  {/* 3. Constituency */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Constituency(s)</label>
                       {selectedEditUserConstituencies.length > 0 && (
@@ -1919,25 +2327,77 @@ export default function UserManagement() {
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  {/* 4. Block / Area */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Booth(s)</label>
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Block / Area(s)</label>
+                      {selectedEditUserMandals.length > 0 && (
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserMandals.length} chosen</span>
+                      )}
+                    </div>
+                    <MultiSelectDropdown
+                      label="Block / Area"
+                      options={availableMandals}
+                      selectedIds={selectedEditUserMandals}
+                      onChange={handleEditUserMandalsChange}
+                      placeholder="Constituency-wide Control (All)"
+                    />
+                  </div>
+
+                  {/* 5. Panchayat / ULB */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Panchayat / ULB(s)</label>
+                      {selectedEditUserPanchayats.length > 0 && (
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserPanchayats.length} chosen</span>
+                      )}
+                    </div>
+                    <MultiSelectDropdown
+                      label="Panchayat / ULB"
+                      options={availablePanchayats}
+                      selectedIds={selectedEditUserPanchayats}
+                      onChange={handleEditUserPanchayatsChange}
+                      placeholder="Block-wide Control (All)"
+                    />
+                  </div>
+
+                  {/* 6. Ward / Village */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Ward / Village(s)</label>
+                      {selectedEditUserWards.length > 0 && (
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserWards.length} chosen</span>
+                      )}
+                    </div>
+                    <MultiSelectDropdown
+                      label="Ward / Village"
+                      options={availableWards}
+                      selectedIds={selectedEditUserWards}
+                      onChange={handleEditUserWardsChange}
+                      placeholder="Panchayat-wide Control (All)"
+                    />
+                  </div>
+
+                  {/* 7. Polling Booth */}
+                  <div className="space-y-1.5 md:col-span-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Polling Booth(s)</label>
                       {selectedEditUserBooths.length > 0 && (
                         <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedEditUserBooths.length} chosen</span>
                       )}
                     </div>
                     <MultiSelectDropdown
-                      label="Booth"
+                      label="Polling Booth"
                       options={availableBooths}
                       selectedIds={selectedEditUserBooths}
                       onChange={handleEditUserBoothsChange}
-                      placeholder="Constituency-wide Control (All)"
+                      placeholder="Ward / Panchayat-wide Control (All)"
                     />
                   </div>
                 </div>
 
                 {/* Scope Summary Badge Bar */}
-                <div className="p-4 bg-zinc-100/70 dark:bg-zinc-900/80 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-3 text-xs">
+                <div className="p-4 bg-zinc-100/70 dark:bg-zinc-900/80 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-2.5 text-xs">
                   <span className="font-bold text-zinc-500 dark:text-zinc-400 uppercase text-[10px]">Active Scope Summary:</span>
                   <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
                     {selectedEditUserStates.length === 0 ? 'All States (Global)' : `${selectedEditUserStates.length} State(s)`}
@@ -1947,6 +2407,15 @@ export default function UserManagement() {
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
                     {selectedEditUserConstituencies.length === 0 ? 'All Constituencies' : `${selectedEditUserConstituencies.length} Constituency(s)`}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                    {selectedEditUserMandals.length === 0 ? 'All Blocks' : `${selectedEditUserMandals.length} Block / Area(s)`}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                    {selectedEditUserPanchayats.length === 0 ? 'All Panchayats' : `${selectedEditUserPanchayats.length} Panchayat / ULB(s)`}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                    {selectedEditUserWards.length === 0 ? 'All Wards' : `${selectedEditUserWards.length} Ward / Village(s)`}
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
                     {selectedEditUserBooths.length === 0 ? 'All Booths' : `${selectedEditUserBooths.length} Booth(s)`}
@@ -2350,14 +2819,14 @@ export default function UserManagement() {
                         Election Setting & Regional Scope Configuration
                       </p>
                       <p className="text-[10px] text-blue-700 dark:text-blue-300/90 font-medium">
-                        Choose assigned geographical levels. Leave blank for unrestricted scope.
+                        Choose assigned administrative levels. Leave blank for unrestricted scope.
                       </p>
                     </div>
                   </div>
-                  {(selectedNewUserStates.length > 0 || selectedNewUserDistricts.length > 0 || selectedNewUserConstituencies.length > 0 || selectedNewUserBooths.length > 0) && (
+                  {(selectedNewUserStates.length > 0 || selectedNewUserDistricts.length > 0 || selectedNewUserConstituencies.length > 0 || selectedNewUserMandals.length > 0 || selectedNewUserPanchayats.length > 0 || selectedNewUserWards.length > 0 || selectedNewUserBooths.length > 0) && (
                     <button
                       type="button"
-                      onClick={() => setNewUser({ ...newUser, stateId: '', districtId: '', constituencyId: '', boothId: '' })}
+                      onClick={() => setNewUser({ ...newUser, stateId: '', districtId: '', constituencyId: '', mandalId: '', panchayatId: '', wardId: '', boothId: '' })}
                       className="text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline whitespace-nowrap self-start md:self-auto"
                     >
                       Reset to Global Scope
@@ -2365,8 +2834,9 @@ export default function UserManagement() {
                   )}
                 </div>
 
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-                  <div className="space-y-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  {/* 1. State */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned State(s)</label>
                       {selectedNewUserStates.length > 0 && (
@@ -2382,7 +2852,8 @@ export default function UserManagement() {
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  {/* 2. District */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned District(s)</label>
                       {selectedNewUserDistricts.length > 0 && (
@@ -2398,7 +2869,8 @@ export default function UserManagement() {
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  {/* 3. Constituency */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
                       <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Constituency(s)</label>
                       {selectedNewUserConstituencies.length > 0 && (
@@ -2414,25 +2886,77 @@ export default function UserManagement() {
                     />
                   </div>
 
-                  <div className="space-y-2">
+                  {/* 4. Block / Area */}
+                  <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Booth(s)</label>
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Block / Area(s)</label>
+                      {selectedNewUserMandals.length > 0 && (
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserMandals.length} chosen</span>
+                      )}
+                    </div>
+                    <MultiSelectDropdown
+                      label="Block / Area"
+                      options={availableNewMandals}
+                      selectedIds={selectedNewUserMandals}
+                      onChange={(ids) => setNewUser({ ...newUser, mandalId: ids.join(',') })}
+                      placeholder="Constituency-wide Control (All)"
+                    />
+                  </div>
+
+                  {/* 5. Panchayat / ULB */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Panchayat / ULB(s)</label>
+                      {selectedNewUserPanchayats.length > 0 && (
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserPanchayats.length} chosen</span>
+                      )}
+                    </div>
+                    <MultiSelectDropdown
+                      label="Panchayat / ULB"
+                      options={availableNewPanchayats}
+                      selectedIds={selectedNewUserPanchayats}
+                      onChange={(ids) => setNewUser({ ...newUser, panchayatId: ids.join(',') })}
+                      placeholder="Block-wide Control (All)"
+                    />
+                  </div>
+
+                  {/* 6. Ward / Village */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Ward / Village(s)</label>
+                      {selectedNewUserWards.length > 0 && (
+                        <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserWards.length} chosen</span>
+                      )}
+                    </div>
+                    <MultiSelectDropdown
+                      label="Ward / Village"
+                      options={availableNewWards}
+                      selectedIds={selectedNewUserWards}
+                      onChange={(ids) => setNewUser({ ...newUser, wardId: ids.join(',') })}
+                      placeholder="Panchayat-wide Control (All)"
+                    />
+                  </div>
+
+                  {/* 7. Polling Booth */}
+                  <div className="space-y-1.5 md:col-span-2">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[11px] font-bold text-zinc-700 dark:text-zinc-300 uppercase tracking-wider">Assigned Polling Booth(s)</label>
                       {selectedNewUserBooths.length > 0 && (
                         <span className="text-[10px] font-bold text-blue-600 dark:text-blue-400">{selectedNewUserBooths.length} chosen</span>
                       )}
                     </div>
                     <MultiSelectDropdown
-                      label="Booth"
+                      label="Polling Booth"
                       options={availableNewBooths}
                       selectedIds={selectedNewUserBooths}
                       onChange={(ids) => setNewUser({ ...newUser, boothId: ids.join(',') })}
-                      placeholder="Constituency-wide Control (All)"
+                      placeholder="Ward / Panchayat-wide Control (All)"
                     />
                   </div>
                 </div>
 
                 {/* Scope Summary Badge Bar */}
-                <div className="p-4 bg-zinc-100/70 dark:bg-zinc-900/80 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-3 text-xs">
+                <div className="p-4 bg-zinc-100/70 dark:bg-zinc-900/80 rounded-xl border border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-2.5 text-xs">
                   <span className="font-bold text-zinc-500 dark:text-zinc-400 uppercase text-[10px]">Active Scope Summary:</span>
                   <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
                     {selectedNewUserStates.length === 0 ? 'All States (Global)' : `${selectedNewUserStates.length} State(s)`}
@@ -2442,6 +2966,15 @@ export default function UserManagement() {
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
                     {selectedNewUserConstituencies.length === 0 ? 'All Constituencies' : `${selectedNewUserConstituencies.length} Constituency(s)`}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                    {selectedNewUserMandals.length === 0 ? 'All Blocks' : `${selectedNewUserMandals.length} Block / Area(s)`}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                    {selectedNewUserPanchayats.length === 0 ? 'All Panchayats' : `${selectedNewUserPanchayats.length} Panchayat / ULB(s)`}
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
+                    {selectedNewUserWards.length === 0 ? 'All Wards' : `${selectedNewUserWards.length} Ward / Village(s)`}
                   </span>
                   <span className="px-2.5 py-1 rounded-lg bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 font-semibold text-zinc-700 dark:text-zinc-200 shadow-xs">
                     {selectedNewUserBooths.length === 0 ? 'All Booths' : `${selectedNewUserBooths.length} Booth(s)`}
