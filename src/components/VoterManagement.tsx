@@ -532,7 +532,6 @@ const VoterManagement: React.FC = () => {
 
   useEffect(() => {
     const fetchVoterSentiments = async () => {
-      if (voters.length === 0) return;
       try {
         const sentiments = await api.get<any[]>('/api/voter-sentiments');
         const mapping: Record<string, Record<string, unknown>> = {};
@@ -547,8 +546,10 @@ const VoterManagement: React.FC = () => {
       }
     };
 
-    fetchVoterSentiments();
-  }, [voters, user, profile, sentimentAdminId]);
+    if (user || profile) {
+      fetchVoterSentiments();
+    }
+  }, [user?.uid, profile?.id, sentimentAdminId]);
 
   const getSectionCompleteness = (v: Voter, sentiment: Record<string, unknown> | undefined) => {
     // 1. Main Profile
@@ -686,44 +687,79 @@ const VoterManagement: React.FC = () => {
 
 
 
+function parseIdArray(...inputs: any[]): string[] {
+  const result = new Set<string>();
+  for (const input of inputs) {
+    if (!input) continue;
+    if (Array.isArray(input)) {
+      for (const item of input) {
+        if (item !== null && item !== undefined) {
+          const val = String(typeof item === 'object' ? (item.id || item.value || '') : item).trim().replace(/\.0$/, '');
+          if (val && val !== 'null' && val !== 'undefined' && val !== '[]' && val !== 'all') {
+            result.add(val);
+          }
+        }
+      }
+    } else if (typeof input === 'string') {
+      const trimmed = input.trim();
+      if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (Array.isArray(parsed)) {
+            for (const item of parsed) {
+              const val = String(item).trim().replace(/\.0$/, '');
+              if (val && val !== 'null' && val !== 'undefined' && val !== '[]' && val !== 'all') {
+                result.add(val);
+              }
+            }
+            continue;
+          }
+        } catch {}
+      }
+      trimmed.split(',').forEach(part => {
+        const val = part.trim().replace(/\.0$/, '');
+        if (val && val !== 'null' && val !== 'undefined' && val !== '[]' && val !== 'all') {
+          result.add(val);
+        }
+      });
+    } else if (typeof input === 'number') {
+      result.add(String(input));
+    }
+  }
+  return Array.from(result);
+}
+
   // Allowed Demographics Based on Role & Profile Scoping
   const electSettings = profile?.election_settings || profile?.electionSettings || {};
-  const rawState = profile?.stateId || profile?.state_id || electSettings.state_id || electSettings.stateId || '';
-  const rawDistrict = profile?.districtId || profile?.district_id || electSettings.district_id || electSettings.districtId || '';
-  const rawConstituency = profile?.constituencyId || profile?.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '';
-  const rawMandal = profile?.mandalId || profile?.mandal_id || electSettings.mandal_id || electSettings.mandalId || '';
-  const rawPanchayat = profile?.panchayatId || profile?.panchayat_id || electSettings.panchayat_id || electSettings.panchayatId || '';
-  const rawWard = profile?.wardId || profile?.ward_id || electSettings.ward_id || electSettings.wardId || '';
-  const rawBooth = profile?.boothId || profile?.booth_id || electSettings.booth_id || electSettings.boothId || '';
-  const rawAssignedBooths = profile?.assigned_booths || electSettings.assigned_booths || [];
 
-  const isPrivilegedUser = isSuperAdmin || isAdmin || isManager || 
-    profile?.role === 'super_admin' || profile?.role === 'admin' || profile?.role === 'manager' ||
+  const isSuperAdminUser = isSuperAdmin || 
+    profile?.role === 'super_admin' || 
+    profile?.role === 'owner' ||
     (user?.email || profile?.email || '').toLowerCase().trim() === 'vijaychauhanofficial01@gmail.com';
 
-  const allowedStateIds = !isPrivilegedUser && rawState
-    ? String(rawState).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+  const allowedStateIds = !isSuperAdminUser
+    ? parseIdArray(profile?.stateId, profile?.state_id, electSettings.state_id, electSettings.stateId, electSettings.state_ids, electSettings.stateIds, electSettings.states)
     : [];
-  const allowedDistrictIds = !isPrivilegedUser && rawDistrict
-    ? String(rawDistrict).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+  const allowedDistrictIds = !isSuperAdminUser
+    ? parseIdArray(profile?.districtId, profile?.district_id, electSettings.district_id, electSettings.districtId, electSettings.district_ids, electSettings.districtIds, electSettings.districts)
     : [];
-  const allowedConstituencyIds = !isPrivilegedUser && rawConstituency
-    ? String(rawConstituency).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+  const allowedConstituencyIds = !isSuperAdminUser
+    ? parseIdArray(profile?.constituencyId, profile?.constituency_id, electSettings.constituency_id, electSettings.constituencyId, electSettings.constituency_ids, electSettings.constituencyIds, electSettings.constituencies)
     : [];
-  const allowedMandalIds = !isPrivilegedUser && rawMandal
-    ? String(rawMandal).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+  const allowedMandalIds = !isSuperAdminUser
+    ? parseIdArray(profile?.mandalId, profile?.mandal_id, electSettings.mandal_id, electSettings.mandalId, electSettings.mandal_ids, electSettings.mandalIds, electSettings.mandals, electSettings.block_id, electSettings.block_ids)
     : [];
-  const allowedPanchayatIds = !isPrivilegedUser && rawPanchayat
-    ? String(rawPanchayat).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+  const allowedPanchayatIds = !isSuperAdminUser
+    ? parseIdArray(profile?.panchayatId, profile?.panchayat_id, electSettings.panchayat_id, electSettings.panchayatId, electSettings.panchayat_ids, electSettings.panchayatIds, electSettings.panchayats)
     : [];
-  const allowedWardIds = !isPrivilegedUser && rawWard
-    ? String(rawWard).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') 
+  const allowedWardIds = !isSuperAdminUser
+    ? parseIdArray(profile?.wardId, profile?.ward_id, electSettings.ward_id, electSettings.wardId, electSettings.ward_ids, electSettings.wardIds, electSettings.wards)
     : [];
-  const allowedBoothIds = !isPrivilegedUser && (rawBooth || (Array.isArray(rawAssignedBooths) && rawAssignedBooths.length > 0))
-    ? (rawBooth ? String(rawBooth).split(',').map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]') : (rawAssignedBooths || []).map(String).map(s => s.trim()).filter(s => s && s !== 'null' && s !== 'undefined' && s !== '[]')) 
+  const allowedBoothIds = !isSuperAdminUser
+    ? parseIdArray(profile?.boothId, profile?.booth_id, profile?.assigned_booths, electSettings.booth_id, electSettings.boothId, electSettings.booth_ids, electSettings.boothIds, electSettings.booths, electSettings.assigned_booths)
     : [];
 
-  const hasAssignedScope = isPrivilegedUser || (
+  const hasAssignedScope = (
     allowedBoothIds.length > 0 ||
     allowedWardIds.length > 0 ||
     allowedPanchayatIds.length > 0 ||
@@ -732,7 +768,9 @@ const VoterManagement: React.FC = () => {
     allowedDistrictIds.length > 0 ||
     allowedStateIds.length > 0
   );
-  const isRestrictedUser = !isPrivilegedUser;
+
+  const isRestrictedUser = !isSuperAdminUser && hasAssignedScope;
+  const isPrivilegedUser = isSuperAdminUser || (!hasAssignedScope && (isAdmin || profile?.role === 'admin'));
 
   const fetchStates = async () => {
     try {
@@ -822,7 +860,7 @@ const VoterManagement: React.FC = () => {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set('limit', '10000');
+      params.set('limit', '1000');
 
       // 1. Explicit UI filter dropdown selections
       if (selectedBoothId !== 'all') {
@@ -867,9 +905,9 @@ const VoterManagement: React.FC = () => {
         params.set('stateIds', selectedStateIds.join(','));
       }
 
-      // 2. If non-privileged user and no explicit UI filters selected, apply assigned profile scope
-      if (!isPrivilegedUser) {
-        if (!params.has('boothId') && !params.has('boothIds') && allowedBoothIds.length > 0 && allowedBoothIds.length < 50) {
+      // 2. If restricted user with assigned scope, enforce scope boundaries
+      if (isRestrictedUser) {
+        if (!params.has('boothId') && !params.has('boothIds') && allowedBoothIds.length > 0) {
           params.set('boothIds', allowedBoothIds.join(','));
         }
         if (!params.has('wardId') && !params.has('wardIds') && allowedWardIds.length > 0) {
@@ -1067,9 +1105,10 @@ const VoterManagement: React.FC = () => {
   useEffect(() => {
     fetchVoters();
   }, [
+    user?.uid, profile?.id, profile?.role, isPrivilegedUser, hasAssignedScope,
     selectedStateId, selectedDistrictId, selectedConstituencyId, selectedMandalId, selectedPanchayatId, selectedWardId, selectedBoothId,
-    selectedBoothIds, selectedWardIds, selectedPanchayatIds, selectedMandalIds, selectedStateIds, selectedDistrictIds, selectedConstituencyIds,
-    booths, isSuperAdmin, allowedConstituencyIds.join(','), allowedDistrictIds.join(','), allowedMandalIds.join(','), allowedPanchayatIds.join(','), allowedWardIds.join(','),
+    selectedBoothIds.join(','), selectedWardIds.join(','), selectedPanchayatIds.join(','), selectedMandalIds.join(','), selectedStateIds.join(','), selectedDistrictIds.join(','), selectedConstituencyIds.join(','),
+    isSuperAdmin, allowedConstituencyIds.join(','), allowedDistrictIds.join(','), allowedMandalIds.join(','), allowedPanchayatIds.join(','), allowedWardIds.join(','),
     allowedStateIds.join(','), allowedBoothIds.join(',')
   ]);
 
@@ -1585,12 +1624,18 @@ const VoterManagement: React.FC = () => {
   // Helper to extract full resolved location for a voter record
   const normalize = (id: any): string => {
     if (id === null || id === undefined) return '';
-    return String(id).trim().replace(/\.0$/, '');
+    return String(id).trim().replace(/^#\s*/, '').replace(/\.0$/, '');
   };
 
   const getVoterLocation = (v: Voter) => {
     const bId = normalize(v.boothId || (v as any).booth_id);
-    const boothObj = booths.find(b => normalize(b.id) === bId || normalize(b.boothNumber) === bId || b.name?.trim() === bId);
+    const pNo = normalize(v.partNo || (v as any).part_no);
+    const boothObj = booths.find(b => 
+      normalize(b.id) === bId || 
+      normalize(b.boothNumber) === bId || 
+      (pNo && (normalize(b.boothNumber) === pNo || normalize(b.id) === pNo)) ||
+      b.name?.trim() === bId
+    );
     
     const rawWId = normalize(v.wardId || (v as any).ward_id || (boothObj ? (boothObj.wardId || (boothObj as any).ward_id) : ''));
     const wardObj = wards.find(w => normalize(w.id) === rawWId || w.name?.trim() === rawWId);
@@ -1624,7 +1669,7 @@ const VoterManagement: React.FC = () => {
 
     return { 
       boothId: boothObj ? normalize(boothObj.id) : bId, 
-      boothNumber: boothObj ? normalize(boothObj.boothNumber) : bId,
+      boothNumber: boothObj ? normalize(boothObj.boothNumber) : (pNo || bId), 
       boothName: boothObj ? boothObj.name : (v.boothName || ''),
       constituencyId: cId, 
       constituencyName: cName,
@@ -1643,78 +1688,12 @@ const VoterManagement: React.FC = () => {
 
   // Determine if a voter is within the user's assigned scope
   const matchesUserScope = (v: Voter) => {
-    if (isPrivilegedUser) return true;
-    if (!hasAssignedScope) return false;
+    if (!isRestrictedUser) return true;
+    if (!hasAssignedScope) return true;
 
     const loc = getVoterLocation(v);
 
-    // 1. Check booth level restriction
-    if (allowedBoothIds.length > 0) {
-      const matchBooth = allowedBoothIds.some(id => {
-        const nId = normalize(id);
-        return nId === normalize(loc.boothId) || 
-               nId === normalize(loc.boothNumber) ||
-               booths.some(b => normalize(b.id) === nId && (normalize(b.boothNumber) === normalize(loc.boothId) || b.name === loc.boothId || normalize(b.id) === normalize(loc.boothId)));
-      });
-      if (matchBooth) return true;
-    }
-
-    // 2. Check ward level restriction
-    if (allowedWardIds.length > 0) {
-      const matchWard = allowedWardIds.some(id => {
-        const nId = normalize(id);
-        return nId === normalize(loc.wardId) || 
-               nId === normalize(loc.wardName) ||
-               wards.some(w => normalize(w.id) === nId && (w.name === loc.wardName || normalize(w.id) === normalize(loc.wardId)));
-      });
-      if (matchWard) return true;
-    }
-
-    // 3. Check panchayat level restriction
-    if (allowedPanchayatIds.length > 0) {
-      const matchPanchayat = allowedPanchayatIds.some(id => {
-        const nId = normalize(id);
-        return nId === normalize(loc.panchayatId) || 
-               nId === normalize(loc.panchayatName) ||
-               panchayats.some(p => normalize(p.id) === nId && (p.name === loc.panchayatName || normalize(p.id) === normalize(loc.panchayatId)));
-      });
-      if (matchPanchayat) return true;
-    }
-
-    // 4. Check mandal (block/area) level restriction
-    if (allowedMandalIds.length > 0) {
-      const matchMandal = allowedMandalIds.some(id => {
-        const nId = normalize(id);
-        return nId === normalize(loc.mandalId) || 
-               nId === normalize(loc.mandalName) ||
-               mandals.some(m => normalize(m.id) === nId && (m.name === loc.mandalName || normalize(m.id) === normalize(loc.mandalId)));
-      });
-      if (matchMandal) return true;
-    }
-
-    // 5. Check constituency level restriction
-    if (allowedConstituencyIds.length > 0) {
-      const matchConst = allowedConstituencyIds.some(id => {
-        const nId = normalize(id);
-        return nId === normalize(loc.constituencyId) || 
-               nId === normalize(loc.constituencyName) ||
-               constituencies.some(c => normalize(c.id) === nId && (c.name === loc.constituencyName || normalize(c.id) === normalize(loc.constituencyId)));
-      });
-      if (matchConst) return true;
-    }
-
-    // 6. Check district level restriction
-    if (allowedDistrictIds.length > 0) {
-      const matchDist = allowedDistrictIds.some(id => {
-        const nId = normalize(id);
-        return nId === normalize(loc.districtId) || 
-               nId === normalize(loc.districtName) ||
-               districts.some(d => normalize(d.id) === nId && (d.name === loc.districtName || normalize(d.id) === normalize(loc.districtId)));
-      });
-      if (matchDist) return true;
-    }
-
-    // 7. Check state level restriction
+    // 1. Check state level restriction (if assigned)
     if (allowedStateIds.length > 0) {
       const matchState = allowedStateIds.some(id => {
         const nId = normalize(id);
@@ -1722,10 +1701,83 @@ const VoterManagement: React.FC = () => {
                nId === normalize(loc.stateName) ||
                states.some(s => normalize(s.id) === nId && (s.name === loc.stateName || s.code === loc.stateName || normalize(s.id) === normalize(loc.stateId)));
       });
-      if (matchState) return true;
+      if (!matchState) return false;
     }
 
-    return false;
+    // 2. Check district level restriction (if assigned)
+    if (allowedDistrictIds.length > 0) {
+      const matchDist = allowedDistrictIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.districtId) || 
+               nId === normalize(loc.districtName) ||
+               districts.some(d => normalize(d.id) === nId && (d.name === loc.districtName || normalize(d.id) === normalize(loc.districtId)));
+      });
+      if (!matchDist) return false;
+    }
+
+    // 3. Check constituency level restriction (if assigned)
+    if (allowedConstituencyIds.length > 0) {
+      const matchConst = allowedConstituencyIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.constituencyId) || 
+               nId === normalize(loc.constituencyName) ||
+               constituencies.some(c => normalize(c.id) === nId && (c.name === loc.constituencyName || normalize(c.id) === normalize(loc.constituencyId)));
+      });
+      if (!matchConst) return false;
+    }
+
+    // 4. Check mandal (block/area) level restriction (if assigned)
+    if (allowedMandalIds.length > 0) {
+      const matchMandal = allowedMandalIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.mandalId) || 
+               nId === normalize(loc.mandalName) ||
+               mandals.some(m => normalize(m.id) === nId && (m.name === loc.mandalName || normalize(m.id) === normalize(loc.mandalId)));
+      });
+      if (!matchMandal) return false;
+    }
+
+    // 5. Check panchayat level restriction (if assigned)
+    if (allowedPanchayatIds.length > 0) {
+      const matchPanchayat = allowedPanchayatIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.panchayatId) || 
+               nId === normalize(loc.panchayatName) ||
+               panchayats.some(p => normalize(p.id) === nId && (p.name === loc.panchayatName || normalize(p.id) === normalize(loc.panchayatId)));
+      });
+      if (!matchPanchayat) return false;
+    }
+
+    // 6. Check ward level restriction (if assigned)
+    if (allowedWardIds.length > 0) {
+      const matchWard = allowedWardIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.wardId) || 
+               nId === normalize(loc.wardName) ||
+               wards.some(w => normalize(w.id) === nId && (w.name === loc.wardName || normalize(w.id) === normalize(loc.wardId)));
+      });
+      if (!matchWard) return false;
+    }
+
+    // 7. Check booth level restriction (if assigned)
+    if (allowedBoothIds.length > 0) {
+      const pNo = normalize(v.partNo || (v as any).part_no);
+      const matchBooth = allowedBoothIds.some(id => {
+        const nId = normalize(id);
+        return nId === normalize(loc.boothId) || 
+               nId === normalize(loc.boothNumber) ||
+               (pNo && nId === pNo) ||
+               booths.some(b => (normalize(b.id) === nId || normalize(b.boothNumber) === nId || b.name?.trim() === nId) && 
+                 (normalize(b.id) === normalize(loc.boothId) || 
+                  normalize(b.boothNumber) === normalize(loc.boothId) || 
+                  normalize(b.boothNumber) === normalize(loc.boothNumber) ||
+                  (pNo && (normalize(b.boothNumber) === pNo || normalize(b.id) === pNo)) ||
+                  b.name === loc.boothId));
+      });
+      if (!matchBooth) return false;
+    }
+
+    return true;
   };
 
   // Scoped State IDs for dropdown filters
@@ -2253,6 +2305,53 @@ const VoterManagement: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* Assigned Scope Indicator */}
+      {isRestrictedUser && (
+        <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-3 sm:p-4 text-xs">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="font-bold flex items-center gap-1.5 text-blue-700 dark:text-blue-300">
+              <MapPin size={14} className="text-blue-600 dark:text-blue-400" />
+              Assigned Election Scope:
+            </span>
+            {allowedStateIds.length > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-medium">
+                Assigned State(s): {allowedStateIds.length} chosen
+              </span>
+            )}
+            {allowedDistrictIds.length > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 font-medium">
+                Assigned District(s): {allowedDistrictIds.length} chosen
+              </span>
+            )}
+            {allowedConstituencyIds.length > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 font-medium">
+                Assigned Constituency(s): {allowedConstituencyIds.length} chosen
+              </span>
+            )}
+            {allowedMandalIds.length > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 font-medium">
+                Assigned Block / Area(s): {allowedMandalIds.length} chosen
+              </span>
+            )}
+            {allowedPanchayatIds.length > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 font-medium">
+                Assigned Panchayat / ULB(s): {allowedPanchayatIds.length} chosen
+              </span>
+            )}
+            {allowedWardIds.length > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-200 font-medium">
+                Assigned Ward / Village(s): {allowedWardIds.length} chosen
+              </span>
+            )}
+            {allowedBoothIds.length > 0 && (
+              <span className="px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 font-medium">
+                Assigned Polling Booth(s): {allowedBoothIds.length} chosen
+              </span>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">

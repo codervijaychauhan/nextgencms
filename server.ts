@@ -3463,15 +3463,22 @@ async function startServer() {
           let electSettings: any = {};
           try { electSettings = userRow.election_settings ? JSON.parse(userRow.election_settings) : {}; } catch {}
 
-          const rawState = userRow.state_id || electSettings.state_id || electSettings.stateId;
-          const rawDist = userRow.district_id || electSettings.district_id || electSettings.districtId;
-          const rawConst = userRow.constituency_id || electSettings.constituency_id || electSettings.constituencyId;
-          const rawBooth = userRow.booth_id || electSettings.booth_id || electSettings.boothId;
+          const rawState = userRow.state_id || userRow.stateId || electSettings.state_id || electSettings.stateId || electSettings.state_ids || electSettings.stateIds || electSettings.states;
+          const rawDist = userRow.district_id || userRow.districtId || electSettings.district_id || electSettings.districtId || electSettings.district_ids || electSettings.districtIds || electSettings.districts;
+          const rawConst = userRow.constituency_id || userRow.constituencyId || electSettings.constituency_id || electSettings.constituencyId || electSettings.constituency_ids || electSettings.constituencyIds || electSettings.constituencies;
+          const rawMandal = userRow.mandal_id || userRow.mandalId || electSettings.mandal_id || electSettings.mandalId || electSettings.mandal_ids || electSettings.mandalIds || electSettings.mandals || electSettings.block_id || electSettings.block_ids;
+          const rawPanchayat = userRow.panchayat_id || userRow.panchayatId || electSettings.panchayat_id || electSettings.panchayatId || electSettings.panchayat_ids || electSettings.panchayatIds || electSettings.panchayats;
+          const rawWard = userRow.ward_id || userRow.wardId || electSettings.ward_id || electSettings.wardId || electSettings.ward_ids || electSettings.wardIds || electSettings.wards;
+          const rawBooth = userRow.booth_id || userRow.boothId || electSettings.booth_id || electSettings.boothId || electSettings.booth_ids || electSettings.boothIds || electSettings.booths;
           const rawBooths = userRow.assigned_booths || electSettings.assigned_booths;
 
           const userStates = rawState ? String(rawState).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
           const userDistricts = rawDist ? String(rawDist).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
           const userConstituencies = rawConst ? String(rawConst).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const userMandals = rawMandal ? String(rawMandal).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const userPanchayats = rawPanchayat ? String(rawPanchayat).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+          const userWards = rawWard ? String(rawWard).split(',').map((s: string) => s.trim()).filter(Boolean) : [];
+
           let userBooths: string[] = [];
           try {
             userBooths = rawBooths ? (typeof rawBooths === 'string' ? JSON.parse(rawBooths) : rawBooths) : [];
@@ -3480,17 +3487,32 @@ async function startServer() {
             if (rawBooth) userBooths = String(rawBooth).split(',').map((s: string) => s.trim()).filter(Boolean);
           }
 
-          // Enforce narrowest assigned demographic level
+          // Enforce all assigned demographic levels
           if (userBooths.length > 0) {
-            const bClause = buildSafeInClause(userBooths.join(','), 'u_bth', ['v.booth_id', 'b.id'], params);
+            const bClause = buildSafeInClause(userBooths.join(','), 'u_bth', ['v.booth_id', 'b.id', 'b.booth_number', 'v.part_no'], params);
             if (bClause) whereConditions.push(bClause);
-          } else if (userConstituencies.length > 0) {
+          }
+          if (userWards.length > 0) {
+            const wrdClause = buildSafeInClause(userWards.join(','), 'u_wrd', ['v.ward_id', 'b.ward_id', 'w.id'], params);
+            if (wrdClause) whereConditions.push(wrdClause);
+          }
+          if (userPanchayats.length > 0) {
+            const pchClause = buildSafeInClause(userPanchayats.join(','), 'u_pch', ['v.panchayat_id', 'b.panchayat_id', 'p.id'], params);
+            if (pchClause) whereConditions.push(pchClause);
+          }
+          if (userMandals.length > 0) {
+            const mClause = buildSafeInClause(userMandals.join(','), 'u_mnd', ['v.mandal_id', 'b.mandal_id', 'm.id'], params);
+            if (mClause) whereConditions.push(mClause);
+          }
+          if (userConstituencies.length > 0) {
             const cClause = buildSafeInClause(userConstituencies.join(','), 'u_cst', ['v.constituency_id', 'b.constituency_id', 'c.id'], params);
             if (cClause) whereConditions.push(cClause);
-          } else if (userDistricts.length > 0) {
+          }
+          if (userDistricts.length > 0) {
             const dClause = buildSafeInClause(userDistricts.join(','), 'u_dst', ['v.district_id', 'c.district_id', 'd.id'], params);
             if (dClause) whereConditions.push(dClause);
-          } else if (userStates.length > 0) {
+          }
+          if (userStates.length > 0) {
             const sClause = buildSafeInClause(userStates.join(','), 'u_st', ['v.state_id', 'c.state_id', 'd.state_id', 's.id'], params);
             if (sClause) whereConditions.push(sClause);
           }
@@ -3498,7 +3520,7 @@ async function startServer() {
       }
 
       // 2. Query level filter parameters (from dropdowns or multi-selects)
-      const bClause = buildSafeInClause(boothId || boothIds, 'f_bth', ['v.booth_id', 'b.id'], params);
+      const bClause = buildSafeInClause(boothId || boothIds, 'f_bth', ['v.booth_id', 'b.id', 'b.booth_number', 'v.part_no'], params);
       if (bClause) whereConditions.push(bClause);
 
       const wrdClause = buildSafeInClause(wardId || wardIds, 'f_wrd', ['v.ward_id', 'b.ward_id', 'w.id'], params);

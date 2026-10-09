@@ -299,7 +299,7 @@ export default function UserManagement() {
   // Open and normalize user profile edit modal
   const openEditModal = (u: UserData, tab: 'details' | 'demographics' | 'permissions' = 'details') => {
     setError('');
-    const electSettings = u.election_settings || (u as any).electionSettings || {};
+    const electSettings = (u as any).election_settings || (u as any).electionSettings || {};
     const rawState = String(u.stateId || u.state_id || electSettings.state_id || electSettings.stateId || '').trim();
     const rawDistrict = String(u.districtId || u.district_id || electSettings.district_id || electSettings.districtId || '').trim();
     const rawConst = String(u.constituencyId || u.constituency_id || electSettings.constituency_id || electSettings.constituencyId || '').trim();

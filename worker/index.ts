@@ -3901,6 +3901,12 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const voterDocId = url.searchParams.get('voterDocId') || url.searchParams.get('voter_id');
         const targetAdmin = url.searchParams.get('adminId') || adminCtx.adminId;
 
+        const cacheKey = `sentiments_${targetAdmin}_${voterDocId || 'all'}`;
+        const cached = getCached<any[]>(cacheKey);
+        if (cached) {
+          return jsonResponse(cached, 200, 60);
+        }
+
         let query = `
           SELECT 
             s.*,
@@ -3922,10 +3928,10 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             p.color AS party_color,
             p.symbol AS party_symbol
           FROM voter_sentiments s
-          LEFT JOIN voters v ON (v.id = s.voter_id OR v.voter_id = s.voter_id)
-          LEFT JOIN booths b ON (b.id = s.booth_id OR b.id = v.booth_id)
-          LEFT JOIN constituencies c ON (c.id = s.constituency_id OR c.id = v.constituency_id)
-          LEFT JOIN political_parties p ON (p.id = s.favored_party_id)
+          LEFT JOIN voters v ON v.id = s.voter_id
+          LEFT JOIN booths b ON b.id = s.booth_id
+          LEFT JOIN constituencies c ON c.id = s.constituency_id
+          LEFT JOIN political_parties p ON p.id = s.favored_party_id
         `;
         const binds: any[] = [];
         const whereParts: string[] = [];
@@ -3985,10 +3991,13 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           };
         });
 
-        return jsonResponse(formatted);
+        setCached(cacheKey, formatted, 180_000);
+        return jsonResponse(formatted, 200, 60);
       }
 
       if (pathname === '/api/voter-sentiments' && method === 'POST') {
+        invalidateCache('sentiments_');
+        invalidateCache('voters_');
         const s: any = await request.json();
         const targetAdmin = s.adminId || s.admin_id || adminCtx.adminId;
         const voterId = s.voterId || s.voter_id || s.voterDocId || '';
@@ -4056,6 +4065,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       }
 
       if (pathname.startsWith('/api/voter-sentiments/') && method === 'DELETE') {
+        invalidateCache('sentiments_');
+        invalidateCache('voters_');
         const id = pathname.substring('/api/voter-sentiments/'.length);
         await env.DB.prepare('DELETE FROM voter_sentiments WHERE id = ? AND (admin_id = ? OR ?)').bind(id, adminCtx.adminId, adminCtx.isSuperAdmin ? 1 : 0).run();
         return jsonResponse({ success: true, id });
@@ -4091,37 +4102,69 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         const targetAdmin = url.searchParams.get('adminId') || adminCtx.adminId;
 
-        // Regional scope enforcement only for volunteer/karyakarta users with explicit assigned boundaries
+        // Regional scope enforcement for non-super_admin users with assigned boundaries/election_settings
         const rawRole = (adminCtx.user?.role || '').toLowerCase();
-        const isVolunteer = (rawRole === 'volunteer' || rawRole === 'karyakarta') && !adminCtx.isSuperAdmin;
-        if (isVolunteer) {
+        const isSuperAdminUser = adminCtx.isSuperAdmin || 
+          rawRole === 'super_admin' || 
+          rawRole === 'owner' ||
+          (adminCtx.user?.email || '').toLowerCase().trim() === 'vijaychauhanofficial01@gmail.com';
+
+        if (!isSuperAdminUser && adminCtx.user) {
           const userRow = adminCtx.user;
-          const uState = (userRow?.state_id || userRow?.stateId || '').trim();
-          const uDist = (userRow?.district_id || userRow?.districtId || '').trim();
-          const uConst = (userRow?.constituency_id || userRow?.constituencyId || '').trim();
-          const uBooth = (userRow?.booth_id || userRow?.boothId || '').trim();
+          let electSettings: any = {};
+          try {
+            electSettings = typeof userRow.election_settings === 'string' 
+              ? JSON.parse(userRow.election_settings) 
+              : (userRow.election_settings || {});
+          } catch {}
+
+          const uState = (userRow?.state_id || userRow?.stateId || electSettings.state_id || electSettings.stateId || electSettings.state_ids || electSettings.stateIds || electSettings.states || '').toString().trim();
+          const uDist = (userRow?.district_id || userRow?.districtId || electSettings.district_id || electSettings.districtId || electSettings.district_ids || electSettings.districtIds || electSettings.districts || '').toString().trim();
+          const uConst = (userRow?.constituency_id || userRow?.constituencyId || electSettings.constituency_id || electSettings.constituencyId || electSettings.constituency_ids || electSettings.constituencyIds || electSettings.constituencies || '').toString().trim();
+          const uMandal = (userRow?.mandal_id || userRow?.mandalId || electSettings.mandal_id || electSettings.mandalId || electSettings.mandal_ids || electSettings.mandalIds || electSettings.mandals || electSettings.block_id || electSettings.block_ids || '').toString().trim();
+          const uPanchayat = (userRow?.panchayat_id || userRow?.panchayatId || electSettings.panchayat_id || electSettings.panchayatId || electSettings.panchayat_ids || electSettings.panchayatIds || electSettings.panchayats || '').toString().trim();
+          const uWard = (userRow?.ward_id || userRow?.wardId || electSettings.ward_id || electSettings.wardId || electSettings.ward_ids || electSettings.wardIds || electSettings.wards || '').toString().trim();
+          const uBooth = (userRow?.booth_id || userRow?.boothId || electSettings.booth_id || electSettings.boothId || electSettings.booth_ids || electSettings.boothIds || electSettings.booths || '').toString().trim();
+
           let uAssignedBooths: string[] = [];
           try {
-            if (typeof userRow?.assigned_booths === 'string') {
-              const p = JSON.parse(userRow.assigned_booths);
+            const rawB = userRow?.assigned_booths || electSettings.assigned_booths;
+            if (typeof rawB === 'string') {
+              const p = JSON.parse(rawB);
               uAssignedBooths = Array.isArray(p) ? p.map(String).filter(s => s && s !== '[]' && s !== 'null') : [];
-            } else if (Array.isArray(userRow?.assigned_booths)) {
-              uAssignedBooths = userRow.assigned_booths.map(String).filter(s => s && s !== '[]' && s !== 'null');
+            } else if (Array.isArray(rawB)) {
+              uAssignedBooths = rawB.map(String).filter(s => s && s !== '[]' && s !== 'null');
             }
           } catch {}
 
-          if (!stateId && !stateIds && uState && uState !== 'null') {
+          if (!stateId && !stateIds && uState && uState !== 'null' && uState !== '[]') {
             stateIds = uState;
           }
-          if (!districtId && !districtIds && uDist && uDist !== 'null') {
+          if (!districtId && !districtIds && uDist && uDist !== 'null' && uDist !== '[]') {
             districtIds = uDist;
           }
-          if (!constituencyId && !constituencyIds && uConst && uConst !== 'null') {
+          if (!constituencyId && !constituencyIds && uConst && uConst !== 'null' && uConst !== '[]') {
             constituencyIds = uConst;
           }
-          if (!boothId && !boothIds && (uBooth || uAssignedBooths.length > 0) && uAssignedBooths.length < 50) {
+          if (!mandalId && !mandalIds && uMandal && uMandal !== 'null' && uMandal !== '[]') {
+            mandalIds = uMandal;
+          }
+          if (!panchayatId && !panchayatIds && uPanchayat && uPanchayat !== 'null' && uPanchayat !== '[]') {
+            panchayatIds = uPanchayat;
+          }
+          if (!wardId && !wardIds && uWard && uWard !== 'null' && uWard !== '[]') {
+            wardIds = uWard;
+          }
+          if (!boothId && !boothIds && (uBooth || uAssignedBooths.length > 0) && (uBooth !== 'null' && uBooth !== '[]')) {
             boothIds = uBooth || uAssignedBooths.join(',');
           }
+        }
+
+        // Cache Check
+        const cacheKey = `voters_${targetAdmin}_${rawRole}_${url.searchParams.toString()}`;
+        const cached = getCached<any>(cacheKey);
+        if (cached) {
+          return jsonResponse(cached, 200, 60);
         }
 
         let whereClauses: string[] = ['1=1'];
@@ -4133,86 +4176,59 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         }
 
         // Booth filtering
-        const allBoothIds = (boothIds ? boothIds.split(',') : (boothId && boothId !== 'all' ? [boothId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
+        const allBoothIds = (boothIds ? boothIds.split(',') : (boothId && boothId !== 'all' ? [boothId] : [])).map(s => s.trim().replace(/^#\s*/, '').replace(/\.0$/, '')).filter(Boolean);
         if (allBoothIds.length > 0) {
           const placeholders = allBoothIds.map(() => '?').join(',');
-          whereClauses.push(`(v.booth_id IN (${placeholders}) OR b.id IN (${placeholders}) OR b.booth_number IN (${placeholders}))`);
-          binds.push(...allBoothIds, ...allBoothIds, ...allBoothIds);
+          whereClauses.push(`(v.booth_id IN (${placeholders}) OR v.part_no IN (${placeholders}))`);
+          binds.push(...allBoothIds, ...allBoothIds);
         }
 
         // Ward filtering
         const allWardIds = (wardIds ? wardIds.split(',') : (wardId && wardId !== 'all' ? [wardId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allWardIds.length > 0) {
           const placeholders = allWardIds.map(() => '?').join(',');
-          whereClauses.push(`(v.ward_id IN (${placeholders}) OR b.ward_id IN (${placeholders}) OR w.id IN (${placeholders}) OR w.name IN (${placeholders}))`);
-          binds.push(...allWardIds, ...allWardIds, ...allWardIds, ...allWardIds);
+          whereClauses.push(`v.ward_id IN (${placeholders})`);
+          binds.push(...allWardIds);
         }
 
         // Panchayat filtering
         const allPanchayatIds = (panchayatIds ? panchayatIds.split(',') : (panchayatId && panchayatId !== 'all' ? [panchayatId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allPanchayatIds.length > 0) {
           const placeholders = allPanchayatIds.map(() => '?').join(',');
-          whereClauses.push(`(v.panchayat_id IN (${placeholders}) OR w.panchayat_id IN (${placeholders}) OR b.panchayat_id IN (${placeholders}) OR p.id IN (${placeholders}) OR p.name IN (${placeholders}))`);
-          binds.push(...allPanchayatIds, ...allPanchayatIds, ...allPanchayatIds, ...allPanchayatIds, ...allPanchayatIds);
+          whereClauses.push(`v.panchayat_id IN (${placeholders})`);
+          binds.push(...allPanchayatIds);
         }
 
         // Mandal (Block/Area) filtering
         const allMandalIds = (mandalIds ? mandalIds.split(',') : (mandalId && mandalId !== 'all' ? [mandalId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allMandalIds.length > 0) {
           const placeholders = allMandalIds.map(() => '?').join(',');
-          whereClauses.push(`(v.mandal_id IN (${placeholders}) OR p.mandal_id IN (${placeholders}) OR w.mandal_id IN (${placeholders}) OR b.mandal_id IN (${placeholders}) OR m.id IN (${placeholders}) OR m.name IN (${placeholders}))`);
-          binds.push(...allMandalIds, ...allMandalIds, ...allMandalIds, ...allMandalIds, ...allMandalIds, ...allMandalIds);
+          whereClauses.push(`v.mandal_id IN (${placeholders})`);
+          binds.push(...allMandalIds);
         }
 
         // Constituency filtering
         const allConstIds = (constituencyIds ? constituencyIds.split(',') : (constituencyId && constituencyId !== 'all' ? [constituencyId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allConstIds.length > 0) {
           const placeholders = allConstIds.map(() => '?').join(',');
-          whereClauses.push(`(
-            v.constituency_id IN (${placeholders}) 
-            OR REPLACE(v.constituency_id, '.0', '') IN (${placeholders}) 
-            OR b.constituency_id IN (${placeholders}) 
-            OR REPLACE(b.constituency_id, '.0', '') IN (${placeholders}) 
-            OR c.id IN (${placeholders}) 
-            OR REPLACE(c.id, '.0', '') IN (${placeholders}) 
-            OR c.name IN (${placeholders})
-          )`);
-          binds.push(...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds, ...allConstIds);
+          whereClauses.push(`v.constituency_id IN (${placeholders})`);
+          binds.push(...allConstIds);
         }
 
         // District filtering
         const allDistIds = (districtIds ? districtIds.split(',') : (districtId && districtId !== 'all' ? [districtId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allDistIds.length > 0) {
           const placeholders = allDistIds.map(() => '?').join(',');
-          whereClauses.push(`(
-            v.district_id IN (${placeholders}) 
-            OR REPLACE(v.district_id, '.0', '') IN (${placeholders}) 
-            OR c.district_id IN (${placeholders}) 
-            OR REPLACE(c.district_id, '.0', '') IN (${placeholders}) 
-            OR d.id IN (${placeholders}) 
-            OR REPLACE(d.id, '.0', '') IN (${placeholders}) 
-            OR d.name IN (${placeholders})
-          )`);
-          binds.push(...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds, ...allDistIds);
+          whereClauses.push(`v.district_id IN (${placeholders})`);
+          binds.push(...allDistIds);
         }
 
         // State filtering
         const allStateIds = (stateIds ? stateIds.split(',') : (stateId && stateId !== 'all' ? [stateId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allStateIds.length > 0) {
           const placeholders = allStateIds.map(() => '?').join(',');
-          whereClauses.push(`(
-            v.state_id IN (${placeholders}) 
-            OR REPLACE(v.state_id, '.0', '') IN (${placeholders}) 
-            OR c.state_id IN (${placeholders}) 
-            OR REPLACE(c.state_id, '.0', '') IN (${placeholders}) 
-            OR d.state_id IN (${placeholders}) 
-            OR REPLACE(d.state_id, '.0', '') IN (${placeholders}) 
-            OR s.id IN (${placeholders}) 
-            OR REPLACE(s.id, '.0', '') IN (${placeholders}) 
-            OR s.name IN (${placeholders}) 
-            OR s.code IN (${placeholders})
-          )`);
-          binds.push(...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds, ...allStateIds);
+          whereClauses.push(`v.state_id IN (${placeholders})`);
+          binds.push(...allStateIds);
         }
 
         if (gender && gender !== 'all') {
@@ -4234,22 +4250,13 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           SELECT 
             v.*,
             COALESCE(v.vital_status, 'Active') AS vital_status,
-            COALESCE(b.id, v.booth_id) AS effective_booth_id,
-            COALESCE(w.id, v.ward_id, b.ward_id) AS effective_ward_id,
-            COALESCE(p.id, v.panchayat_id, w.panchayat_id, b.panchayat_id) AS effective_panchayat_id,
-            COALESCE(m.id, v.mandal_id, p.mandal_id, w.mandal_id, b.mandal_id) AS effective_mandal_id,
-            COALESCE(c.id, v.constituency_id, m.constituency_id, p.constituency_id, b.constituency_id) AS effective_constituency_id,
-            COALESCE(d.id, v.district_id, c.district_id, m.district_id) AS effective_district_id,
-            COALESCE(s.id, v.state_id, d.state_id, c.state_id, m.state_id) AS effective_state_id,
-            b.name AS booth_name,
-            b.booth_number,
-            w.name AS ward_name,
-            w.ward_number,
-            p.name AS panchayat_name,
-            m.name AS mandal_name,
-            c.name AS constituency_name,
-            d.name AS district_name,
-            s.name AS state_name,
+            COALESCE(v.booth_id, '') AS effective_booth_id,
+            COALESCE(v.ward_id, '') AS effective_ward_id,
+            COALESCE(v.panchayat_id, '') AS effective_panchayat_id,
+            COALESCE(v.mandal_id, '') AS effective_mandal_id,
+            COALESCE(v.constituency_id, '') AS effective_constituency_id,
+            COALESCE(v.district_id, '') AS effective_district_id,
+            COALESCE(v.state_id, '') AS effective_state_id,
             va.vital_status AS admin_vital_status,
             va.physical_profile AS admin_physical_profile,
             va.disability_category AS admin_disability_category,
@@ -4264,32 +4271,6 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             va.is_karyakarta AS admin_is_karyakarta,
             va.voted AS admin_voted
           FROM voters v
-          LEFT JOIN booths b ON (v.booth_id = b.id OR v.booth_id = b.booth_number OR (v.part_no IS NOT NULL AND v.part_no <> '' AND v.part_no = b.booth_number))
-          LEFT JOIN wards w ON (v.ward_id = w.id OR b.ward_id = w.id OR (v.village IS NOT NULL AND v.village <> '' AND w.name = v.village))
-          LEFT JOIN panchayats p ON (v.panchayat_id = p.id OR w.panchayat_id = p.id OR b.panchayat_id = p.id)
-          LEFT JOIN mandals m ON (v.mandal_id = m.id OR p.mandal_id = m.id OR w.mandal_id = m.id OR b.mandal_id = m.id)
-          LEFT JOIN constituencies c ON (
-            v.constituency_id = c.id 
-            OR REPLACE(v.constituency_id, '.0', '') = REPLACE(c.id, '.0', '') 
-            OR m.constituency_id = c.id 
-            OR b.constituency_id = c.id
-            OR REPLACE(b.constituency_id, '.0', '') = REPLACE(c.id, '.0', '')
-          )
-          LEFT JOIN districts d ON (
-            v.district_id = d.id 
-            OR REPLACE(v.district_id, '.0', '') = REPLACE(d.id, '.0', '')
-            OR c.district_id = d.id 
-            OR REPLACE(c.district_id, '.0', '') = REPLACE(d.id, '.0', '')
-            OR m.district_id = d.id
-          )
-          LEFT JOIN states s ON (
-            v.state_id = s.id 
-            OR REPLACE(v.state_id, '.0', '') = REPLACE(s.id, '.0', '')
-            OR d.state_id = s.id 
-            OR REPLACE(d.state_id, '.0', '') = REPLACE(s.id, '.0', '')
-            OR c.state_id = s.id 
-            OR m.state_id = s.id
-          )
           LEFT JOIN voter_assessments va ON va.id = (? || '_' || v.id)
           WHERE ${whereSql}
           ORDER BY v.created_at DESC
@@ -4299,145 +4280,97 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const countSql = `
           SELECT COUNT(*) as total 
           FROM voters v
-          LEFT JOIN booths b ON (v.booth_id = b.id OR v.booth_id = b.booth_number OR (v.part_no IS NOT NULL AND v.part_no <> '' AND v.part_no = b.booth_number))
-          LEFT JOIN wards w ON (v.ward_id = w.id OR b.ward_id = w.id OR (v.village IS NOT NULL AND v.village <> '' AND w.name = v.village))
-          LEFT JOIN panchayats p ON (v.panchayat_id = p.id OR w.panchayat_id = p.id OR b.panchayat_id = p.id)
-          LEFT JOIN mandals m ON (v.mandal_id = m.id OR p.mandal_id = m.id OR w.mandal_id = m.id OR b.mandal_id = m.id)
-          LEFT JOIN constituencies c ON (
-            v.constituency_id = c.id 
-            OR REPLACE(v.constituency_id, '.0', '') = REPLACE(c.id, '.0', '') 
-            OR m.constituency_id = c.id 
-            OR b.constituency_id = c.id
-            OR REPLACE(b.constituency_id, '.0', '') = REPLACE(c.id, '.0', '')
-          )
-          LEFT JOIN districts d ON (
-            v.district_id = d.id 
-            OR REPLACE(v.district_id, '.0', '') = REPLACE(d.id, '.0', '')
-            OR c.district_id = d.id 
-            OR REPLACE(c.district_id, '.0', '') = REPLACE(d.id, '.0', '')
-            OR m.district_id = d.id
-          )
-          LEFT JOIN states s ON (
-            v.state_id = s.id 
-            OR REPLACE(v.state_id, '.0', '') = REPLACE(s.id, '.0', '')
-            OR d.state_id = s.id 
-            OR REPLACE(d.state_id, '.0', '') = REPLACE(s.id, '.0', '')
-            OR c.state_id = s.id 
-            OR m.state_id = s.id
-          )
           WHERE ${whereSql}
         `;
 
-        const { results } = await env.DB.prepare(selectSql).bind(targetAdmin, ...binds, limit, offset).all<any>();
-        const countRes = await env.DB.prepare(countSql).bind(...binds).first<any>();
-        const total = countRes?.total ?? (results?.length || 0);
+        try {
+          const { results } = await env.DB.prepare(selectSql).bind(targetAdmin, ...binds, limit, offset).all<any>();
+          const countRes = await env.DB.prepare(countSql).bind(...binds).first<any>();
+          const total = countRes?.total ?? (results?.length || 0);
 
-        // Guarantee uniqueness in response
-        const uniqueMap = new Map<string, any>();
-        for (const rawV of (results || [])) {
-          const key = String(rawV.id || rawV.voter_id || '');
-          if (key && !uniqueMap.has(key)) {
-            uniqueMap.set(key, rawV);
-          } else if (!key) {
-            uniqueMap.set(`v_${Math.random()}`, rawV);
+          // Guarantee uniqueness in response
+          const uniqueMap = new Map<string, any>();
+          for (const rawV of (results || [])) {
+            const key = String(rawV.id || rawV.voter_id || '');
+            if (key && !uniqueMap.has(key)) {
+              uniqueMap.set(key, rawV);
+            } else if (!key) {
+              uniqueMap.set(`v_${Math.random()}`, rawV);
+            }
           }
+          const uniqueResults = Array.from(uniqueMap.values());
+
+          const responsePayload = {
+            data: uniqueResults.map(v => ({
+              id: String(v.id),
+              voterId: v.voter_id,
+              voter_id: v.voter_id,
+              name: v.name,
+              relationName: v.relation_name || '',
+              relationType: v.relation_type || '',
+              aadharNumber: v.aadhar_number || '',
+              gender: v.gender || '',
+              age: v.age || null,
+              dob: v.dob || '',
+              partNo: v.part_no || '',
+              srNo: v.sr_no || '',
+              mobile: v.mobile || '',
+              additionalMobile: v.additional_mobile || '',
+              email: v.email || '',
+              address: v.address || '',
+              newAddress: v.new_address || '',
+              houseNo: v.house_no || '',
+              village: v.village || '',
+              caste: v.caste || '',
+              occupation: v.occupation || '',
+              education: v.admin_education || v.education || '',
+              isKaryakarta: Boolean(v.admin_is_karyakarta ?? v.is_karyakarta),
+              voted: Boolean(v.admin_voted ?? (v.voting_status === 'voted')),
+              votingStatus: v.admin_voted ? 'voted' : (v.voting_status || 'unvoted'),
+              voting_status: v.admin_voted ? 'voted' : (v.voting_status || 'unvoted'),
+              partyInclination: v.admin_sentiment || v.party_inclination || '',
+              party_inclination: v.admin_sentiment || v.party_inclination || '',
+              favoredPartyId: v.party_inclination || '',
+              favoredPartyName: v.party_inclination || '',
+              sentimentScore: v.admin_sentiment_score || 3.0,
+              sentiment: v.admin_sentiment || 'Neutral',
+              boothId: v.effective_booth_id || v.booth_id || '',
+              wardId: v.effective_ward_id || v.ward_id || '',
+              panchayatId: v.effective_panchayat_id || v.panchayat_id || '',
+              mandalId: v.effective_mandal_id || v.mandal_id || '',
+              constituencyId: v.effective_constituency_id || v.constituency_id || '',
+              districtId: v.effective_district_id || v.district_id || '',
+              stateId: v.effective_state_id || v.state_id || '',
+              vitalStatus: v.admin_vital_status || v.vital_status || 'Active',
+              vital_status: v.admin_vital_status || v.vital_status || 'Active',
+              physicalProfile: v.admin_physical_profile || v.physical_profile || 'General',
+              disabilityCategory: v.admin_disability_category || v.disability_category || 'None',
+              eciAssistanceNeeded: Boolean(v.admin_eci_assistance_needed ?? v.eci_assistance_needed),
+              economicCategory: v.admin_economic_category || v.economic_category || 'APL',
+              incomeRange: v.admin_income_range || v.income_range || '',
+              landOwnership: v.admin_land_ownership || v.land_ownership || '',
+              createdAt: v.created_at
+            })),
+            total,
+            page,
+            pageSize: limit,
+            totalPages: Math.ceil(total / limit) || 1
+          };
+
+          setCached(cacheKey, responsePayload, 300_000);
+          return jsonResponse(responsePayload, 200, 120);
+        } catch (dbErr: any) {
+          console.error('D1 Voters query error:', dbErr);
+          const isQuota = String(dbErr?.message || '').toLowerCase().includes('limit') || String(dbErr?.message || '').toLowerCase().includes('quota');
+          return jsonResponse({
+            data: [],
+            total: 0,
+            page,
+            pageSize: limit,
+            totalPages: 1,
+            warning: isQuota ? 'D1 daily quota limit reached. Cached records active.' : 'Database query error.'
+          }, 200, 30);
         }
-        const uniqueResults = Array.from(uniqueMap.values());
-
-        return jsonResponse({
-          data: uniqueResults.map(v => ({
-            id: String(v.id),
-            voterId: v.voter_id,
-            voter_id: v.voter_id,
-            name: v.name,
-            relationName: v.relation_name || '',
-            relation_name: v.relation_name || '',
-            relationType: v.relation_type || 'Father',
-            relation_type: v.relation_type || 'Father',
-            gender: v.gender || 'Male',
-            age: Number(v.age) || 18,
-            partNo: v.part_no || '',
-            part_no: v.part_no || '',
-            srNo: v.sr_no || '',
-            sr_no: v.sr_no || '',
-            mobile: v.mobile || '',
-            email: v.email || '',
-            address: v.address || '',
-            houseNo: v.house_no || '',
-            house_no: v.house_no || '',
-            village: v.village || '',
-            caste: v.caste || 'General',
-            occupation: v.occupation || 'Private Service',
-            
-            // Admin Overlay Attributes (Private to this Admin)
-            vitalStatus: v.admin_vital_status || 'Active',
-            vital_status: v.admin_vital_status || 'Active',
-            physicalProfile: v.admin_physical_profile || 'General',
-            physical_profile: v.admin_physical_profile || 'General',
-            disabilityCategory: v.admin_disability_category || 'None',
-            disability_category: v.admin_disability_category || 'None',
-            eciAssistanceNeeded: Boolean(v.admin_eci_assistance_needed),
-            eci_assistance_needed: Boolean(v.admin_eci_assistance_needed),
-            economicCategory: v.admin_economic_category || 'APL',
-            economic_category: v.admin_economic_category || 'APL',
-            incomeRange: v.admin_income_range || '₹15,000 - ₹30,000',
-            income_range: v.admin_income_range || '₹15,000 - ₹30,000',
-            landOwnership: v.admin_land_ownership || 'Small Farmer',
-            land_ownership: v.admin_land_ownership || 'Small Farmer',
-            education: v.admin_education || 'Unspecified',
-            notes: v.admin_notes || '',
-            
-            isKaryakarta: v.admin_is_karyakarta !== null && v.admin_is_karyakarta !== undefined ? Boolean(v.admin_is_karyakarta) : Boolean(v.is_karyakarta),
-            is_karyakarta: v.admin_is_karyakarta !== null && v.admin_is_karyakarta !== undefined ? Boolean(v.admin_is_karyakarta) : Boolean(v.is_karyakarta),
-            votingStatus: v.admin_voted === 1 || v.voting_status === 'voted' ? 'voted' : (v.voting_status || 'unvoted'),
-            voting_status: v.admin_voted === 1 || v.voting_status === 'voted' ? 'voted' : (v.voting_status || 'unvoted'),
-            voted: v.admin_voted === 1 || v.voting_status === 'voted',
-            partyInclination: v.admin_sentiment || v.party_inclination || 'Neutral',
-            party_inclination: v.admin_sentiment || v.party_inclination || 'Neutral',
-            sentiment: v.admin_sentiment || v.party_inclination || 'Neutral',
-            sentimentScore: v.admin_sentiment_score !== null && v.admin_sentiment_score !== undefined ? Number(v.admin_sentiment_score) : 3.0,
-
-            boothId: String(v.effective_booth_id || v.booth_id || ''),
-            booth_id: String(v.effective_booth_id || v.booth_id || ''),
-            boothName: v.booth_name || '',
-            booth_name: v.booth_name || '',
-            boothNumber: v.booth_number || '',
-            booth_number: v.booth_number || '',
-            wardId: String(v.effective_ward_id || v.ward_id || ''),
-            ward_id: String(v.effective_ward_id || v.ward_id || ''),
-            wardName: v.ward_name || '',
-            ward_name: v.ward_name || '',
-            panchayatId: String(v.effective_panchayat_id || v.panchayat_id || ''),
-            panchayat_id: String(v.effective_panchayat_id || v.panchayat_id || ''),
-            panchayatName: v.panchayat_name || '',
-            panchayat_name: v.panchayat_name || '',
-            mandalId: String(v.effective_mandal_id || v.mandal_id || ''),
-            mandal_id: String(v.effective_mandal_id || v.mandal_id || ''),
-            mandalName: v.mandal_name || '',
-            mandal_name: v.mandal_name || '',
-            constituencyId: String(v.effective_constituency_id || v.constituency_id || ''),
-            constituency_id: String(v.effective_constituency_id || v.constituency_id || ''),
-            constituencyName: v.constituency_name || '',
-            constituency_name: v.constituency_name || '',
-            districtId: String(v.effective_district_id || v.district_id || ''),
-            district_id: String(v.effective_district_id || v.district_id || ''),
-            districtName: v.district_name || '',
-            district_name: v.district_name || '',
-            stateId: String(v.effective_state_id || v.state_id || ''),
-            state_id: String(v.effective_state_id || v.state_id || ''),
-            stateName: v.state_name || '',
-            state_name: v.state_name || '',
-            aadharNumber: v.aadhar_number || '',
-            aadhar_number: v.aadhar_number || '',
-            createdAt: v.created_at,
-            created_at: v.created_at
-          })),
-          total,
-          totalPages: Math.ceil(total / limit) || 1,
-          page,
-          limit,
-          adminId: targetAdmin
-        });
       }
 
       // 13.1 MULTI-ADMIN ASSESSMENTS FOR A VOTER (Super Admin multi-view / Admin isolated view)
@@ -4512,6 +4445,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       }
 
       if (pathname === '/api/voters' && method === 'POST') {
+        invalidateCache('voters_');
+        invalidateCache('sentiments_');
         const userRole = adminCtx.user?.role || 'volunteer';
         if (userRole === 'volunteer' && !adminCtx.isSuperAdmin) {
           return jsonResponse({ 
@@ -4693,6 +4628,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       }
 
       if (pathname === '/api/voters/bulk' && method === 'POST') {
+        invalidateCache('voters_');
+        invalidateCache('sentiments_');
         const userRole = adminCtx.user?.role || 'volunteer';
         if (userRole === 'volunteer' && !adminCtx.isSuperAdmin) {
           return jsonResponse({ 
@@ -4785,6 +4722,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       }
 
       if (pathname.startsWith('/api/voters/') && method === 'PUT') {
+        invalidateCache('voters_');
+        invalidateCache('sentiments_');
         const id = pathname.substring('/api/voters/'.length);
         const v: any = await request.json();
         const userRole = adminCtx.user?.role || 'volunteer';
@@ -4972,6 +4911,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       }
 
       if (pathname.startsWith('/api/voters/') && method === 'DELETE') {
+        invalidateCache('voters_');
+        invalidateCache('sentiments_');
         const userRole = adminCtx.user?.role || 'volunteer';
         if (userRole === 'volunteer' && !adminCtx.isSuperAdmin) {
           return jsonResponse({ error: 'Karyakartas are not permitted to delete voters.' }, 403);
