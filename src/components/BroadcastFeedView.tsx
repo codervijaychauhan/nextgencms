@@ -326,8 +326,23 @@ export const BroadcastFeedView: React.FC = () => {
                       <td className="py-2.5 px-4 font-mono text-zinc-600 text-[11px]">
                         {index + 1}
                       </td>
-                      <td className="py-2.5 px-4 font-mono font-black text-emerald-400 text-sm">
-                        {voter.phone}
+                      <td className="py-2.5 px-4 font-mono font-bold text-sm">
+                        {voter.phone ? (
+                          <div className="flex items-center gap-2">
+                            <span className="text-emerald-400">{voter.phone}</span>
+                            <a
+                              href={`https://wa.me/${voter.phone.replace(/\D/g, '')}?text=${encodeURIComponent(`Namaste ${voter.name || ''},`)}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="p-1 rounded-md bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 transition-colors"
+                              title={`Chat with ${voter.name || 'voter'} on WhatsApp`}
+                            >
+                              <MessageCircle size={13} />
+                            </a>
+                          </div>
+                        ) : (
+                          <span className="text-zinc-500 font-normal text-xs italic">No Mobile</span>
+                        )}
                       </td>
                       {feedData.columns.filter(c => c !== 'phone').map((col, cIdx) => (
                         <td key={cIdx} className="py-2.5 px-4 text-zinc-200">

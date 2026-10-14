@@ -4153,8 +4153,20 @@ async function startServer() {
   app.get("/api/voters/:id/assessments", optionalAuth, async (req, res) => {
     try {
       const voterDocId = String(req.params.id);
-      const assessments = await query(
-        `SELECT 
+      const reqUser = (req as any).user;
+      let isSuperAdmin = false;
+      let effectiveAdminId = '';
+
+      if (reqUser) {
+        const info = await getRequesterInfo(reqUser);
+        isSuperAdmin = info.isSuperAdmin;
+        if (!isSuperAdmin && info.userRow) {
+          effectiveAdminId = String(info.userRow.parent_admin_id || info.userRow.admin_id || info.userRow.id || info.reqUid);
+        }
+      }
+
+      let sqlQuery = `
+        SELECT 
            va.*,
            COALESCE(u.name, 'Admin (' + va.admin_id + ')') AS admin_name,
            u.email AS admin_email,
@@ -4165,48 +4177,301 @@ async function startServer() {
          FROM dbo.voter_assessments va
          LEFT JOIN dbo.users u ON CAST(va.admin_id AS NVARCHAR(64)) = CAST(u.id AS NVARCHAR(64))
          LEFT JOIN dbo.users rec ON CAST(va.recorded_by AS NVARCHAR(64)) = CAST(rec.id AS NVARCHAR(64))
-         WHERE va.voter_id = @voterDocId 
+         WHERE (va.voter_id = @voterDocId 
             OR va.voter_epic = @voterDocId
-            OR va.id LIKE @likeDocId
-         ORDER BY va.updated_at DESC`,
-        { voterDocId, likeDocId: `%_${voterDocId}` }
-      );
+            OR va.id = @voterDocId
+            OR va.id LIKE @likeDocId)
+      `;
+      const params: Record<string, any> = { voterDocId, likeDocId: `%_${voterDocId}` };
+
+      // Non-super-admins can strictly only inspect their own admin's assessment
+      if (!isSuperAdmin && effectiveAdminId) {
+        sqlQuery += ` AND va.admin_id = @adminId`;
+        params.adminId = effectiveAdminId;
+      }
+
+      sqlQuery += ` ORDER BY va.updated_at DESC`;
+      const assessments = await query(sqlQuery, params);
       res.json(assessments);
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
   });
 
-  // Get all multi-admin assessments
+  // Get multi-admin assessments (Scoped per admin for staff/managers/karyakartas, global/selectable for Super Admin)
   app.get("/api/voter-assessments", optionalAuth, async (req, res) => {
     try {
-      const assessments = await query(
-        `SELECT 
-           va.*,
-           COALESCE(u.name, 'Admin (' + va.admin_id + ')') AS admin_name,
-           u.email AS admin_email,
-           u.role AS admin_role,
-           v.voter_id AS voter_epic,
-           COALESCE(v.name, va.voter_name) AS voter_full_name,
-           v.gender AS voter_gender,
-           v.age AS voter_age,
-           v.mobile AS voter_mobile,
-           v.village AS voter_village,
-           v.house_no AS voter_house_no,
-           v.booth_id AS voter_booth_id,
-           b.name AS booth_name,
-           b.booth_number,
-           v.constituency_id AS voter_constituency_id,
-           c.name AS constituency_name
-         FROM dbo.voter_assessments va
-         LEFT JOIN dbo.users u ON CAST(va.admin_id AS NVARCHAR(64)) = CAST(u.id AS NVARCHAR(64))
-         LEFT JOIN dbo.voters v ON (CAST(va.voter_id AS NVARCHAR(64)) = CAST(v.id AS NVARCHAR(64)) OR va.voter_id = v.voter_id)
-         LEFT JOIN dbo.booths b ON CAST(v.booth_id AS NVARCHAR(64)) = CAST(b.id AS NVARCHAR(64))
-         LEFT JOIN dbo.constituencies c ON (CAST(v.constituency_id AS NVARCHAR(64)) = CAST(c.id AS NVARCHAR(64)) OR CAST(b.constituency_id AS NVARCHAR(64)) = CAST(c.id AS NVARCHAR(64)))
-         ORDER BY va.updated_at DESC`
-      );
+      const { voterId, voterDocId, adminId } = req.query;
+      const targetVoter = String(voterId || voterDocId || '').trim();
+      const reqUser = (req as any).user;
+
+      let isSuperAdmin = false;
+      let userRow = null;
+      let effectiveAdminId = '';
+
+      if (reqUser) {
+        const info = await getRequesterInfo(reqUser);
+        isSuperAdmin = info.isSuperAdmin;
+        userRow = info.userRow;
+        if (isSuperAdmin) {
+          effectiveAdminId = String(adminId || '').trim();
+        } else if (userRow?.role === 'admin') {
+          effectiveAdminId = String(userRow.id || info.reqUid);
+        } else {
+          effectiveAdminId = String(userRow?.parent_admin_id || userRow?.admin_id || userRow?.id || info.reqUid);
+        }
+      } else {
+        effectiveAdminId = String(adminId || '').trim();
+      }
+
+      let sqlQuery = `
+        SELECT 
+          va.*,
+          COALESCE(u.name, 'Admin (' + va.admin_id + ')') AS admin_name,
+          u.email AS admin_email,
+          u.role AS admin_role,
+          COALESCE(va.recorded_by_name, rec.name, 'Staff') AS recorded_by_display_name,
+          rec.email AS recorded_by_email,
+          rec.role AS recorded_by_role,
+          v.voter_id AS voter_epic,
+          COALESCE(v.name, va.voter_name) AS voter_full_name,
+          v.gender AS voter_gender,
+          v.age AS voter_age,
+          v.mobile AS voter_mobile,
+          v.village AS voter_village,
+          v.house_no AS voter_house_no,
+          v.booth_id AS voter_booth_id,
+          v.booth_id AS booth_id,
+          v.booth_id AS boothId,
+          b.name AS booth_name,
+          b.name AS boothName,
+          b.booth_number,
+          b.booth_number AS boothNumber,
+          v.constituency_id AS voter_constituency_id,
+          v.constituency_id AS constituency_id,
+          v.constituency_id AS constituencyId,
+          c.name AS constituency_name,
+          c.name AS constituencyName,
+          p.name AS party_name,
+          COALESCE(va.party_color, p.color, '#3b82f6') AS effective_party_color,
+          COALESCE(va.party_symbol, p.symbol, '🗳️') AS effective_party_symbol
+        FROM dbo.voter_assessments va
+        LEFT JOIN dbo.users u ON CAST(va.admin_id AS NVARCHAR(64)) = CAST(u.id AS NVARCHAR(64))
+        LEFT JOIN dbo.users rec ON CAST(va.recorded_by AS NVARCHAR(64)) = CAST(rec.id AS NVARCHAR(64))
+        LEFT JOIN dbo.voters v ON (CAST(va.voter_id AS NVARCHAR(64)) = CAST(v.id AS NVARCHAR(64)) OR va.voter_id = v.voter_id)
+        LEFT JOIN dbo.booths b ON CAST(v.booth_id AS NVARCHAR(64)) = CAST(b.id AS NVARCHAR(64))
+        LEFT JOIN dbo.constituencies c ON (CAST(v.constituency_id AS NVARCHAR(64)) = CAST(c.id AS NVARCHAR(64)) OR CAST(b.constituency_id AS NVARCHAR(64)) = CAST(c.id AS NVARCHAR(64)))
+        LEFT JOIN dbo.parties p ON CAST(va.favored_party_id AS NVARCHAR(64)) = CAST(p.id AS NVARCHAR(64))
+        WHERE 1=1
+      `;
+      const params: Record<string, any> = {};
+
+      if (!isSuperAdmin) {
+        if (effectiveAdminId) {
+          sqlQuery += ` AND va.admin_id = @adminId`;
+          params.adminId = effectiveAdminId;
+        }
+      } else {
+        if (adminId && String(adminId).trim() !== '' && adminId !== 'all') {
+          sqlQuery += ` AND va.admin_id = @adminId`;
+          params.adminId = String(adminId).trim();
+        }
+      }
+
+      if (targetVoter) {
+        sqlQuery += ` AND (va.voter_id = @voterId OR va.voter_epic = @voterId OR va.id = @voterId OR va.id LIKE @likeDocId)`;
+        params.voterId = targetVoter;
+        params.likeDocId = `%_${targetVoter}`;
+      }
+
+      sqlQuery += ` ORDER BY va.updated_at DESC`;
+      const assessments = await query(sqlQuery, params);
       res.json(assessments);
     } catch (error: any) {
+      console.error('Error fetching voter assessments:', error);
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Create or Update single Admin Political Sentiment & Assessment Record
+  app.post("/api/voter-assessments", authenticateUser, async (req, res) => {
+    try {
+      const a = req.body;
+      const reqUser = (req as any).user;
+      const { isSuperAdmin, userRow, reqUid } = await getRequesterInfo(reqUser);
+
+      // Determine target admin role context:
+      // 1. Super Admin: can act on behalf of any admin passed in payload
+      // 2. Admin: acts on behalf of own admin ID
+      // 3. Manager, Volunteer, Karyakarta: acts strictly on behalf of their parent admin
+      let targetAdmin = '';
+      if (isSuperAdmin) {
+        targetAdmin = String(a.adminId || a.admin_id || reqUid).trim();
+      } else if (userRow?.role === 'admin') {
+        targetAdmin = String(userRow.id || reqUid).trim();
+      } else {
+        targetAdmin = String(userRow?.parent_admin_id || userRow?.admin_id || userRow?.id || reqUid).trim();
+      }
+
+      const voterDocId = String(a.voterId || a.voter_id || a.voterDocId || '').trim();
+      if (!voterDocId) {
+        return res.status(400).json({ error: "voterId or voterDocId is required" });
+      }
+
+      const assessmentId = `${targetAdmin}_${voterDocId}`;
+      const sentimentStatus = a.sentiment || 'Neutral';
+      const sentimentScore = a.sentimentScore !== undefined ? Number(a.sentimentScore) : (a.sentiment_score !== undefined ? Number(a.sentiment_score) : 3.0);
+      const favoredPartyId = a.favoredPartyId || a.favored_party_id || null;
+      const favoredPartyName = a.favoredPartyName || a.favored_party_name || null;
+      const partyColor = a.partyColor || a.party_color || '#3b82f6';
+      const partySymbol = a.partySymbol || a.party_symbol || '🗳️';
+      const notes = a.notes || '';
+      const isKaryakarta = (a.isKaryakarta || a.is_karyakarta) ? 1 : 0;
+      const recordedBy = String(a.recordedBy || a.recorded_by || reqUid || 'Staff');
+      const recordedByName = String(a.recordedByName || a.recorded_by_name || userRow?.name || reqUser?.name || 'Staff');
+      const voterName = a.voterName || a.voter_name || null;
+      const voterEpic = a.voterEpic || a.voter_epic || null;
+
+      // Upsert into dbo.voter_assessments with exactly ONE record per (admin_id, voter_id)
+      await execute(`
+        IF EXISTS (SELECT 1 FROM dbo.voter_assessments WHERE id = @id OR (admin_id = @admin_id AND voter_id = @voter_id))
+        BEGIN
+          UPDATE dbo.voter_assessments SET
+            voter_name = COALESCE(@voter_name, voter_name),
+            voter_epic = COALESCE(@voter_epic, voter_epic),
+            vital_status = COALESCE(@vital_status, vital_status),
+            physical_profile = COALESCE(@physical_profile, physical_profile),
+            disability_category = COALESCE(@disability_category, disability_category),
+            eci_assistance_needed = COALESCE(@eci_assistance_needed, eci_assistance_needed),
+            economic_category = COALESCE(@economic_category, economic_category),
+            income_range = COALESCE(@income_range, income_range),
+            land_ownership = COALESCE(@land_ownership, land_ownership),
+            education = COALESCE(@education, education),
+            sentiment = @sentiment,
+            sentiment_score = @sentiment_score,
+            favored_party_id = @favored_party_id,
+            favored_party_name = @favored_party_name,
+            party_color = @party_color,
+            party_symbol = @party_symbol,
+            notes = @notes,
+            is_karyakarta = @is_karyakarta,
+            recorded_by = @recorded_by,
+            recorded_by_name = @recorded_by_name,
+            updated_at = SYSUTCDATETIME()
+          WHERE id = @id OR (admin_id = @admin_id AND voter_id = @voter_id);
+        END
+        ELSE
+        BEGIN
+          INSERT INTO dbo.voter_assessments (
+            id, admin_id, voter_id, voter_epic, voter_name,
+            vital_status, physical_profile, disability_category, eci_assistance_needed,
+            economic_category, income_range, land_ownership, education,
+            sentiment, sentiment_score, favored_party_id, favored_party_name,
+            party_color, party_symbol, notes, is_karyakarta,
+            recorded_by, recorded_by_name, created_at, updated_at
+          ) VALUES (
+            @id, @admin_id, @voter_id, @voter_epic, @voter_name,
+            @vital_status, @physical_profile, @disability_category, @eci_assistance_needed,
+            @economic_category, @income_range, @land_ownership, @education,
+            @sentiment, @sentiment_score, @favored_party_id, @favored_party_name,
+            @party_color, @party_symbol, @notes, @is_karyakarta,
+            @recorded_by, @recorded_by_name, SYSUTCDATETIME(), SYSUTCDATETIME()
+          );
+        END
+      `, {
+        id: assessmentId,
+        admin_id: targetAdmin,
+        voter_id: voterDocId,
+        voter_epic: voterEpic,
+        voter_name: voterName,
+        vital_status: a.vitalStatus || a.vital_status || 'Active',
+        physical_profile: a.physicalProfile || a.physical_profile || 'General',
+        disability_category: a.disabilityCategory || a.disability_category || 'None',
+        eci_assistance_needed: a.eciAssistanceNeeded ? 1 : 0,
+        economic_category: a.economicCategory || a.economic_category || 'APL',
+        income_range: a.incomeRange || a.income_range || '₹15,000 - ₹30,000',
+        land_ownership: a.landOwnership || a.land_ownership || 'Small Farmer',
+        education: a.education || 'Unspecified',
+        sentiment: sentimentStatus,
+        sentiment_score: sentimentScore,
+        favored_party_id: favoredPartyId,
+        favored_party_name: favoredPartyName,
+        party_color: partyColor,
+        party_symbol: partySymbol,
+        notes: notes,
+        is_karyakarta: isKaryakarta,
+        recorded_by: recordedBy,
+        recorded_by_name: recordedByName
+      });
+
+      // Synchronize with dbo.voter_sentiments with admin_id preservation
+      try {
+        await execute(`
+          IF EXISTS (SELECT 1 FROM dbo.voter_sentiments WHERE admin_id = @admin_id AND (voter_id = @voter_id OR voter_id = @voter_epic) AND (survey_id IS NULL OR survey_id = ''))
+          BEGIN
+            UPDATE dbo.voter_sentiments SET
+              favored_party_id = COALESCE(@favored_party_id, favored_party_id),
+              favored_party_name = COALESCE(@favored_party_name, favored_party_name),
+              sentiment_score = @sentiment_score,
+              party_color = @party_color,
+              party_symbol = @party_symbol,
+              notes = @notes,
+              is_karyakarta = @is_karyakarta,
+              recorded_by = @recorded_by,
+              recorded_by_name = @recorded_by_name
+            WHERE admin_id = @admin_id AND (voter_id = @voter_id OR voter_id = @voter_epic) AND (survey_id IS NULL OR survey_id = '');
+          END
+          ELSE
+          BEGIN
+            INSERT INTO dbo.voter_sentiments (
+              voter_id, voter_name, election_id, election_year,
+              favored_party_id, favored_party_name, sentiment_score,
+              party_color, party_symbol, notes, is_karyakarta,
+              admin_id, recorded_by, recorded_by_name, created_at
+            ) VALUES (
+              @voter_id, COALESCE(@voter_name, 'Voter'), '1', 2026,
+              COALESCE(@favored_party_id, 'none'), COALESCE(@favored_party_name, 'Undecided'), @sentiment_score,
+              @party_color, @party_symbol, @notes, @is_karyakarta,
+              @admin_id, @recorded_by, @recorded_by_name, SYSUTCDATETIME()
+            );
+          END
+        `, {
+          admin_id: targetAdmin,
+          voter_id: voterDocId,
+          voter_epic: voterEpic,
+          voter_name: voterName,
+          favored_party_id: favoredPartyId,
+          favored_party_name: favoredPartyName,
+          sentiment_score: sentimentScore,
+          party_color: partyColor,
+          party_symbol: partySymbol,
+          notes: notes,
+          is_karyakarta: isKaryakarta,
+          recorded_by: recordedBy,
+          recorded_by_name: recordedByName
+        });
+      } catch (syncErr) {
+        console.warn('Note on voter_sentiments sync:', syncErr);
+      }
+
+      res.json({
+        success: true,
+        id: assessmentId,
+        adminId: targetAdmin,
+        voterId: voterDocId,
+        sentiment: sentimentStatus,
+        sentimentScore,
+        favoredPartyId,
+        favoredPartyName,
+        partyColor,
+        partySymbol,
+        notes,
+        isKaryakarta: Boolean(isKaryakarta),
+        recordedBy,
+        recordedByName
+      });
+    } catch (error: any) {
+      console.error('Error saving voter assessment:', error);
       res.status(500).json({ error: sanitizeError(error) });
     }
   });
@@ -4525,8 +4790,19 @@ async function startServer() {
       const { id } = req.params;
       const v = req.body;
       const idParam = String(id);
-      const reqUserId = (req as any).user?.uid || (req as any).user?.email || 'admin';
-      const reqUserName = (req as any).user?.name || (req as any).user?.username || 'Staff';
+      const reqUser = (req as any).user;
+      const info = await getRequesterInfo(reqUser);
+      const reqUserId = info.reqUid || reqUser?.uid || 'admin';
+      const reqUserName = info.userRow?.name || reqUser?.name || reqUser?.username || 'Staff';
+
+      let targetAdmin = '';
+      if (info.isSuperAdmin) {
+        targetAdmin = String(v.adminId || v.admin_id || reqUserId).trim();
+      } else if (info.userRow?.role === 'admin') {
+        targetAdmin = String(info.userRow.id || reqUserId).trim();
+      } else {
+        targetAdmin = String(info.userRow?.parent_admin_id || info.userRow?.admin_id || info.userRow?.id || reqUserId).trim();
+      }
 
       await execute(
         `UPDATE dbo.voters 
@@ -4682,10 +4958,10 @@ async function startServer() {
 
       // If assessment / sentiment fields are present, upsert into dbo.voter_assessments
       if (v.adminId || v.sentiment || v.sentimentScore !== undefined || v.notes) {
-        const targetAdmin = String(v.adminId || v.admin_id || reqUserId);
-        const assessmentId = `${targetAdmin}_${idParam}`;
+        const assessmentAdmin = targetAdmin || String(v.adminId || v.admin_id || reqUserId);
+        const assessmentId = `${assessmentAdmin}_${idParam}`;
         await execute(
-          `IF EXISTS (SELECT 1 FROM dbo.voter_assessments WHERE id = @assessmentId)
+          `IF EXISTS (SELECT 1 FROM dbo.voter_assessments WHERE id = @assessmentId OR (admin_id = @targetAdmin AND voter_id = @idParam))
            BEGIN
              UPDATE dbo.voter_assessments SET
                vital_status = COALESCE(@vital_status, vital_status),
@@ -4706,7 +4982,7 @@ async function startServer() {
                recorded_by = @reqUserId,
                recorded_by_name = @reqUserName,
                updated_at = SYSUTCDATETIME()
-             WHERE id = @assessmentId
+             WHERE id = @assessmentId OR (admin_id = @targetAdmin AND voter_id = @idParam)
            END
            ELSE
            BEGIN
@@ -4726,7 +5002,7 @@ async function startServer() {
            END`,
           {
             assessmentId,
-            targetAdmin,
+            targetAdmin: assessmentAdmin,
             idParam,
             voterEpicVal,
             aadharVal,
@@ -6125,6 +6401,7 @@ async function startServer() {
         name: p.name,
         abbreviation: p.abbreviation,
         logoUrl: p.logo_url,
+        symbol: p.symbol || '',
         color: p.color,
         createdAt: p.created_at
       }));
@@ -6491,41 +6768,6 @@ async function startServer() {
     }
   });
 
-  // Multi-Admin Voter Assessments & Sentiments for Cross-Auditing
-  app.get("/api/voter-assessments", optionalAuth, async (req, res) => {
-    try {
-      const results = await query(`
-        SELECT 
-          va.*,
-          COALESCE(u.name, 'Admin (' + CAST(va.admin_id AS VARCHAR) + ')') AS admin_name,
-          u.email AS admin_email,
-          u.role AS admin_role,
-          v.voter_id AS voter_epic,
-          COALESCE(v.name, va.voter_name) AS voter_full_name,
-          v.gender AS voter_gender,
-          v.age AS voter_age,
-          v.mobile AS voter_mobile,
-          v.village AS voter_village,
-          v.house_no AS voter_house_no,
-          v.booth_id AS voter_booth_id,
-          b.name AS booth_name,
-          b.booth_number,
-          v.constituency_id AS voter_constituency_id,
-          c.name AS constituency_name
-        FROM dbo.voter_assessments va
-        LEFT JOIN dbo.users u ON va.admin_id = u.id
-        LEFT JOIN dbo.voters v ON (va.voter_id = v.id OR va.voter_id = v.voter_id)
-        LEFT JOIN dbo.booths b ON v.booth_id = b.id
-        LEFT JOIN dbo.constituencies c ON v.constituency_id = c.id
-        ORDER BY va.updated_at DESC
-      `);
-      res.json(results || []);
-    } catch (err: any) {
-      console.error('Error fetching voter assessments:', err);
-      res.status(500).json({ error: sanitizeError(err) });
-    }
-  });
-
   // Voter Sentiments
   app.get("/api/voter-sentiments", optionalAuth, async (req, res) => {
     try {
@@ -6693,6 +6935,8 @@ async function startServer() {
 
       const partyIdVal = (rawPartyId === 'none' || !rawPartyId) ? 'none' : String(rawPartyId);
 
+      const rawAdminId = s.adminId || s.admin_id || null;
+
       if (id && !isNaN(Number(id))) {
         await execute(
           `UPDATE dbo.voter_sentiments SET
@@ -6700,6 +6944,11 @@ async function startServer() {
              favored_party_id = @favored_party_id,
              favored_party_name = @favored_party_name,
              sentiment_score = @sentiment_score,
+             party_color = COALESCE(@party_color, party_color),
+             party_symbol = COALESCE(@party_symbol, party_symbol),
+             notes = COALESCE(@notes, notes),
+             is_karyakarta = COALESCE(@is_karyakarta, is_karyakarta),
+             admin_id = COALESCE(@admin_id, admin_id),
              key_concerns = @key_concerns,
              custom_answers = @custom_answers,
              survey_id = COALESCE(@survey_id, survey_id),
@@ -6711,6 +6960,11 @@ async function startServer() {
             favored_party_id: partyIdVal,
             favored_party_name: s.favoredPartyName || s.favored_party_name || 'Undecided / No Favor',
             sentiment_score: parseFloat(s.sentimentScore || s.sentiment_score) || 3.0,
+            party_color: s.partyColor || s.party_color || null,
+            party_symbol: s.partySymbol || s.party_symbol || null,
+            notes: s.notes || null,
+            is_karyakarta: (s.isKaryakarta || s.is_karyakarta) ? 1 : 0,
+            admin_id: rawAdminId,
             key_concerns: JSON.stringify(s.keyConcerns || []),
             custom_answers: JSON.stringify(customAns),
             survey_id: sId || null,
@@ -6720,7 +6974,7 @@ async function startServer() {
         return res.json({ id: Number(id), ...s });
       }
 
-      // Check for duplicate response: One voter can only submit once per survey campaign
+      // Check for duplicate response: One voter can only submit once per survey campaign or once per admin general assessment
       const checkVoterId = String(vId || '').trim();
       const dupParams: Record<string, any> = { vId: checkVoterId };
       let dupSql = '';
@@ -6749,6 +7003,10 @@ async function startServer() {
               OR voter_id IN (SELECT voter_id FROM dbo.voters WHERE voter_id = @vId OR CAST(id AS VARCHAR(64)) = @vId)
             )
         `;
+        if (rawAdminId) {
+          dupSql += ` AND (admin_id = @adminId OR admin_id IS NULL)`;
+          dupParams.adminId = String(rawAdminId);
+        }
         dupParams.electionId = String(eId || '1');
       }
 
@@ -6759,7 +7017,7 @@ async function startServer() {
             error: `This voter has already submitted a response for this survey campaign (${existingEntries[0].survey_title || sTitle || 'Current Campaign'}). Multiple entries for the same survey are not allowed.` 
           });
         } else {
-          // Update existing general sentiment entry for this voter
+          // Update existing general sentiment entry for this voter under this admin
           const existingId = existingEntries[0].id;
           await execute(
             `UPDATE dbo.voter_sentiments SET
@@ -6767,6 +7025,11 @@ async function startServer() {
                favored_party_id = @favored_party_id,
                favored_party_name = @favored_party_name,
                sentiment_score = @sentiment_score,
+               party_color = COALESCE(@party_color, party_color),
+               party_symbol = COALESCE(@party_symbol, party_symbol),
+               notes = COALESCE(@notes, notes),
+               is_karyakarta = COALESCE(@is_karyakarta, is_karyakarta),
+               admin_id = COALESCE(@admin_id, admin_id),
                key_concerns = @key_concerns,
                custom_answers = @custom_answers,
                recorded_by = @recorded_by,
@@ -6778,6 +7041,11 @@ async function startServer() {
               favored_party_id: partyIdVal,
               favored_party_name: s.favoredPartyName || s.favored_party_name || 'Undecided / No Favor',
               sentiment_score: parseFloat(s.sentimentScore || s.sentiment_score) || 3.0,
+              party_color: s.partyColor || s.party_color || null,
+              party_symbol: s.partySymbol || s.party_symbol || null,
+              notes: s.notes || null,
+              is_karyakarta: (s.isKaryakarta || s.is_karyakarta) ? 1 : 0,
+              admin_id: rawAdminId,
               key_concerns: JSON.stringify(s.keyConcerns || []),
               custom_answers: JSON.stringify(customAns),
               recorded_by: s.recordedBy || (req as any).user?.uid || 'system',
@@ -6792,6 +7060,7 @@ async function startServer() {
         `INSERT INTO dbo.voter_sentiments (
           voter_id, voter_name, election_id, election_year, 
           favored_party_id, favored_party_name, sentiment_score, 
+          party_color, party_symbol, notes, is_karyakarta, admin_id,
           key_concerns, constituency_id, state_id, district_id, booth_id,
           mobile, email, aadhar_number, survey_id, survey_title, custom_answers,
           recorded_by, recorded_by_name
@@ -6800,6 +7069,7 @@ async function startServer() {
         VALUES (
           @voter_id, @voter_name, @election_id, @election_year,
           @favored_party_id, @favored_party_name, @sentiment_score,
+          @party_color, @party_symbol, @notes, @is_karyakarta, @admin_id,
           @key_concerns, @constituency_id, @state_id, @district_id, @booth_id,
           @mobile, @email, @aadhar_number, @survey_id, @survey_title, @custom_answers,
           @recorded_by, @recorded_by_name
@@ -6812,6 +7082,11 @@ async function startServer() {
           favored_party_id: partyIdVal,
           favored_party_name: s.favoredPartyName || s.favored_party_name || 'Undecided / No Favor',
           sentiment_score: parseFloat(s.sentimentScore || s.sentiment_score) || 3.0,
+          party_color: s.partyColor || s.party_color || null,
+          party_symbol: s.partySymbol || s.party_symbol || null,
+          notes: s.notes || null,
+          is_karyakarta: (s.isKaryakarta || s.is_karyakarta) ? 1 : 0,
+          admin_id: rawAdminId,
           key_concerns: JSON.stringify(s.keyConcerns || []),
           constituency_id: cId ? (parseInt(String(cId), 10) || String(cId)) : null,
           state_id: stId ? String(stId) : null,
@@ -7060,6 +7335,25 @@ async function ensureDemographicAndHealthSchema() {
         CREATE INDEX idx_voter_assessments_admin_voter ON dbo.voter_assessments(admin_id, voter_id);
       END
     `);
+
+    // 4. Ensure auxiliary columns for voter_assessments & voter_sentiments
+    await execute(`
+      IF COL_LENGTH('dbo.voter_assessments', 'party_color') IS NULL
+        ALTER TABLE dbo.voter_assessments ADD party_color VARCHAR(32) NULL;
+      IF COL_LENGTH('dbo.voter_assessments', 'party_symbol') IS NULL
+        ALTER TABLE dbo.voter_assessments ADD party_symbol NVARCHAR(50) NULL;
+
+      IF COL_LENGTH('dbo.voter_sentiments', 'admin_id') IS NULL
+        ALTER TABLE dbo.voter_sentiments ADD admin_id VARCHAR(64) NULL;
+      IF COL_LENGTH('dbo.voter_sentiments', 'party_color') IS NULL
+        ALTER TABLE dbo.voter_sentiments ADD party_color VARCHAR(32) NULL;
+      IF COL_LENGTH('dbo.voter_sentiments', 'party_symbol') IS NULL
+        ALTER TABLE dbo.voter_sentiments ADD party_symbol NVARCHAR(50) NULL;
+      IF COL_LENGTH('dbo.voter_sentiments', 'notes') IS NULL
+        ALTER TABLE dbo.voter_sentiments ADD notes NVARCHAR(MAX) NULL;
+      IF COL_LENGTH('dbo.voter_sentiments', 'is_karyakarta') IS NULL
+        ALTER TABLE dbo.voter_sentiments ADD is_karyakarta BIT DEFAULT 0;
+    `).catch(() => {});
   } catch (err) {
     console.warn('[Migration] ensureDemographicAndHealthSchema note:', err);
   }

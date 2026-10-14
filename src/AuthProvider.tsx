@@ -5,7 +5,7 @@ import {
   signOut as firebaseSignOut
 } from 'firebase/auth';
 import { auth } from './lib/firebase';
-import { api } from './lib/api';
+import { api, invalidateClientCache } from './lib/api';
 
 export interface UserProfile {
   uid: string;
@@ -174,6 +174,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signOut = async () => {
+    invalidateClientCache();
     localStorage.removeItem('nextgen_local_token');
     try {
       await firebaseSignOut(auth);

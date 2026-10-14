@@ -99,7 +99,7 @@ interface Karyakarta {
 }
 
 export default function WBSender() {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth();
   const adminId = user?.uid || 'anonymous';
 
   // State Management
@@ -800,14 +800,16 @@ export default function WBSender() {
         </div>
 
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setIsWhatsAppFeedModalOpen(true)}
-            className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20"
-            title="Generate WhatsApp Extension Stream URL for Chrome/Browser extension"
-          >
-            <MessageCircle size={14} /> Extension Feed Link
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setIsWhatsAppFeedModalOpen(true)}
+              className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20"
+              title="Generate WhatsApp Extension Stream URL for Chrome/Browser extension"
+            >
+              <MessageCircle size={14} /> Extension Feed Link
+            </button>
+          )}
 
           {/* Tab Navigation */}
           <div className="flex flex-wrap items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-800/60 rounded-lg max-w-max self-start sm:self-auto">

@@ -421,9 +421,9 @@ export const PredictionsAnalytics: React.FC = () => {
           sentiment: sentimentVal,
           keyConcerns: Array.isArray(a.key_concerns) ? a.key_concerns : typeof a.key_concerns === 'string' ? JSON.parse(a.key_concerns || '[]') : (a.keyConcerns || []),
           constituencyId: normalizeId(a.voter_constituency_id || a.constituency_id || a.constituencyId),
-          constituencyName: a.constituency_name || a.constituencyName || '',
+          constituencyName: a.constituency_name || a.constituencyName || constituencies.find(c => normalizeId(c.id) === normalizeId(a.voter_constituency_id || a.constituency_id || a.constituencyId))?.name || '',
           boothId: normalizeId(a.voter_booth_id || a.booth_id || a.boothId),
-          boothName: a.booth_name || a.boothName || '',
+          boothName: a.booth_name || a.boothName || mappedBooths.find(b => normalizeId(b.id) === normalizeId(a.voter_booth_id || a.booth_id || a.boothId))?.name || '',
           mobile: a.voter_mobile || a.mobile || '',
           email: a.voter_email || a.email || '',
           recordedBy: recordedById,
@@ -471,9 +471,9 @@ export const PredictionsAnalytics: React.FC = () => {
             sentiment: sentimentVal,
             keyConcerns: Array.isArray(s.keyConcerns) ? s.keyConcerns : Array.isArray(s.key_concerns) ? s.key_concerns : typeof s.key_concerns === 'string' ? JSON.parse(s.key_concerns || '[]') : [],
             constituencyId: normalizeId(s.constituencyId || s.constituency_id || s.effective_constituency_id),
-            constituencyName: s.constituencyName || s.constituency_name || '',
+            constituencyName: s.constituencyName || s.constituency_name || constituencies.find(c => normalizeId(c.id) === normalizeId(s.constituencyId || s.constituency_id || s.effective_constituency_id))?.name || '',
             boothId: normalizeId(s.boothId || s.booth_id || s.effective_booth_id),
-            boothName: s.boothName || s.booth_name || '',
+            boothName: s.boothName || s.booth_name || mappedBooths.find(b => normalizeId(b.id) === normalizeId(s.boothId || s.booth_id || s.effective_booth_id))?.name || '',
             mobile: s.voter_mobile || s.mobile || '',
             email: s.voter_email || s.email || '',
             surveyId: s.surveyId || s.survey_id || '',
@@ -661,8 +661,14 @@ export const PredictionsAnalytics: React.FC = () => {
     });
 
     filtered.forEach(item => {
-      const bId = item.boothId || 'unassigned';
-      const bName = item.boothName || booths.find(b => b.id === bId)?.name || 'General Area';
+      let bId = item.boothId;
+      if (!bId || bId === 'unassigned') {
+        const matchedByName = booths.find(b => b.name && item.boothName && b.name.toLowerCase() === item.boothName.toLowerCase());
+        if (matchedByName) bId = matchedByName.id;
+      }
+      bId = bId || 'unassigned';
+      const matchedBooth = booths.find(b => b.id === bId || normalizeId(b.id) === normalizeId(bId));
+      const bName = item.boothName || matchedBooth?.name || (bId === 'unassigned' ? 'Unassigned / General' : `Booth #${bId}`);
       if (!boothMap[bId]) {
         boothMap[bId] = { total: 0, support: 0, neutral: 0, oppose: 0, boothName: bName };
       }
@@ -1909,7 +1915,7 @@ export const PredictionsAnalytics: React.FC = () => {
                                     <div className="space-y-0.5 max-w-[170px]">
                                       <div className="flex items-center gap-1 font-semibold text-zinc-900 dark:text-zinc-100 truncate">
                                         <MapPin size={11} className="text-zinc-400 shrink-0" />
-                                        <span className="truncate">{record.boothName || 'Booth Unassigned'}</span>
+                                        <span className="truncate">{record.boothName || booths.find(b => b.id === record.boothId)?.name || (record.boothId ? `Booth #${record.boothId}` : 'Booth Unassigned')}</span>
                                       </div>
                                       {record.constituencyName && (
                                         <div className="text-[10px] text-zinc-400 truncate pl-3.5">
@@ -2257,7 +2263,7 @@ export const PredictionsAnalytics: React.FC = () => {
                 <div className="space-y-2 text-xs">
                   <div className="flex justify-between">
                     <span className="text-zinc-500">Polling Booth:</span>
-                    <span className="font-bold text-zinc-800 dark:text-zinc-200">{detailVoterRecord.boothName || 'Unassigned'}</span>
+                    <span className="font-bold text-zinc-800 dark:text-zinc-200">{detailVoterRecord.boothName || booths.find(b => b.id === detailVoterRecord.boothId)?.name || (detailVoterRecord.boothId ? `Booth #${detailVoterRecord.boothId}` : 'Unassigned')}</span>
                   </div>
                   {detailVoterRecord.constituencyName && (
                     <div className="flex justify-between">
@@ -2396,7 +2402,7 @@ export const PredictionsAnalytics: React.FC = () => {
             <div className="p-3.5 rounded-2xl bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-800 text-xs space-y-1.5">
               <div className="flex justify-between">
                 <span className="text-zinc-500">Polling Booth:</span>
-                <span className="font-semibold text-zinc-800 dark:text-zinc-200">{sentimentToDelete.boothName || 'Unassigned'}</span>
+                <span className="font-semibold text-zinc-800 dark:text-zinc-200">{sentimentToDelete.boothName || booths.find(b => b.id === sentimentToDelete.boothId)?.name || (sentimentToDelete.boothId ? `Booth #${sentimentToDelete.boothId}` : 'Unassigned')}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-zinc-500">Favored Party:</span>

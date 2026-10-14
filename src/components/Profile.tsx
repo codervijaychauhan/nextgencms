@@ -3,9 +3,9 @@ import { updateProfile, sendEmailVerification } from 'firebase/auth';
 import { apiFetch } from '../lib/api';
 import { useAuth } from '../AuthProvider';
 import { motion, AnimatePresence } from 'motion/react';
-import { 
-  User, Camera, Save, Loader2, CheckCircle, AlertCircle, 
-  ShieldCheck, Mail, Shield, Users, UserCheck, 
+import {
+  User, Camera, Save, Loader2, CheckCircle, AlertCircle,
+  ShieldCheck, Mail, Shield, Users, UserCheck,
   Network, Crown, MapPin, Building2, Vote, IdCard,
   Briefcase, CheckCircle2, ChevronRight, Hash, Phone, ExternalLink,
   ClipboardList, BarChart3
@@ -21,7 +21,7 @@ const ROLES = [
 
 export default function Profile() {
   const { user, profile, refreshProfile, isSuperAdmin } = useAuth();
-  
+
   const [username, setUsername] = useState(profile?.username || (profile as any)?.name || user?.displayName || '');
   const [bio, setBio] = useState(profile?.bio || '');
   const [isSaving, setIsSaving] = useState(false);
@@ -193,8 +193,8 @@ export default function Profile() {
                   (username || profile?.username || user?.email || 'U')[0]?.toUpperCase()
                 )}
               </div>
-              <button 
-                className="absolute -bottom-2 -right-2 p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white shadow-lg transition-all active:scale-90" 
+              <button
+                className="absolute -bottom-2 -right-2 p-2 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white shadow-lg transition-all active:scale-90"
                 title="Change Avatar"
               >
                 <Camera size={13} />
@@ -219,15 +219,13 @@ export default function Profile() {
                   {isUserSuperAdmin ? <Crown size={13} /> : <Briefcase size={13} />}
                   {currentRole.label}
                 </span>
-                <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 ${
-                  profile?.disabled ? 'bg-red-500/10 text-red-600 border-red-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                }`}>
+                <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 ${profile?.disabled ? 'bg-red-500/10 text-red-600 border-red-500/20' : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
+                  }`}>
                   <span className={`w-2 h-2 rounded-full ${profile?.disabled ? 'bg-red-500' : 'bg-emerald-500 animate-pulse'}`} />
                   {profile?.disabled ? 'Suspended' : 'Active Account'}
                 </span>
-                <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 ${
-                  user?.emailVerified ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
-                }`}>
+                <span className={`px-3 py-1 rounded-lg text-xs font-bold uppercase tracking-wider border flex items-center gap-1.5 ${user?.emailVerified ? 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-500/20' : 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20'
+                  }`}>
                   <CheckCircle2 size={13} />
                   {user?.emailVerified ? 'Email Verified' : 'Awaiting Email Verification'}
                 </span>

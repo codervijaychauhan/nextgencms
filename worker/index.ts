@@ -176,12 +176,14 @@ async function getEffectiveAdminContext(request: Request, env: Env): Promise<Adm
   }
 
   const userRole = (userRow?.role || authUser.role || '').toLowerCase();
-  const isSuperAdmin = email === OWNER_EMAIL || userRole === 'super_admin' || userRole === 'admin' || userRole === 'manager';
+  const isSuperAdmin = email === OWNER_EMAIL || userRole === 'super_admin' || userRole === 'owner';
   const requestedAdminId = url.searchParams.get('adminId') || request.headers.get('x-admin-id') || '';
 
   let effectiveAdminId = uid;
   if (isSuperAdmin) {
     effectiveAdminId = requestedAdminId || uid;
+  } else if (userRole === 'admin') {
+    effectiveAdminId = requestedAdminId && requestedAdminId === uid ? uid : uid;
   } else if (userRow) {
     effectiveAdminId = userRow.parent_admin_id || String(userRow.id);
   }
@@ -222,79 +224,79 @@ export default {
     const adminCtx = await getEffectiveAdminContext(request, env);
 
     try {
-function formatUserProfile(u: any) {
-  if (!u) return null;
-  let parsedRights = {};
-  try { parsedRights = typeof u.rights === 'string' ? JSON.parse(u.rights) : (u.rights || {}); } catch { }
-  let assignedBooths: string[] = [];
-  try { 
-    if (typeof u.assigned_booths === 'string') {
-      const p = JSON.parse(u.assigned_booths);
-      assignedBooths = Array.isArray(p) ? p.map(String).filter(s => s && s !== '[]' && s !== 'null') : [];
-    } else if (Array.isArray(u.assigned_booths)) {
-      assignedBooths = u.assigned_booths.map(String).filter(s => s && s !== '[]' && s !== 'null');
-    }
-  } catch { }
-  let electionSettingsObj = {};
-  try { electionSettingsObj = typeof u.election_settings === 'string' ? JSON.parse(u.election_settings) : (u.election_settings || {}); } catch { }
+      function formatUserProfile(u: any) {
+        if (!u) return null;
+        let parsedRights = {};
+        try { parsedRights = typeof u.rights === 'string' ? JSON.parse(u.rights) : (u.rights || {}); } catch { }
+        let assignedBooths: string[] = [];
+        try {
+          if (typeof u.assigned_booths === 'string') {
+            const p = JSON.parse(u.assigned_booths);
+            assignedBooths = Array.isArray(p) ? p.map(String).filter(s => s && s !== '[]' && s !== 'null') : [];
+          } else if (Array.isArray(u.assigned_booths)) {
+            assignedBooths = u.assigned_booths.map(String).filter(s => s && s !== '[]' && s !== 'null');
+          }
+        } catch { }
+        let electionSettingsObj = {};
+        try { electionSettingsObj = typeof u.election_settings === 'string' ? JSON.parse(u.election_settings) : (u.election_settings || {}); } catch { }
 
-  const cleanBoothId = assignedBooths.length > 0 ? assignedBooths.join(',') : (u.booth_id && u.booth_id !== '[]' && u.booth_id !== 'null' ? String(u.booth_id) : '');
+        const cleanBoothId = assignedBooths.length > 0 ? assignedBooths.join(',') : (u.booth_id && u.booth_id !== '[]' && u.booth_id !== 'null' ? String(u.booth_id) : '');
 
-  return {
-    uid: String(u.id),
-    id: String(u.id),
-    username: u.name,
-    displayName: u.name,
-    name: u.name,
-    email: u.email,
-    role: u.role,
-    adminId: u.parent_admin_id || String(u.id),
-    parentAdminId: u.parent_admin_id || null,
-    parent_admin_id: u.parent_admin_id || null,
-    parentAdminName: u.parent_admin_name || null,
-    parent_admin_name: u.parent_admin_name || null,
-    parentAdminEmail: u.parent_admin_email || null,
-    parent_admin_email: u.parent_admin_email || null,
-    parentAdminRole: u.parent_admin_role || null,
-    parent_admin_role: u.parent_admin_role || null,
-    parentManagerId: u.parent_manager_id || null,
-    parent_manager_id: u.parent_manager_id || null,
-    parentManagerName: u.parent_manager_name || null,
-    parent_manager_name: u.parent_manager_name || null,
-    parentManagerEmail: u.parent_manager_email || null,
-    parent_manager_email: u.parent_manager_email || null,
-    parentManagerRole: u.parent_manager_role || null,
-    parent_manager_role: u.parent_manager_role || null,
-    voterId: u.voter_id || '',
-    voter_id: u.voter_id || '',
-    voterDocId: u.voter_doc_id || '',
-    voter_doc_id: u.voter_doc_id || '',
-    permissions: parsedRights,
-    rights: parsedRights,
-    state_id: u.state_id || (electionSettingsObj as any).state_id || '',
-    district_id: u.district_id || (electionSettingsObj as any).district_id || '',
-    constituency_id: u.constituency_id || (electionSettingsObj as any).constituency_id || '',
-    mandal_id: u.mandal_id || (electionSettingsObj as any).mandal_id || '',
-    panchayat_id: u.panchayat_id || (electionSettingsObj as any).panchayat_id || '',
-    ward_id: u.ward_id || (electionSettingsObj as any).ward_id || '',
-    stateId: u.state_id || (electionSettingsObj as any).state_id || '',
-    districtId: u.district_id || (electionSettingsObj as any).district_id || '',
-    constituencyId: u.constituency_id || (electionSettingsObj as any).constituency_id || '',
-    mandalId: u.mandal_id || (electionSettingsObj as any).mandal_id || '',
-    panchayatId: u.panchayat_id || (electionSettingsObj as any).panchayat_id || '',
-    wardId: u.ward_id || (electionSettingsObj as any).ward_id || '',
-    boothId: cleanBoothId,
-    assigned_booths: assignedBooths,
-    election_settings: electionSettingsObj,
-    electionSettings: electionSettingsObj,
-    disabled: Boolean(u.disabled),
-    createdAt: u.created_at,
-    created_at: u.created_at
-  };
-}
+        return {
+          uid: String(u.id),
+          id: String(u.id),
+          username: u.name,
+          displayName: u.name,
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          adminId: u.parent_admin_id || String(u.id),
+          parentAdminId: u.parent_admin_id || null,
+          parent_admin_id: u.parent_admin_id || null,
+          parentAdminName: u.parent_admin_name || null,
+          parent_admin_name: u.parent_admin_name || null,
+          parentAdminEmail: u.parent_admin_email || null,
+          parent_admin_email: u.parent_admin_email || null,
+          parentAdminRole: u.parent_admin_role || null,
+          parent_admin_role: u.parent_admin_role || null,
+          parentManagerId: u.parent_manager_id || null,
+          parent_manager_id: u.parent_manager_id || null,
+          parentManagerName: u.parent_manager_name || null,
+          parent_manager_name: u.parent_manager_name || null,
+          parentManagerEmail: u.parent_manager_email || null,
+          parent_manager_email: u.parent_manager_email || null,
+          parentManagerRole: u.parent_manager_role || null,
+          parent_manager_role: u.parent_manager_role || null,
+          voterId: u.voter_id || '',
+          voter_id: u.voter_id || '',
+          voterDocId: u.voter_doc_id || '',
+          voter_doc_id: u.voter_doc_id || '',
+          permissions: parsedRights,
+          rights: parsedRights,
+          state_id: u.state_id || (electionSettingsObj as any).state_id || '',
+          district_id: u.district_id || (electionSettingsObj as any).district_id || '',
+          constituency_id: u.constituency_id || (electionSettingsObj as any).constituency_id || '',
+          mandal_id: u.mandal_id || (electionSettingsObj as any).mandal_id || '',
+          panchayat_id: u.panchayat_id || (electionSettingsObj as any).panchayat_id || '',
+          ward_id: u.ward_id || (electionSettingsObj as any).ward_id || '',
+          stateId: u.state_id || (electionSettingsObj as any).state_id || '',
+          districtId: u.district_id || (electionSettingsObj as any).district_id || '',
+          constituencyId: u.constituency_id || (electionSettingsObj as any).constituency_id || '',
+          mandalId: u.mandal_id || (electionSettingsObj as any).mandal_id || '',
+          panchayatId: u.panchayat_id || (electionSettingsObj as any).panchayat_id || '',
+          wardId: u.ward_id || (electionSettingsObj as any).ward_id || '',
+          boothId: cleanBoothId,
+          assigned_booths: assignedBooths,
+          election_settings: electionSettingsObj,
+          electionSettings: electionSettingsObj,
+          disabled: Boolean(u.disabled),
+          createdAt: u.created_at,
+          created_at: u.created_at
+        };
+      }
 
-async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string): Promise<any> {
-  const query = `
+      async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string): Promise<any> {
+        const query = `
     SELECT 
       u.*,
       pa.name AS parent_admin_name,
@@ -309,8 +311,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
     WHERE u.id = ? OR LOWER(u.email) = LOWER(?)
     LIMIT 1
   `;
-  return await db.prepare(query).bind(id || '', email || id || '').first<any>();
-}
+        return await db.prepare(query).bind(id || '', email || id || '').first<any>();
+      }
 
       // ------------------------------------------------------------------------
       // 1. AUTH & SESSION ROUTES
@@ -551,7 +553,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         // If linked to a voter, update voter status
         if (voterId || voterDocId) {
-          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(voterDocId || voterId, voterId || voterDocId).run().catch(() => {});
+          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(voterDocId || voterId, voterId || voterDocId).run().catch(() => { });
         }
 
         const host = url.host;
@@ -608,7 +610,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         // If linked to a voter, update voter status
         if (voterId || voterDocId) {
-          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(voterDocId || voterId, voterId || voterDocId).run().catch(() => {});
+          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(voterDocId || voterId, voterId || voterDocId).run().catch(() => { });
         }
 
         return jsonResponse({ success: true, id: newId, message: 'User created successfully' });
@@ -769,7 +771,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         // If linked to a voter, update voter status
         if (voterId || voterDocId) {
-          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(voterDocId || voterId, voterId || voterDocId).run().catch(() => {});
+          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(voterDocId || voterId, voterId || voterDocId).run().catch(() => { });
         }
 
         return jsonResponse({ success: true, message: 'User updated successfully' });
@@ -950,7 +952,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
               const p = JSON.parse(adminRow.assigned_booths);
               if (Array.isArray(p)) boothIds = p.map(String).filter(Boolean);
             }
-          } catch {}
+          } catch { }
           if (adminRow.booth_id && !boothIds.includes(String(adminRow.booth_id))) {
             boothIds.push(String(adminRow.booth_id));
           }
@@ -1089,13 +1091,13 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/states/') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/states/'.length));
-        await env.DB.prepare('UPDATE districts SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE constituencies SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE mandals SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE panchayats SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE wards SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE users SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE voters SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE districts SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE constituencies SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE mandals SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE panchayats SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE wards SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE users SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE voters SET state_id = NULL WHERE state_id = ? OR CAST(state_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM states WHERE id = ? OR CAST(id AS TEXT) = ?').bind(id, id).run();
         return jsonResponse({ success: true });
       }
@@ -1165,7 +1167,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           if (stateRow) {
             resolvedStateId = String(stateRow.id);
           } else {
-            await env.DB.prepare('INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)').bind(resolvedStateId, `State ${resolvedStateId}`, '').run().catch(() => {});
+            await env.DB.prepare('INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)').bind(resolvedStateId, `State ${resolvedStateId}`, '').run().catch(() => { });
           }
         }
 
@@ -1199,7 +1201,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           if (stateRow) {
             resolvedStateId = String(stateRow.id);
           } else {
-            await env.DB.prepare('INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)').bind(checkState, `State ${checkState}`, '').run().catch(() => {});
+            await env.DB.prepare('INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)').bind(checkState, `State ${checkState}`, '').run().catch(() => { });
             resolvedStateId = checkState;
           }
         }
@@ -1210,12 +1212,12 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/districts/') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/districts/'.length));
-        await env.DB.prepare('UPDATE constituencies SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE mandals SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE panchayats SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE wards SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE users SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE voters SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE constituencies SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE mandals SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE panchayats SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE wards SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE users SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE voters SET district_id = NULL WHERE district_id = ? OR CAST(district_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM districts WHERE id = ? OR CAST(id AS TEXT) = ?').bind(id, id).run();
         return jsonResponse({ success: true });
       }
@@ -1314,7 +1316,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             const fallbackStateId = resolvedStateId || '1';
             await env.DB.prepare(`
               INSERT OR IGNORE INTO districts (id, name, state_id) VALUES (?, ?, ?)
-            `).bind(fallbackDistId, `District ${fallbackDistId}`, fallbackStateId).run().catch(() => {});
+            `).bind(fallbackDistId, `District ${fallbackDistId}`, fallbackStateId).run().catch(() => { });
           }
         }
 
@@ -1331,7 +1333,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           } else {
             await env.DB.prepare(`
               INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)
-            `).bind(resolvedStateId, `State ${resolvedStateId}`, '').run().catch(() => {});
+            `).bind(resolvedStateId, `State ${resolvedStateId}`, '').run().catch(() => { });
           }
         }
 
@@ -1364,7 +1366,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const targetId = existing ? existing.id : id;
         const name = b.name !== undefined ? String(b.name).trim() : (existing ? existing.name : '');
         const category = b.category !== undefined ? b.category : (existing ? existing.category : 'General');
-        
+
         let resolvedDistrictId = existing ? existing.district_id : null;
         let resolvedStateId = existing ? existing.state_id : null;
 
@@ -1388,7 +1390,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             const fallbackStateId = rawStateId ? String(rawStateId).trim() : (resolvedStateId || '1');
             await env.DB.prepare(`
               INSERT OR IGNORE INTO districts (id, name, state_id) VALUES (?, ?, ?)
-            `).bind(checkDist, `District ${checkDist}`, fallbackStateId).run().catch(() => {});
+            `).bind(checkDist, `District ${checkDist}`, fallbackStateId).run().catch(() => { });
             resolvedDistrictId = checkDist;
           }
         }
@@ -1406,7 +1408,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           } else {
             await env.DB.prepare(`
               INSERT OR IGNORE INTO states (id, name, code) VALUES (?, ?, ?)
-            `).bind(checkState, `State ${checkState}`, '').run().catch(() => {});
+            `).bind(checkState, `State ${checkState}`, '').run().catch(() => { });
             resolvedStateId = checkState;
           }
         }
@@ -1428,12 +1430,12 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const id = decodeURIComponent(pathname.substring('/api/constituencies/'.length));
 
         // Safely unlink or cascade child references so foreign keys never block deletion
-        await env.DB.prepare('UPDATE mandals SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE panchayats SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE wards SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE booths SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE users SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
-        await env.DB.prepare('UPDATE voters SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => {});
+        await env.DB.prepare('UPDATE mandals SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE panchayats SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE wards SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE booths SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE users SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
+        await env.DB.prepare('UPDATE voters SET constituency_id = NULL WHERE constituency_id = ? OR CAST(constituency_id AS TEXT) = ?').bind(id, id).run().catch(() => { });
 
         await env.DB.prepare('DELETE FROM constituencies WHERE id = ? OR CAST(id AS TEXT) = ?').bind(id, id).run();
         return jsonResponse({ success: true });
@@ -1632,10 +1634,10 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/mandals/') && !pathname.includes('/members') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/mandals/'.length));
-        await env.DB.prepare('DELETE FROM mandal_members WHERE mandal_id = ?').bind(id).run().catch(() => {});
-        await env.DB.prepare('UPDATE booths SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
-        await env.DB.prepare('UPDATE panchayats SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
-        await env.DB.prepare('UPDATE wards SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM mandal_members WHERE mandal_id = ?').bind(id).run().catch(() => { });
+        await env.DB.prepare('UPDATE booths SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => { });
+        await env.DB.prepare('UPDATE panchayats SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => { });
+        await env.DB.prepare('UPDATE wards SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM mandals WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
@@ -1933,8 +1935,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/panchayats/') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/panchayats/'.length));
-        await env.DB.prepare('UPDATE booths SET panchayat_id = NULL WHERE panchayat_id = ?').bind(id).run().catch(() => {});
-        await env.DB.prepare('DELETE FROM wards WHERE panchayat_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE booths SET panchayat_id = NULL WHERE panchayat_id = ?').bind(id).run().catch(() => { });
+        await env.DB.prepare('DELETE FROM wards WHERE panchayat_id = ?').bind(id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM panchayats WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
@@ -2146,7 +2148,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/wards/') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/wards/'.length));
-        await env.DB.prepare('UPDATE booths SET ward_id = NULL WHERE ward_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE booths SET ward_id = NULL WHERE ward_id = ?').bind(id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM wards WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
@@ -2281,9 +2283,9 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           b.address || ''
         ).run().catch(async () => {
           // Fallback if columns missing in old sqlite table
-          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN booth_label TEXT`).run().catch(() => {});
-          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN panchayat_id TEXT`).run().catch(() => {});
-          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN ward_id TEXT`).run().catch(() => {});
+          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN booth_label TEXT`).run().catch(() => { });
+          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN panchayat_id TEXT`).run().catch(() => { });
+          await env.DB.prepare(`ALTER TABLE booths ADD COLUMN ward_id TEXT`).run().catch(() => { });
           await env.DB.prepare(`
             INSERT INTO booths (id, booth_number, name, constituency_id, mandal_id, total_voters, address)
             VALUES (?, ?, ?, ?, ?, ?, ?)
@@ -2316,15 +2318,15 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
               address = COALESCE(?, address)
           WHERE id = ?
         `).bind(
-          b.name || null, 
-          b.booth_number || b.boothNumber || null, 
+          b.name || null,
+          b.booth_number || b.boothNumber || null,
           b.booth_label !== undefined ? b.booth_label : (b.boothLabel !== undefined ? b.boothLabel : null),
           b.constituency_id || b.constituencyId || null,
           b.mandal_id || b.mandalId || null,
           b.panchayat_id || b.panchayatId || null,
           b.ward_id || b.wardId || null,
-          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : (b.population !== undefined ? b.population : null)), 
-          b.address !== undefined ? b.address : null, 
+          b.total_voters !== undefined ? b.total_voters : (b.totalVoters !== undefined ? b.totalVoters : (b.population !== undefined ? b.population : null)),
+          b.address !== undefined ? b.address : null,
           id
         ).run().catch(async () => {
           await env.DB.prepare('UPDATE booths SET name = COALESCE(?, name), booth_number = COALESCE(?, booth_number), address = COALESCE(?, address) WHERE id = ?')
@@ -2335,8 +2337,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/booths/') && !pathname.includes('/agents') && method === 'DELETE') {
         invalidateCache('master_booths');
         const id = decodeURIComponent(pathname.substring('/api/booths/'.length));
-        await env.DB.prepare('DELETE FROM booth_agents WHERE booth_id = ?').bind(id).run().catch(() => {});
-        await env.DB.prepare('UPDATE volunteers SET assigned_booth_id = NULL, assigned_booth_name = NULL WHERE assigned_booth_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM booth_agents WHERE booth_id = ?').bind(id).run().catch(() => { });
+        await env.DB.prepare('UPDATE volunteers SET assigned_booth_id = NULL, assigned_booth_name = NULL WHERE assigned_booth_id = ?').bind(id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM booths WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
@@ -2501,8 +2503,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/panchayats/') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/panchayats/'.length));
-        await env.DB.prepare('UPDATE booths SET panchayat_id = NULL WHERE panchayat_id = ?').bind(id).run().catch(() => {});
-        await env.DB.prepare('DELETE FROM wards WHERE panchayat_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE booths SET panchayat_id = NULL WHERE panchayat_id = ?').bind(id).run().catch(() => { });
+        await env.DB.prepare('DELETE FROM wards WHERE panchayat_id = ?').bind(id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM panchayats WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
@@ -2685,7 +2687,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/wards/') && method === 'DELETE') {
         invalidateCache('master_');
         const id = decodeURIComponent(pathname.substring('/api/wards/'.length));
-        await env.DB.prepare('UPDATE booths SET ward_id = NULL WHERE ward_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE booths SET ward_id = NULL WHERE ward_id = ?').bind(id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM wards WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
@@ -2739,8 +2741,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname === '/api/mandals' && method === 'POST') {
         const b: any = await request.json();
         const id = b.id || `mnd_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-        const targetAdmin = adminCtx.isSuperAdmin 
-          ? (b.admin_id || b.adminId || adminCtx.requestedAdminId || adminCtx.adminId) 
+        const targetAdmin = adminCtx.isSuperAdmin
+          ? (b.admin_id || b.adminId || adminCtx.requestedAdminId || adminCtx.adminId)
           : adminCtx.adminId;
 
         await env.DB.prepare(`
@@ -2775,7 +2777,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           return jsonResponse({ error: 'Forbidden: You cannot modify another admin’s mandal.' }, 403);
         }
 
-        const targetAdmin = adminCtx.isSuperAdmin 
+        const targetAdmin = adminCtx.isSuperAdmin
           ? (b.admin_id !== undefined ? b.admin_id : (b.adminId !== undefined ? b.adminId : existing.admin_id))
           : existing.admin_id;
 
@@ -2820,8 +2822,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         }
 
         await env.DB.prepare('DELETE FROM mandal_members WHERE mandal_id = ?').bind(id).run();
-        await env.DB.prepare('UPDATE booths SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
-        await env.DB.prepare('UPDATE voters SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => {});
+        await env.DB.prepare('UPDATE booths SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => { });
+        await env.DB.prepare('UPDATE voters SET mandal_id = NULL WHERE mandal_id = ?').bind(id).run().catch(() => { });
         await env.DB.prepare('DELETE FROM mandals WHERE id = ?').bind(id).run();
         return jsonResponse({ success: true });
       }
@@ -2861,13 +2863,13 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           INSERT INTO mandal_members (id, mandal_id, name, phone, voter_id, designation, category_key, admin_id)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).bind(
-          id, 
-          mandalId, 
-          b.name, 
-          b.phone || '', 
-          b.voter_id || b.voterId || '', 
-          b.designation || '', 
-          b.category_key || b.categoryKey || 'office_bearers', 
+          id,
+          mandalId,
+          b.name,
+          b.phone || '',
+          b.voter_id || b.voterId || '',
+          b.designation || '',
+          b.category_key || b.categoryKey || 'office_bearers',
           memberAdminId
         ).run();
         return jsonResponse({ success: true, id, adminId: memberAdminId });
@@ -2890,10 +2892,10 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           SET name = COALESCE(?, name), phone = COALESCE(?, phone), voter_id = COALESCE(?, voter_id), designation = COALESCE(?, designation), category_key = COALESCE(?, category_key)
           WHERE id = ?
         `).bind(
-          b.name || null, 
-          b.phone || null, 
+          b.name || null,
+          b.phone || null,
           b.voter_id !== undefined ? b.voter_id : (b.voterId !== undefined ? b.voterId : null),
-          b.designation || null, 
+          b.designation || null,
           b.category_key || b.categoryKey || null,
           memberId
         ).run();
@@ -3104,12 +3106,12 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         // Mark voter as karyakarta in master voters directory and admin assessment
         if (vDocId || vId) {
-          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(vDocId, vId).run().catch(() => {});
+          await env.DB.prepare('UPDATE voters SET is_karyakarta = 1 WHERE id = ? OR voter_id = ?').bind(vDocId, vId).run().catch(() => { });
           await env.DB.prepare(`
             INSERT INTO voter_assessments (id, admin_id, voter_id, voter_name, is_karyakarta)
             VALUES (?, ?, ?, ?, 1)
             ON CONFLICT(admin_id, voter_id) DO UPDATE SET is_karyakarta = 1
-          `).bind(`va_${Date.now()}`, targetAdmin, vId || vDocId, v.name || '').run().catch(() => {});
+          `).bind(`va_${Date.now()}`, targetAdmin, vId || vDocId, v.name || '').run().catch(() => { });
         }
 
         return jsonResponse({ success: true, id, adminId: targetAdmin });
@@ -3816,28 +3818,116 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
       if (pathname === '/api/voter-assessments' && method === 'GET') {
         const voterId = url.searchParams.get('voterId') || url.searchParams.get('voterDocId') || '';
-        const targetAdmin = url.searchParams.get('adminId') || adminCtx.adminId;
+        const requestedAdmin = url.searchParams.get('adminId');
 
-        let query = 'SELECT * FROM voter_assessments WHERE admin_id = ?';
-        const binds: any[] = [targetAdmin];
-        if (voterId) {
-          query += ' AND (voter_id = ? OR id = ?)';
-          binds.push(voterId, `${targetAdmin}_${voterId}`);
+        const baseSelect = `
+          SELECT 
+            va.*,
+            COALESCE(u.name, 'Admin (' || va.admin_id || ')') AS admin_name,
+            u.email AS admin_email,
+            u.role AS admin_role,
+            COALESCE(v.voter_id, va.voter_id) AS voter_epic,
+            COALESCE(v.name, va.voter_name) AS voter_full_name,
+            COALESCE(v.booth_id, '') AS voter_booth_id,
+            COALESCE(v.booth_id, '') AS booth_id,
+            COALESCE(v.booth_id, '') AS boothId,
+            COALESCE(b.name, CASE WHEN b.booth_number IS NOT NULL THEN 'Booth ' || b.booth_number ELSE '' END) AS booth_name,
+            COALESCE(b.name, CASE WHEN b.booth_number IS NOT NULL THEN 'Booth ' || b.booth_number ELSE '' END) AS boothName,
+            COALESCE(b.booth_number, '') AS booth_number,
+            COALESCE(b.booth_number, '') AS boothNumber,
+            COALESCE(v.constituency_id, b.constituency_id, '') AS voter_constituency_id,
+            COALESCE(v.constituency_id, b.constituency_id, '') AS constituency_id,
+            COALESCE(v.constituency_id, b.constituency_id, '') AS constituencyId,
+            COALESCE(c.name, '') AS constituency_name,
+            COALESCE(c.name, '') AS constituencyName,
+            COALESCE(v.village, '') AS voter_village,
+            COALESCE(v.house_no, '') AS voter_house_no,
+            COALESCE(v.mobile, '') AS voter_mobile,
+            COALESCE(v.email, '') AS voter_email,
+            COALESCE(v.gender, 'Male') AS voter_gender,
+            COALESCE(v.age, 35) AS voter_age,
+            COALESCE(v.caste, '') AS voter_caste,
+            COALESCE(va.recorded_by_name, rec.name, 'Staff') AS recorded_by_display_name,
+            COALESCE(p.name, va.favored_party_name) AS effective_party_name,
+            COALESCE(p.color, '#3b82f6') AS effective_party_color,
+            COALESCE(p.symbol, '🗳️') AS effective_party_symbol,
+            p.color AS party_color,
+            p.symbol AS party_symbol
+          FROM voter_assessments va
+          LEFT JOIN users u ON va.admin_id = u.id
+          LEFT JOIN users rec ON va.recorded_by = rec.id
+          LEFT JOIN voters v ON (va.voter_id = v.id OR va.voter_id = v.voter_id)
+          LEFT JOIN booths b ON v.booth_id = b.id
+          LEFT JOIN constituencies c ON (v.constituency_id = c.id OR b.constituency_id = c.id)
+          LEFT JOIN political_parties p ON (va.favored_party_id = p.id OR va.favored_party_name = p.name OR va.favored_party_name = p.abbreviation)
+        `;
+
+        if (adminCtx.isSuperAdmin) {
+          if (requestedAdmin && requestedAdmin !== 'all') {
+            let query = `${baseSelect} WHERE va.admin_id = ?`;
+            const binds: any[] = [requestedAdmin];
+            if (voterId) {
+              query += ' AND (va.voter_id = ? OR va.id = ? OR v.id = ? OR v.voter_id = ?)';
+              binds.push(voterId, `${requestedAdmin}_${voterId}`, voterId, voterId);
+            }
+            query += ' ORDER BY va.updated_at DESC';
+            const { results } = await env.DB.prepare(query).bind(...binds).all<any>();
+            return jsonResponse(results || []);
+          } else if (voterId) {
+            const query = `${baseSelect} WHERE va.voter_id = ? OR va.id LIKE ? OR v.id = ? OR v.voter_id = ? ORDER BY va.updated_at DESC`;
+            const { results } = await env.DB.prepare(query).bind(voterId, `%_${voterId}`, voterId, voterId).all<any>();
+            return jsonResponse(results || []);
+          } else {
+            const query = `${baseSelect} ORDER BY va.updated_at DESC`;
+            const { results } = await env.DB.prepare(query).all<any>();
+            return jsonResponse(results || []);
+          }
+        } else {
+          // If requestedAdmin is provided, or user is associated with an admin, filter by it
+          const targetAdmin = requestedAdmin || (adminCtx.adminId !== 'unauthenticated' ? adminCtx.adminId : '');
+          if (targetAdmin) {
+            let query = `${baseSelect} WHERE va.admin_id = ?`;
+            const binds: any[] = [targetAdmin];
+            if (voterId) {
+              query += ' AND (va.voter_id = ? OR va.id = ? OR v.id = ? OR v.voter_id = ?)';
+              binds.push(voterId, `${targetAdmin}_${voterId}`, voterId, voterId);
+            }
+            query += ' ORDER BY va.updated_at DESC';
+            const { results } = await env.DB.prepare(query).bind(...binds).all<any>();
+            return jsonResponse(results || []);
+          } else {
+            // Fallback for unauthenticated dev context: return all available assessments
+            let query = `${baseSelect}`;
+            const binds: any[] = [];
+            if (voterId) {
+              query += ' WHERE va.voter_id = ? OR va.id LIKE ? OR v.id = ? OR v.voter_id = ?';
+              binds.push(voterId, `%_${voterId}`, voterId, voterId);
+            }
+            query += ' ORDER BY va.updated_at DESC';
+            const { results } = binds.length > 0 
+              ? await env.DB.prepare(query).bind(...binds).all<any>()
+              : await env.DB.prepare(query).all<any>();
+            return jsonResponse(results || []);
+          }
         }
-        query += ' ORDER BY updated_at DESC';
-
-        const { results } = await env.DB.prepare(query).bind(...binds).all<any>();
-        return jsonResponse(results);
       }
 
       if (pathname === '/api/voter-assessments' && method === 'POST') {
         const a: any = await request.json();
-        const targetAdmin = a.adminId || a.admin_id || adminCtx.adminId;
+        const targetAdmin = (adminCtx.isSuperAdmin && (a.adminId || a.admin_id)) 
+          ? String(a.adminId || a.admin_id).trim() 
+          : (a.adminId || a.admin_id || adminCtx.adminId);
         const voterId = String(a.voterId || a.voter_id || a.voterDocId || '');
         if (!voterId) {
           return jsonResponse({ error: 'voterId is required' }, 400);
         }
         const id = `${targetAdmin}_${voterId}`;
+
+        // Ensure voter's linked booth in master table is preserved or updated
+        const candidateBooth = String(a.boothId || a.booth_id || '').trim();
+        if (candidateBooth) {
+          await env.DB.prepare('UPDATE voters SET booth_id = ? WHERE (booth_id IS NULL OR booth_id = \'\' OR booth_id != ?) AND (id = ? OR voter_id = ?)').bind(candidateBooth, candidateBooth, voterId, voterId).run().catch(() => {});
+        }
 
         await env.DB.prepare(`
           INSERT INTO voter_assessments (
@@ -3893,6 +3983,52 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           a.recordedByName || a.recorded_by_name || adminCtx.user?.name || 'Admin Staff'
         ).run();
 
+        // Also synchronize voter_sentiments table with resolved booth_id
+        try {
+          let sBoothId = candidateBooth;
+          let sConstId = String(a.constituencyId || a.constituency_id || '').trim();
+          if (!sBoothId || !sConstId) {
+            const vRow = await env.DB.prepare('SELECT booth_id, constituency_id FROM voters WHERE id = ? OR voter_id = ? LIMIT 1').bind(voterId, voterId).first<any>();
+            if (vRow) {
+              if (!sBoothId && vRow.booth_id) sBoothId = vRow.booth_id;
+              if (!sConstId && vRow.constituency_id) sConstId = vRow.constituency_id;
+            }
+          }
+          const sScore = a.sentimentScore !== undefined ? Number(a.sentimentScore) : 3.0;
+          const sConcerns = typeof a.keyConcerns === 'object' ? JSON.stringify(a.keyConcerns) : (a.key_concerns || '[]');
+
+          await env.DB.prepare(`
+            INSERT INTO voter_sentiments (
+              id, voter_id, voter_name, favored_party_id, favored_party_name,
+              sentiment_score, key_concerns, constituency_id, booth_id,
+              recorded_by, recorded_by_name, admin_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+              voter_name = COALESCE(excluded.voter_name, voter_name),
+              favored_party_id = COALESCE(excluded.favored_party_id, favored_party_id),
+              favored_party_name = COALESCE(excluded.favored_party_name, favored_party_name),
+              sentiment_score = excluded.sentiment_score,
+              key_concerns = excluded.key_concerns,
+              constituency_id = COALESCE(NULLIF(excluded.constituency_id, ''), constituency_id),
+              booth_id = COALESCE(NULLIF(excluded.booth_id, ''), booth_id),
+              recorded_by = excluded.recorded_by,
+              recorded_by_name = excluded.recorded_by_name
+          `).bind(
+            id,
+            voterId,
+            a.voterName || a.voter_name || 'Voter',
+            a.favoredPartyId || a.favored_party_id || null,
+            a.favoredPartyName || a.favored_party_name || null,
+            sScore,
+            sConcerns,
+            sConstId,
+            sBoothId,
+            a.recordedBy || a.recorded_by || adminCtx.userId,
+            a.recordedByName || a.recorded_by_name || adminCtx.user?.name || 'Staff',
+            targetAdmin
+          ).run();
+        } catch (_) {}
+
         return jsonResponse({ success: true, id, adminId: targetAdmin, voterId });
       }
 
@@ -3914,35 +4050,36 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             COALESCE(v.gender, 'Male') AS voter_gender,
             COALESCE(v.age, 35) AS voter_age,
             COALESCE(v.caste, '') AS voter_caste,
-            v.voter_id AS voter_epic,
+            COALESCE(v.voter_id, s.voter_id) AS voter_epic,
             v.mobile AS voter_mobile,
             v.email AS voter_email,
             v.village AS voter_village,
-            v.guardian_name AS voter_guardian_name,
+            COALESCE(v.relation_name, '') AS voter_guardian_name,
             v.house_no AS voter_house_no,
-            COALESCE(s.booth_id, v.booth_id) AS effective_booth_id,
-            COALESCE(s.constituency_id, v.constituency_id) AS effective_constituency_id,
-            b.name AS booth_name,
-            c.name AS constituency_name,
+            COALESCE(NULLIF(s.booth_id, ''), v.booth_id, '') AS effective_booth_id,
+            COALESCE(NULLIF(s.constituency_id, ''), v.constituency_id, b.constituency_id, '') AS effective_constituency_id,
+            COALESCE(b.name, CASE WHEN b.booth_number IS NOT NULL THEN 'Booth ' || b.booth_number ELSE '' END) AS booth_name,
+            COALESCE(b.booth_number, '') AS booth_number,
+            COALESCE(c.name, '') AS constituency_name,
             p.name AS party_name,
             p.color AS party_color,
             p.symbol AS party_symbol
           FROM voter_sentiments s
-          LEFT JOIN voters v ON v.id = s.voter_id
-          LEFT JOIN booths b ON b.id = s.booth_id
-          LEFT JOIN constituencies c ON c.id = s.constituency_id
-          LEFT JOIN political_parties p ON p.id = s.favored_party_id
+          LEFT JOIN voters v ON (v.id = s.voter_id OR v.voter_id = s.voter_id)
+          LEFT JOIN booths b ON b.id = COALESCE(NULLIF(s.booth_id, ''), v.booth_id)
+          LEFT JOIN constituencies c ON c.id = COALESCE(NULLIF(s.constituency_id, ''), v.constituency_id, b.constituency_id)
+          LEFT JOIN political_parties p ON (p.id = s.favored_party_id OR p.name = s.favored_party_name)
         `;
         const binds: any[] = [];
         const whereParts: string[] = [];
 
-        if (!adminCtx.isSuperAdmin || adminCtx.requestedAdminId) {
+        if (targetAdmin && targetAdmin !== 'unauthenticated' && (!adminCtx.isSuperAdmin || adminCtx.requestedAdminId)) {
           whereParts.push('(s.admin_id = ? OR s.admin_id IS NULL OR s.admin_id = \'\')');
           binds.push(targetAdmin);
         }
         if (voterDocId) {
-          whereParts.push('s.voter_id = ?');
-          binds.push(voterDocId);
+          whereParts.push('(s.voter_id = ? OR v.id = ? OR v.voter_id = ?)');
+          binds.push(voterDocId, voterDocId, voterDocId);
         }
 
         if (whereParts.length > 0) {
@@ -3950,9 +4087,11 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         }
         query += ' ORDER BY s.created_at DESC';
 
-        const { results } = await env.DB.prepare(query).bind(...binds).all<any>();
+        const { results } = binds.length > 0
+          ? await env.DB.prepare(query).bind(...binds).all<any>()
+          : await env.DB.prepare(query).all<any>();
 
-        const formatted = results.map(s => {
+        const formatted = (results || []).map(s => {
           let keyConcerns = [];
           try { keyConcerns = s.key_concerns ? JSON.parse(s.key_concerns) : []; } catch { }
           let customAnswers = {};
@@ -3981,6 +4120,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             constituencyName: s.constituency_name || '',
             boothId: String(s.effective_booth_id || s.booth_id || ''),
             boothName: s.booth_name || '',
+            boothNumber: s.booth_number || '',
             surveyId: String(s.survey_id || ''),
             surveyTitle: s.survey_title || '',
             customAnswers,
@@ -4005,6 +4145,20 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const id = s.id || `${targetAdmin}_${voterId}`;
         const concernsJson = JSON.stringify(s.keyConcerns || s.key_concerns || []);
         const customAnswersJson = JSON.stringify(s.customAnswers || s.custom_answers || {});
+        let boothId = String(s.boothId || s.booth_id || '').trim();
+        let constituencyId = String(s.constituencyId || s.constituency_id || '').trim();
+
+        if (!boothId || !constituencyId) {
+          const vRow = await env.DB.prepare('SELECT booth_id, constituency_id FROM voters WHERE id = ? OR voter_id = ? LIMIT 1').bind(voterId, voterId).first<any>();
+          if (vRow) {
+            if (!boothId && vRow.booth_id) boothId = vRow.booth_id;
+            if (!constituencyId && vRow.constituency_id) constituencyId = vRow.constituency_id;
+          }
+        }
+
+        if (boothId) {
+          await env.DB.prepare('UPDATE voters SET booth_id = ? WHERE (booth_id IS NULL OR booth_id = \'\' OR booth_id != ?) AND (id = ? OR voter_id = ?)').bind(boothId, boothId, voterId, voterId).run().catch(() => {});
+        }
 
         await env.DB.prepare(`
           INSERT INTO voter_sentiments (
@@ -4013,8 +4167,13 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             survey_id, survey_title, custom_answers, recorded_by, recorded_by_name, admin_id
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
+            voter_name = COALESCE(excluded.voter_name, voter_name),
+            favored_party_id = COALESCE(excluded.favored_party_id, favored_party_id),
+            favored_party_name = COALESCE(excluded.favored_party_name, favored_party_name),
             sentiment_score = excluded.sentiment_score,
             key_concerns = excluded.key_concerns,
+            constituency_id = COALESCE(NULLIF(excluded.constituency_id, ''), constituency_id),
+            booth_id = COALESCE(NULLIF(excluded.booth_id, ''), booth_id),
             recorded_by = excluded.recorded_by,
             recorded_by_name = excluded.recorded_by_name
         `).bind(
@@ -4025,8 +4184,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           s.favoredPartyName || s.favored_party_name || '',
           s.sentimentScore || s.sentiment_score || 3.0,
           concernsJson,
-          s.constituencyId || s.constituency_id || '',
-          s.boothId || s.booth_id || '',
+          constituencyId,
+          boothId,
           s.surveyId || s.survey_id || '',
           s.surveyTitle || s.survey_title || '',
           customAnswersJson,
@@ -4038,11 +4197,14 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         // Also upsert voter_assessments table
         await env.DB.prepare(`
           INSERT INTO voter_assessments (
-            id, admin_id, voter_id, voter_name, sentiment_score, sentiment, notes, is_karyakarta, recorded_by, recorded_by_name
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            id, admin_id, voter_id, voter_name, sentiment_score, sentiment, favored_party_id, favored_party_name, notes, is_karyakarta, recorded_by, recorded_by_name
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
+            voter_name = COALESCE(excluded.voter_name, voter_name),
             sentiment_score = excluded.sentiment_score,
             sentiment = excluded.sentiment,
+            favored_party_id = COALESCE(excluded.favored_party_id, favored_party_id),
+            favored_party_name = COALESCE(excluded.favored_party_name, favored_party_name),
             notes = COALESCE(excluded.notes, notes),
             is_karyakarta = COALESCE(excluded.is_karyakarta, is_karyakarta),
             recorded_by = excluded.recorded_by,
@@ -4055,11 +4217,13 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           voterName,
           s.sentimentScore || s.sentiment_score || 3.0,
           s.sentiment || (Number(s.sentimentScore || s.sentiment_score || 3) >= 4 ? 'Support' : (Number(s.sentimentScore || s.sentiment_score || 3) <= 2 ? 'Oppose' : 'Neutral')),
+          s.favoredPartyId || s.favored_party_id || null,
+          s.favoredPartyName || s.favored_party_name || null,
           s.notes || '',
           s.isKaryakarta ? 1 : 0,
           s.recordedBy || s.recorded_by || adminCtx.userId,
           s.recordedByName || s.recorded_by_name || adminCtx.user?.name || 'Administrator'
-        ).run().catch(() => {});
+        ).run().catch(() => { });
 
         return jsonResponse({ success: true, id, adminId: targetAdmin });
       }
@@ -4081,7 +4245,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const page = parseInt(url.searchParams.get('page') || '1');
         const offset = (page - 1) * limit;
         const search = url.searchParams.get('search') || '';
-        
+
         const boothId = url.searchParams.get('boothId') || url.searchParams.get('booth_id') || '';
         let boothIds = url.searchParams.get('boothIds') || '';
         const wardId = url.searchParams.get('wardId') || url.searchParams.get('ward_id') || '';
@@ -4104,64 +4268,105 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         // Regional scope enforcement for non-super_admin users with assigned boundaries/election_settings
         const rawRole = (adminCtx.user?.role || '').toLowerCase();
-        const isSuperAdminUser = adminCtx.isSuperAdmin || 
-          rawRole === 'super_admin' || 
+        const isSuperAdminUser = adminCtx.isSuperAdmin ||
+          rawRole === 'super_admin' ||
           rawRole === 'owner' ||
           (adminCtx.user?.email || '').toLowerCase().trim() === 'vijaychauhanofficial01@gmail.com';
 
-        if (!isSuperAdminUser && adminCtx.user) {
+        if (!isSuperAdminUser) {
+          if (!adminCtx.isAuthenticated || !adminCtx.user) {
+            return jsonResponse({
+              data: [],
+              total: 0,
+              page,
+              pageSize: limit,
+              totalPages: 0,
+              warning: 'Authentication required to access voter records.'
+            }, 200, 30);
+          }
+
           const userRow = adminCtx.user;
           let electSettings: any = {};
           try {
-            electSettings = typeof userRow.election_settings === 'string' 
-              ? JSON.parse(userRow.election_settings) 
+            electSettings = typeof userRow.election_settings === 'string'
+              ? JSON.parse(userRow.election_settings)
               : (userRow.election_settings || {});
-          } catch {}
+          } catch { }
 
-          const uState = (userRow?.state_id || userRow?.stateId || electSettings.state_id || electSettings.stateId || electSettings.state_ids || electSettings.stateIds || electSettings.states || '').toString().trim();
-          const uDist = (userRow?.district_id || userRow?.districtId || electSettings.district_id || electSettings.districtId || electSettings.district_ids || electSettings.districtIds || electSettings.districts || '').toString().trim();
-          const uConst = (userRow?.constituency_id || userRow?.constituencyId || electSettings.constituency_id || electSettings.constituencyId || electSettings.constituency_ids || electSettings.constituencyIds || electSettings.constituencies || '').toString().trim();
-          const uMandal = (userRow?.mandal_id || userRow?.mandalId || electSettings.mandal_id || electSettings.mandalId || electSettings.mandal_ids || electSettings.mandalIds || electSettings.mandals || electSettings.block_id || electSettings.block_ids || '').toString().trim();
-          const uPanchayat = (userRow?.panchayat_id || userRow?.panchayatId || electSettings.panchayat_id || electSettings.panchayatId || electSettings.panchayat_ids || electSettings.panchayatIds || electSettings.panchayats || '').toString().trim();
-          const uWard = (userRow?.ward_id || userRow?.wardId || electSettings.ward_id || electSettings.wardId || electSettings.ward_ids || electSettings.wardIds || electSettings.wards || '').toString().trim();
-          const uBooth = (userRow?.booth_id || userRow?.boothId || electSettings.booth_id || electSettings.boothId || electSettings.booth_ids || electSettings.boothIds || electSettings.booths || '').toString().trim();
+          const cleanId = (s: any) => String(s || '').trim().replace(/^#\s*/, '').replace(/\.0$/, '');
 
           let uAssignedBooths: string[] = [];
           try {
             const rawB = userRow?.assigned_booths || electSettings.assigned_booths;
-            if (typeof rawB === 'string') {
+            if (typeof rawB === 'string' && rawB.trim()) {
               const p = JSON.parse(rawB);
-              uAssignedBooths = Array.isArray(p) ? p.map(String).filter(s => s && s !== '[]' && s !== 'null') : [];
+              if (Array.isArray(p)) {
+                uAssignedBooths.push(...p.map(cleanId).filter(s => s && s !== '[]' && s !== 'null' && s !== 'undefined'));
+              }
             } else if (Array.isArray(rawB)) {
-              uAssignedBooths = rawB.map(String).filter(s => s && s !== '[]' && s !== 'null');
+              uAssignedBooths.push(...rawB.map(cleanId).filter(s => s && s !== '[]' && s !== 'null' && s !== 'undefined'));
             }
-          } catch {}
+          } catch { }
 
-          if (!stateId && !stateIds && uState && uState !== 'null' && uState !== '[]') {
-            stateIds = uState;
+          const rawBId = (userRow?.booth_id || userRow?.boothId || electSettings.booth_id || electSettings.boothId || electSettings.booth_ids || electSettings.boothIds || electSettings.booths || '').toString().trim();
+          if (rawBId && rawBId !== 'null' && rawBId !== '[]' && rawBId !== 'undefined') {
+            uAssignedBooths.push(...rawBId.split(',').map(cleanId).filter(Boolean));
           }
-          if (!districtId && !districtIds && uDist && uDist !== 'null' && uDist !== '[]') {
-            districtIds = uDist;
+          uAssignedBooths = Array.from(new Set(uAssignedBooths));
+
+          // Strict restriction: If user is not super admin and has no booth assigned, they CANNOT access any voters!
+          if (uAssignedBooths.length === 0) {
+            return jsonResponse({
+              data: [],
+              total: 0,
+              page,
+              pageSize: limit,
+              totalPages: 0,
+              message: 'No polling booth assigned. Access restricted to assigned booths only.'
+            }, 200, 30);
           }
-          if (!constituencyId && !constituencyIds && uConst && uConst !== 'null' && uConst !== '[]') {
-            constituencyIds = uConst;
+
+          // Expand assigned booths with both booth ID and booth number from booths table
+          const bPlaceholders = uAssignedBooths.map(() => '?').join(',');
+          const boothRows = await env.DB.prepare(`
+            SELECT id, booth_number 
+            FROM booths 
+            WHERE id IN (${bPlaceholders}) OR booth_number IN (${bPlaceholders})
+          `).bind(...uAssignedBooths, ...uAssignedBooths).all<any>().catch(() => ({ results: [] }));
+
+          for (const row of (boothRows.results || [])) {
+            if (row.id) uAssignedBooths.push(cleanId(row.id));
+            if (row.booth_number) uAssignedBooths.push(cleanId(row.booth_number));
           }
-          if (!mandalId && !mandalIds && uMandal && uMandal !== 'null' && uMandal !== '[]') {
-            mandalIds = uMandal;
-          }
-          if (!panchayatId && !panchayatIds && uPanchayat && uPanchayat !== 'null' && uPanchayat !== '[]') {
-            panchayatIds = uPanchayat;
-          }
-          if (!wardId && !wardIds && uWard && uWard !== 'null' && uWard !== '[]') {
-            wardIds = uWard;
-          }
-          if (!boothId && !boothIds && (uBooth || uAssignedBooths.length > 0) && (uBooth !== 'null' && uBooth !== '[]')) {
-            boothIds = uBooth || uAssignedBooths.join(',');
+          uAssignedBooths = Array.from(new Set(uAssignedBooths.filter(Boolean)));
+
+          // Check if specific booth(s) were requested via query parameter
+          const requestedBooths = (boothIds ? boothIds.split(',') : (boothId && boothId !== 'all' ? [boothId] : []))
+            .map(cleanId)
+            .filter(Boolean);
+
+          if (requestedBooths.length > 0) {
+            const allowedRequested = requestedBooths.filter(rb => uAssignedBooths.includes(rb));
+            if (allowedRequested.length === 0) {
+              // Requested booth does NOT belong to user's assigned booths
+              return jsonResponse({
+                data: [],
+                total: 0,
+                page,
+                pageSize: limit,
+                totalPages: 0,
+                message: 'Access restricted: Requested booth is not assigned to your account.'
+              }, 200, 30);
+            }
+            boothIds = allowedRequested.join(',');
+          } else {
+            // Force query to ONLY the user's assigned booths
+            boothIds = uAssignedBooths.join(',');
           }
         }
 
-        // Cache Check
-        const cacheKey = `voters_${targetAdmin}_${rawRole}_${url.searchParams.toString()}`;
+        // Cache Check - key by specific user and search params
+        const cacheKey = `voters_${adminCtx.userId}_${rawRole}_${url.searchParams.toString()}_${boothIds}`;
         const cached = getCached<any>(cacheKey);
         if (cached) {
           return jsonResponse(cached, 200, 60);
@@ -4175,9 +4380,22 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           binds.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
         }
 
-        // Booth filtering
-        const allBoothIds = (boothIds ? boothIds.split(',') : (boothId && boothId !== 'all' ? [boothId] : [])).map(s => s.trim().replace(/^#\s*/, '').replace(/\.0$/, '')).filter(Boolean);
+        // Booth filtering - expand booth IDs & booth numbers for comprehensive matching
+        let allBoothIds = (boothIds ? boothIds.split(',') : (boothId && boothId !== 'all' ? [boothId] : [])).map(s => s.trim().replace(/^#\s*/, '').replace(/\.0$/, '')).filter(Boolean);
         if (allBoothIds.length > 0) {
+          const bpList = allBoothIds.map(() => '?').join(',');
+          const bLookup = await env.DB.prepare(`
+            SELECT id, booth_number 
+            FROM booths 
+            WHERE id IN (${bpList}) OR booth_number IN (${bpList})
+          `).bind(...allBoothIds, ...allBoothIds).all<any>().catch(() => ({ results: [] }));
+
+          for (const row of (bLookup.results || [])) {
+            if (row.id) allBoothIds.push(String(row.id).trim().replace(/^#\s*/, '').replace(/\.0$/, ''));
+            if (row.booth_number) allBoothIds.push(String(row.booth_number).trim().replace(/^#\s*/, '').replace(/\.0$/, ''));
+          }
+          allBoothIds = Array.from(new Set(allBoothIds.filter(Boolean)));
+
           const placeholders = allBoothIds.map(() => '?').join(',');
           whereClauses.push(`(v.booth_id IN (${placeholders}) OR v.part_no IN (${placeholders}))`);
           binds.push(...allBoothIds, ...allBoothIds);
@@ -4377,69 +4595,48 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       if (pathname.startsWith('/api/voters/') && pathname.endsWith('/assessments') && method === 'GET') {
         const voterDocId = pathname.substring('/api/voters/'.length, pathname.length - '/assessments'.length);
 
-        if (adminCtx.isSuperAdmin) {
-          const { results } = await env.DB.prepare(`
-            SELECT 
-              va.*,
-              COALESCE(u.name, 'Admin (' || va.admin_id || ')') AS admin_name,
-              u.email AS admin_email,
-              u.role AS admin_role,
-              COALESCE(va.recorded_by_name, rec.name, 'Staff') AS recorded_by_display_name,
-              rec.email AS recorded_by_email,
-              rec.role AS recorded_by_role
-            FROM voter_assessments va
-            LEFT JOIN users u ON va.admin_id = u.id
-            LEFT JOIN users rec ON va.recorded_by = rec.id
-            WHERE va.voter_id = ? OR va.id LIKE ?
-            ORDER BY va.updated_at DESC
-          `).bind(voterDocId, `%_${voterDocId}`).all<any>();
-
-          return jsonResponse(results || []);
-        } else {
-          const { results } = await env.DB.prepare(`
-            SELECT 
-              va.*,
-              COALESCE(u.name, 'Admin') AS admin_name,
-              u.email AS admin_email,
-              u.role AS admin_role,
-              COALESCE(va.recorded_by_name, 'Staff') AS recorded_by_display_name
-            FROM voter_assessments va
-            LEFT JOIN users u ON va.admin_id = u.id
-            WHERE (va.voter_id = ? OR va.id = ?) AND va.admin_id = ?
-            ORDER BY va.updated_at DESC
-          `).bind(voterDocId, `${adminCtx.adminId}_${voterDocId}`, adminCtx.adminId).all<any>();
-
-          return jsonResponse(results || []);
-        }
-      }
-
-      // 13.2 ALL MULTI-ADMIN VOTER ASSESSMENTS & SENTIMENTS
-      if (pathname === '/api/voter-assessments' && method === 'GET') {
         const { results } = await env.DB.prepare(`
           SELECT 
             va.*,
             COALESCE(u.name, 'Admin (' || va.admin_id || ')') AS admin_name,
             u.email AS admin_email,
             u.role AS admin_role,
-            v.voter_id AS voter_epic,
+            COALESCE(va.recorded_by_name, rec.name, 'Staff') AS recorded_by_display_name,
+            rec.email AS recorded_by_email,
+            rec.role AS recorded_by_role,
+            COALESCE(v.voter_id, va.voter_id) AS voter_epic,
             COALESCE(v.name, va.voter_name) AS voter_full_name,
-            v.gender AS voter_gender,
-            v.age AS voter_age,
-            v.mobile AS voter_mobile,
-            v.village AS voter_village,
-            v.house_no AS voter_house_no,
-            v.booth_id AS voter_booth_id,
-            b.name AS booth_name,
-            b.booth_number,
-            v.constituency_id AS voter_constituency_id,
-            c.name AS constituency_name
+            COALESCE(v.booth_id, '') AS voter_booth_id,
+            COALESCE(v.booth_id, '') AS booth_id,
+            COALESCE(v.booth_id, '') AS boothId,
+            COALESCE(b.name, CASE WHEN b.booth_number IS NOT NULL THEN 'Booth ' || b.booth_number ELSE '' END) AS booth_name,
+            COALESCE(b.name, CASE WHEN b.booth_number IS NOT NULL THEN 'Booth ' || b.booth_number ELSE '' END) AS boothName,
+            COALESCE(b.booth_number, '') AS booth_number,
+            COALESCE(b.booth_number, '') AS boothNumber,
+            COALESCE(v.constituency_id, b.constituency_id, '') AS voter_constituency_id,
+            COALESCE(v.constituency_id, b.constituency_id, '') AS constituency_id,
+            COALESCE(v.constituency_id, b.constituency_id, '') AS constituencyId,
+            COALESCE(c.name, '') AS constituency_name,
+            COALESCE(c.name, '') AS constituencyName,
+            COALESCE(v.village, '') AS voter_village,
+            COALESCE(v.house_no, '') AS voter_house_no,
+            COALESCE(v.mobile, '') AS voter_mobile,
+            COALESCE(v.email, '') AS voter_email,
+            COALESCE(p.name, va.favored_party_name) AS effective_party_name,
+            COALESCE(p.color, '#3b82f6') AS effective_party_color,
+            COALESCE(p.symbol, '🗳️') AS effective_party_symbol,
+            p.color AS party_color,
+            p.symbol AS party_symbol
           FROM voter_assessments va
           LEFT JOIN users u ON va.admin_id = u.id
+          LEFT JOIN users rec ON va.recorded_by = rec.id
           LEFT JOIN voters v ON (va.voter_id = v.id OR va.voter_id = v.voter_id)
           LEFT JOIN booths b ON v.booth_id = b.id
           LEFT JOIN constituencies c ON (v.constituency_id = c.id OR b.constituency_id = c.id)
+          LEFT JOIN political_parties p ON (va.favored_party_id = p.id OR va.favored_party_name = p.name OR va.favored_party_name = p.abbreviation)
+          WHERE va.voter_id = ? OR va.id LIKE ? OR v.id = ? OR v.voter_id = ?
           ORDER BY va.updated_at DESC
-        `).all<any>();
+        `).bind(voterDocId, `%_${voterDocId}`, voterDocId, voterDocId).all<any>();
 
         return jsonResponse(results || []);
       }
@@ -4448,9 +4645,9 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         invalidateCache('voters_');
         invalidateCache('sentiments_');
         const userRole = adminCtx.user?.role || 'volunteer';
-        if (userRole === 'volunteer' && !adminCtx.isSuperAdmin) {
-          return jsonResponse({ 
-            error: 'Karyakartas are not permitted to create new master voter records. Only Managers and Admins can add voters.' 
+        if (userRole !== 'admin' && userRole !== 'super_admin' && !adminCtx.isSuperAdmin) {
+          return jsonResponse({
+            error: 'Access denied: Only Admins and above can create new voter records.'
           }, 403);
         }
 
@@ -4582,7 +4779,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           v.housingType || v.housing_type || null,
           adminCtx.userId,
           adminCtx.user?.name || adminCtx.user?.username || 'Staff'
-        ).run().catch(() => {});
+        ).run().catch(() => { });
 
         // Upsert admin assessment overlay
         const assessmentId = `${adminCtx.adminId}_${id}`;
@@ -4622,7 +4819,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           v.voted ? 1 : 0,
           adminCtx.userId,
           adminCtx.user?.name || adminCtx.user?.username || 'Staff'
-        ).run().catch(() => {});
+        ).run().catch(() => { });
 
         return jsonResponse({ success: true, id, voter_id: voterEpic });
       }
@@ -4631,9 +4828,9 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         invalidateCache('voters_');
         invalidateCache('sentiments_');
         const userRole = adminCtx.user?.role || 'volunteer';
-        if (userRole === 'volunteer' && !adminCtx.isSuperAdmin) {
-          return jsonResponse({ 
-            error: 'Karyakartas are not permitted to bulk upload voters. Only Managers and Admins can import voter lists.' 
+        if (userRole !== 'admin' && userRole !== 'super_admin' && !adminCtx.isSuperAdmin) {
+          return jsonResponse({
+            error: 'Access denied: Only Admins and above can bulk import voter lists.'
           }, 403);
         }
 
@@ -4642,14 +4839,14 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         let count = 0;
 
         // Ensure columns exist in voters table
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN panchayat_id TEXT`).run().catch(() => {});
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN ward_id TEXT`).run().catch(() => {});
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN mandal_id TEXT`).run().catch(() => {});
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN constituency_id TEXT`).run().catch(() => {});
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN district_id TEXT`).run().catch(() => {});
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN state_id TEXT`).run().catch(() => {});
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN part_no TEXT`).run().catch(() => {});
-        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN sr_no TEXT`).run().catch(() => {});
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN panchayat_id TEXT`).run().catch(() => { });
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN ward_id TEXT`).run().catch(() => { });
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN mandal_id TEXT`).run().catch(() => { });
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN constituency_id TEXT`).run().catch(() => { });
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN district_id TEXT`).run().catch(() => { });
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN state_id TEXT`).run().catch(() => { });
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN part_no TEXT`).run().catch(() => { });
+        await env.DB.prepare(`ALTER TABLE voters ADD COLUMN sr_no TEXT`).run().catch(() => { });
 
         for (const v of voterList) {
           const epic = (v.voter_id || v.voterId || v.epic || '').trim().toUpperCase();
@@ -4849,20 +5046,23 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             v.housingType || v.housing_type || null,
             adminCtx.userId,
             adminCtx.user?.name || adminCtx.user?.username || 'Staff'
-          ).run().catch(() => {});
+          ).run().catch(() => { });
         }
 
         // Upsert admin private assessment overlay (health, economy, sentiment, notes)
         // Karyakartas, Managers, and Admins can all update this sector-isolated assessment
-        const targetAdmin = v.adminId || v.admin_id || adminCtx.adminId;
+        const targetAdmin = (adminCtx.isSuperAdmin && (v.adminId || v.admin_id)) 
+          ? String(v.adminId || v.admin_id).trim() 
+          : (v.adminId || v.admin_id || adminCtx.adminId);
         const assessmentId = `${targetAdmin}_${id}`;
         await env.DB.prepare(`
           INSERT INTO voter_assessments (
             id, admin_id, voter_id, voter_name, vital_status, physical_profile,
             disability_category, eci_assistance_needed, economic_category,
-            income_range, land_ownership, education, sentiment_score, sentiment, notes, is_karyakarta, voted,
+            income_range, land_ownership, education, sentiment_score, sentiment,
+            favored_party_id, favored_party_name, notes, is_karyakarta, voted,
             recorded_by, recorded_by_name
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(id) DO UPDATE SET
             vital_status = COALESCE(excluded.vital_status, vital_status),
             physical_profile = COALESCE(excluded.physical_profile, physical_profile),
@@ -4874,6 +5074,8 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
             education = COALESCE(excluded.education, education),
             sentiment_score = COALESCE(excluded.sentiment_score, sentiment_score),
             sentiment = COALESCE(excluded.sentiment, sentiment),
+            favored_party_id = COALESCE(excluded.favored_party_id, favored_party_id),
+            favored_party_name = COALESCE(excluded.favored_party_name, favored_party_name),
             notes = COALESCE(excluded.notes, notes),
             is_karyakarta = COALESCE(excluded.is_karyakarta, is_karyakarta),
             voted = COALESCE(excluded.voted, voted),
@@ -4895,18 +5097,20 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
           v.education || 'Unspecified',
           v.sentimentScore !== undefined ? Number(v.sentimentScore) : 3.0,
           v.sentiment || v.partyInclination || 'Neutral',
+          v.favoredPartyId || v.favored_party_id || null,
+          v.favoredPartyName || v.favored_party_name || null,
           v.notes !== undefined ? v.notes : null,
           v.isKaryakarta !== undefined ? (v.isKaryakarta ? 1 : 0) : null,
           v.voted !== undefined ? (v.voted ? 1 : 0) : null,
           adminCtx.userId,
           adminCtx.user?.name || adminCtx.user?.username || 'Staff'
-        ).run().catch(() => {});
+        ).run().catch(() => { });
 
-        return jsonResponse({ 
-          success: true, 
-          id, 
-          adminId: targetAdmin, 
-          demographicsUpdated: !isVolunteer 
+        return jsonResponse({
+          success: true,
+          id,
+          adminId: targetAdmin,
+          demographicsUpdated: !isVolunteer
         });
       }
 
@@ -4920,7 +5124,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
 
         const id = pathname.substring('/api/voters/'.length);
         await env.DB.prepare('DELETE FROM voters WHERE id = ? OR voter_id = ?').bind(id, id).run();
-        await env.DB.prepare('DELETE FROM voter_assessments WHERE voter_id = ? OR id LIKE ?').bind(id, `%_${id}`).run().catch(() => {});
+        await env.DB.prepare('DELETE FROM voter_assessments WHERE voter_id = ? OR id LIKE ?').bind(id, `%_${id}`).run().catch(() => { });
         return jsonResponse({ success: true, id });
       }
 
@@ -4929,6 +5133,13 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       // ------------------------------------------------------------------------
 
       if (pathname === '/api/broadcast-links' && method === 'POST') {
+        const userRole = adminCtx.user?.role || 'volunteer';
+        if (userRole !== 'admin' && userRole !== 'super_admin' && !adminCtx.isSuperAdmin) {
+          return jsonResponse({
+            error: 'Access denied: Only Admins and above can generate WhatsApp broadcast links.'
+          }, 403);
+        }
+
         const b: any = await request.json();
         const id = `bfl_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
         const token = `wa_${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 8)}`;
@@ -5008,10 +5219,17 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
       }
 
       if (pathname.startsWith('/api/broadcast-links/') && method === 'DELETE') {
+        const userRole = adminCtx.user?.role || 'volunteer';
+        if (userRole !== 'admin' && userRole !== 'super_admin' && !adminCtx.isSuperAdmin) {
+          return jsonResponse({
+            error: 'Access denied: Only Admins and above can revoke broadcast links.'
+          }, 403);
+        }
+
         const idOrToken = pathname.substring('/api/broadcast-links/'.length);
         await env.DB.prepare(`
           DELETE FROM broadcast_feed_links WHERE id = ? OR token = ?
-        `).bind(idOrToken, idOrToken).run().catch(() => {});
+        `).bind(idOrToken, idOrToken).run().catch(() => { });
         return jsonResponse({ success: true, message: 'Broadcast link revoked.' });
       }
 
@@ -5032,16 +5250,36 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const filters = typeof link.filter_criteria === 'string' ? JSON.parse(link.filter_criteria || '{}') : (link.filter_criteria || {});
         const selectedColumns = typeof link.columns === 'string' ? JSON.parse(link.columns || '[]') : (link.columns || []);
 
-        let sql = `SELECT v.*, b.name as booth_name, b.boothNumber as booth_number FROM voters v LEFT JOIN booths b ON v.booth_id = b.id WHERE (v.mobile IS NOT NULL AND LENGTH(v.mobile) >= 8)`;
+        let sql = `SELECT v.*, b.name as booth_name, b.booth_number as booth_number FROM voters v LEFT JOIN booths b ON (v.booth_id = b.id OR v.booth_id = b.booth_number) WHERE 1=1`;
         const binds: any[] = [];
 
-        if (filters.boothIds && filters.boothIds.length > 0) {
-          sql += ` AND v.booth_id IN (${filters.boothIds.map(() => '?').join(',')})`;
-          binds.push(...filters.boothIds);
+        if (filters.stateIds && filters.stateIds.length > 0) {
+          sql += ` AND v.state_id IN (${filters.stateIds.map(() => '?').join(',')})`;
+          binds.push(...filters.stateIds);
+        }
+        if (filters.districtIds && filters.districtIds.length > 0) {
+          sql += ` AND v.district_id IN (${filters.districtIds.map(() => '?').join(',')})`;
+          binds.push(...filters.districtIds);
         }
         if (filters.constituencyIds && filters.constituencyIds.length > 0) {
           sql += ` AND v.constituency_id IN (${filters.constituencyIds.map(() => '?').join(',')})`;
           binds.push(...filters.constituencyIds);
+        }
+        if (filters.mandalIds && filters.mandalIds.length > 0) {
+          sql += ` AND v.mandal_id IN (${filters.mandalIds.map(() => '?').join(',')})`;
+          binds.push(...filters.mandalIds);
+        }
+        if (filters.panchayatIds && filters.panchayatIds.length > 0) {
+          sql += ` AND v.panchayat_id IN (${filters.panchayatIds.map(() => '?').join(',')})`;
+          binds.push(...filters.panchayatIds);
+        }
+        if (filters.wardIds && filters.wardIds.length > 0) {
+          sql += ` AND v.ward_id IN (${filters.wardIds.map(() => '?').join(',')})`;
+          binds.push(...filters.wardIds);
+        }
+        if (filters.boothIds && filters.boothIds.length > 0) {
+          sql += ` AND (v.booth_id IN (${filters.boothIds.map(() => '?').join(',')}) OR v.part_no IN (${filters.boothIds.map(() => '?').join(',')}))`;
+          binds.push(...filters.boothIds, ...filters.boothIds);
         }
         if (filters.gender && filters.gender !== 'all') {
           sql += ` AND LOWER(v.gender) = LOWER(?)`;
@@ -5062,30 +5300,36 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const voters = res?.results || [];
 
         const recipients = voters.map((v: any) => {
-          let cleanPhone = String(v.mobile || '').replace(/\D/g, '');
-          if (cleanPhone.length === 10) cleanPhone = `91${cleanPhone}`;
-          else if (cleanPhone.length > 10 && cleanPhone.startsWith('0')) cleanPhone = `91${cleanPhone.substring(1)}`;
+          let rawPhone = String(v.mobile || '').replace(/\D/g, '');
+          let cleanPhone = '';
+          if (rawPhone.length === 10) {
+            cleanPhone = `91${rawPhone}`;
+          } else if (rawPhone.length > 10 && rawPhone.startsWith('0')) {
+            cleanPhone = `91${rawPhone.substring(1)}`;
+          } else if (rawPhone.length > 0) {
+            cleanPhone = rawPhone;
+          }
 
           return {
             phone: cleanPhone,
             name: v.name || '',
-            relation_name: v.relation_name || '',
-            relation_type: v.relation_type || 'Father',
-            epic_no: v.voter_id || '',
-            house_no: v.house_no || '',
-            ward_name: v.ward_name || v.village || '',
-            booth_name: v.booth_name ? `${v.booth_number ? `#${v.booth_number} ` : ''}${v.booth_name}` : '',
+            relation_name: v.relation_name || (v as any).relationName || '',
+            relation_type: v.relation_type || (v as any).relationType || 'Father',
+            epic_no: v.voter_id || (v as any).voterId || '',
+            house_no: v.house_no || (v as any).houseNo || '',
+            ward_name: v.ward_name || (v as any).wardName || v.village || '',
+            booth_name: v.booth_name ? `${v.booth_number ? `#${v.booth_number} ` : ''}${v.booth_name}` : (v.booth_number ? `Booth #${v.booth_number}` : ''),
             age: v.age || '',
             gender: v.gender || '',
             caste: v.caste || '',
-            part_no: v.part_no || '',
-            sr_no: v.sr_no || '',
+            part_no: v.part_no || (v as any).partNo || '',
+            sr_no: v.sr_no || (v as any).srNo || '',
             occupation: v.occupation || '',
-            voting_status: v.voting_status || 'unvoted',
-            party_inclination: v.party_inclination || 'Neutral',
-            is_karyakarta: v.is_karyakarta === 1 ? 'Yes' : 'No'
+            voting_status: v.voting_status || (v as any).votingStatus || 'unvoted',
+            party_inclination: v.party_inclination || (v as any).partyInclination || 'Neutral',
+            is_karyakarta: (v.is_karyakarta === 1 || (v as any).isKaryakarta) ? 'Yes' : 'No'
           };
-        }).filter((r: any) => r.phone && r.phone.length >= 10);
+        });
 
         return jsonResponse({
           success: true,
@@ -5108,7 +5352,7 @@ async function fetchUserWithHierarchy(db: D1Database, id: string, email?: string
         const isSuper = adminCtx.isSuperAdmin && !url.searchParams.get('adminId');
 
         const totalVotersRes = await env.DB.prepare('SELECT COUNT(*) as c FROM voters').first<any>();
-        
+
         let volSql = 'SELECT COUNT(*) as c FROM volunteers';
         const volBinds: any[] = [];
         if (!isSuper) {

@@ -473,11 +473,39 @@ const VoterManagement: React.FC = () => {
   // Political Sentiment states
   const [parties, setParties] = useState<{ id: string; name: string; code?: string; symbol?: string; color?: string }[]>([]);
   const [sentimentFavoredPartyId, setSentimentFavoredPartyId] = useState<string>('');
+
+  const selectedPartyValue = useMemo(() => {
+    if (!sentimentFavoredPartyId) return '';
+    const match = parties.find(p => 
+      String(p.id).toLowerCase() === String(sentimentFavoredPartyId).toLowerCase() ||
+      p.name?.toLowerCase() === sentimentFavoredPartyId.toLowerCase() ||
+      (p.code && p.code.toLowerCase() === sentimentFavoredPartyId.toLowerCase())
+    );
+    return match ? match.id : sentimentFavoredPartyId;
+  }, [sentimentFavoredPartyId, parties]);
   const [sentimentStatus, setSentimentStatus] = useState<'Support' | 'Neutral' | 'Oppose' | 'Other Party'>('Neutral');
   const [sentimentNotes, setSentimentNotes] = useState('');
   const [sentimentStrength, setSentimentStrength] = useState<number>(3);
   const [sentimentIsKaryakarta, setSentimentIsKaryakarta] = useState<boolean>(false);
-  const [sentimentAdminId, setSentimentAdminId] = useState('');
+  const [sentimentAdminId, setSentimentAdminIdState] = useState<string>(() => {
+    try {
+      return localStorage.getItem('nextgencms_active_sentiment_admin') || '';
+    } catch {
+      return '';
+    }
+  });
+
+  const setSentimentAdminId = (id: string) => {
+    setSentimentAdminIdState(id);
+    try {
+      if (id) {
+        localStorage.setItem('nextgencms_active_sentiment_admin', id);
+      } else {
+        localStorage.removeItem('nextgencms_active_sentiment_admin');
+      }
+    } catch {}
+  };
+
   const [allAdmins, setAllAdmins] = useState<{ uid: string; username: string; email: string; role: string }[]>([]);
   const [loadingSentiment, setLoadingSentiment] = useState(false);
   const [lastSentimentUpdatedBy, setLastSentimentUpdatedBy] = useState('');
@@ -530,26 +558,67 @@ const VoterManagement: React.FC = () => {
   // Keep track of political sentiments for all loaded voters under the current admin context
   const [voterSentiments, setVoterSentiments] = useState<Record<string, Record<string, unknown>>>({});
 
-  useEffect(() => {
-    const fetchVoterSentiments = async () => {
-      try {
-        const sentiments = await api.get<any[]>('/api/voter-sentiments');
-        const mapping: Record<string, Record<string, unknown>> = {};
-        sentiments.forEach(s => {
-          if (s.voterDocId) {
-            mapping[s.voterDocId] = s;
-          }
-        });
-        setVoterSentiments(mapping);
-      } catch (err) {
-        console.error("Error loading political sentiments in list context:", err);
-      }
-    };
+  const fetchVoterSentiments = async () => {
+    try {
+      let targetAdmin = isSuperAdmin 
+        ? (sentimentAdminId || localStorage.getItem('nextgencms_active_sentiment_admin') || '')
+        : (profile?.parentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '');
 
+      if (isSuperAdmin && !targetAdmin && allAdmins.length > 0) {
+        const defaultAdm = allAdmins.find(a => a.role === 'admin') || allAdmins[0];
+        if (defaultAdm) {
+          targetAdmin = defaultAdm.uid;
+          setSentimentAdminId(defaultAdm.uid);
+        }
+      }
+
+      const url = targetAdmin 
+        ? `/api/voter-assessments?adminId=${encodeURIComponent(targetAdmin)}` 
+        : '/api/voter-assessments';
+      const list = await api.get<any[]>(url).catch(() => []);
+      const mapping: Record<string, Record<string, unknown>> = {};
+      (list || []).forEach(a => {
+        const vId = String(a.voter_id || a.voterId || a.voterDocId || '');
+        if (vId) {
+          const item = {
+            id: a.id,
+            adminId: a.admin_id || a.adminId,
+            adminName: a.admin_name || a.adminName || 'Admin',
+            voterDocId: vId,
+            voterEpic: a.voter_epic || a.voterEpic || '',
+            boothId: a.voter_booth_id || a.booth_id || a.boothId || '',
+            boothName: a.booth_name || a.boothName || '',
+            boothNumber: a.booth_number || a.boothNumber || '',
+            constituencyId: a.voter_constituency_id || a.constituency_id || a.constituencyId || '',
+            constituencyName: a.constituency_name || a.constituencyName || '',
+            sentiment: a.sentiment || 'Neutral',
+            sentimentScore: a.sentiment_score !== undefined ? Number(a.sentiment_score) : (a.sentimentScore !== undefined ? Number(a.sentimentScore) : 3),
+            favoredPartyId: a.favored_party_id || a.favoredPartyId || '',
+            favoredPartyName: a.favored_party_name || a.favoredPartyName || '',
+            partyColor: a.party_color || a.effective_party_color || '#3b82f6',
+            partySymbol: a.party_symbol || a.effective_party_symbol || '🗳️',
+            notes: a.notes || '',
+            isKaryakarta: Boolean(a.is_karyakarta || a.isKaryakarta),
+            recordedByName: a.recorded_by_display_name || a.recorded_by_name || a.recordedByName || 'Staff',
+            createdAt: a.updated_at || a.created_at || a.createdAt
+          };
+          mapping[vId] = item;
+          if (a.voter_epic) mapping[String(a.voter_epic)] = item;
+          if (a.voterId) mapping[String(a.voterId)] = item;
+          if (a.voterDocId) mapping[String(a.voterDocId)] = item;
+        }
+      });
+      setVoterSentiments(mapping);
+    } catch (err) {
+      console.error("Error loading political sentiments in list context:", err);
+    }
+  };
+
+  useEffect(() => {
     if (user || profile) {
       fetchVoterSentiments();
     }
-  }, [user?.uid, profile?.id, sentimentAdminId]);
+  }, [user?.uid, profile?.id, profile?.parentAdminId, isSuperAdmin, sentimentAdminId, allAdmins]);
 
   const getSectionCompleteness = (v: Voter, sentiment: Record<string, unknown> | undefined) => {
     // 1. Main Profile
@@ -616,7 +685,7 @@ const VoterManagement: React.FC = () => {
   };
 
   const getCompletenessPercent = (v: Voter) => {
-    const sentiment = voterSentiments[v.id];
+    const sentiment = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
     const stats = getSectionCompleteness(v, sentiment);
     const filled = stats.main.filled + stats.address.filled + stats.health.filled + stats.economy.filled + stats.political.filled;
     const total = stats.main.total + stats.address.total + stats.health.total + stats.economy.total + stats.political.total;
@@ -633,7 +702,7 @@ const VoterManagement: React.FC = () => {
     };
 
     filteredVoters.forEach(v => {
-      const sentiment = voterSentiments[v.id];
+      const sentiment = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
       const itemStats = getSectionCompleteness(v, sentiment);
 
       // Main Profile - at least half of the fields filled to count as filled voter context
@@ -769,8 +838,8 @@ function parseIdArray(...inputs: any[]): string[] {
     allowedStateIds.length > 0
   );
 
-  const isRestrictedUser = !isSuperAdminUser && hasAssignedScope;
-  const isPrivilegedUser = isSuperAdminUser || (!hasAssignedScope && (isAdmin || profile?.role === 'admin'));
+  const isRestrictedUser = !isSuperAdminUser;
+  const isPrivilegedUser = isSuperAdminUser;
 
   const fetchStates = async () => {
     try {
@@ -860,7 +929,7 @@ function parseIdArray(...inputs: any[]): string[] {
     setLoading(true);
     try {
       const params = new URLSearchParams();
-      params.set('limit', '1000');
+      params.set('limit', '5000');
 
       // 1. Explicit UI filter dropdown selections
       if (selectedBoothId !== 'all') {
@@ -907,8 +976,27 @@ function parseIdArray(...inputs: any[]): string[] {
 
       // 2. If restricted user with assigned scope, enforce scope boundaries
       if (isRestrictedUser) {
-        if (!params.has('boothId') && !params.has('boothIds') && allowedBoothIds.length > 0) {
-          params.set('boothIds', allowedBoothIds.join(','));
+        if (allowedBoothIds.length > 0) {
+          if (params.has('boothId')) {
+            const reqB = params.get('boothId');
+            const isOk = allowedBoothIds.some(ab => 
+              ab === reqB || booths.some(b => (b.id === ab || b.boothNumber === ab) && (b.id === reqB || b.boothNumber === reqB))
+            );
+            if (!isOk) {
+              params.delete('boothId');
+              params.set('boothIds', allowedBoothIds.join(','));
+            }
+          } else if (params.has('boothIds')) {
+            const reqBs = (params.get('boothIds') || '').split(',').map(s => s.trim()).filter(Boolean);
+            const filteredBs = reqBs.filter(rb => 
+              allowedBoothIds.some(ab => 
+                ab === rb || booths.some(b => (b.id === ab || b.boothNumber === ab) && (b.id === rb || b.boothNumber === rb))
+              )
+            );
+            params.set('boothIds', (filteredBs.length > 0 ? filteredBs : allowedBoothIds).join(','));
+          } else {
+            params.set('boothIds', allowedBoothIds.join(','));
+          }
         }
         if (!params.has('wardId') && !params.has('wardIds') && allowedWardIds.length > 0) {
           params.set('wardIds', allowedWardIds.join(','));
@@ -1122,7 +1210,7 @@ function parseIdArray(...inputs: any[]): string[] {
           const r = u.role || 'guest';
           if (['super_admin', 'admin', 'manager'].includes(r)) {
             list.push({
-              uid: u.id,
+              uid: String(u.id || u.uid),
               username: u.username || u.name || u.email?.split('@')[0] || 'Unknown User',
               email: u.email || '',
               role: r
@@ -1130,6 +1218,18 @@ function parseIdArray(...inputs: any[]): string[] {
           }
         });
         setAllAdmins(list);
+        if (isSuperAdmin && list.length > 0) {
+          const savedAdminId = localStorage.getItem('nextgencms_active_sentiment_admin');
+          const matched = list.find(a => a.uid === savedAdminId);
+          if (matched) {
+            setSentimentAdminId(matched.uid);
+          } else {
+            const defaultAdm = list.find(a => a.role === 'admin') || list[0];
+            if (defaultAdm) {
+              setSentimentAdminId(defaultAdm.uid);
+            }
+          }
+        }
       } catch (err) {
         console.error("Failed to load users for admins:", err);
       }
@@ -1137,34 +1237,51 @@ function parseIdArray(...inputs: any[]): string[] {
     if (user) {
       fetchAdmins();
     }
-  }, [user]);
+  }, [user, isSuperAdmin]);
 
   useEffect(() => {
-    const fetchParties = async () => {
-      try {
-        const pList = await api.get<any[]>('/api/parties');
-        const mapped = (pList || []).map(p => ({
-          id: String(p.id || p.name),
-          name: p.name || 'Party',
-          code: p.code || p.abbreviation || '',
-          symbol: p.symbol || p.logoUrl || '🗳️',
-          color: p.color || '#3b82f6'
-        }));
-        if (mapped.length > 0) {
-          // If custom parties exist, merge with standard parties so user always has complete options
-          const existingNames = new Set(mapped.map(m => m.name.toLowerCase()));
-          const combined = [...mapped, ...DEFAULT_FALLBACK_PARTIES.filter(f => !existingNames.has(f.name.toLowerCase()))];
-          setParties(combined);
-        } else {
-          setParties(DEFAULT_FALLBACK_PARTIES);
-        }
-      } catch (err) {
-        console.error("Failed to load parties, using registered defaults:", err);
+    if (!isSuperAdmin) {
+      const effAdmin = profile?.parentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '';
+      if (effAdmin) {
+        setSentimentAdminId(effAdmin);
+      }
+    }
+  }, [isSuperAdmin, profile?.parentAdminId, profile?.adminId, profile?.creatorId, user?.uid]);
+
+  const fetchParties = async (forceRefresh: boolean = false) => {
+    try {
+      if (forceRefresh) {
+        api.invalidateCache('/api/parties');
+      }
+      const pList = await api.get<any[]>('/api/parties');
+      const mapped = (pList || []).map(p => ({
+        id: String(p.id || p.name),
+        name: p.name || 'Party',
+        code: p.code || p.abbreviation || '',
+        symbol: p.symbol || p.logoUrl || '',
+        color: p.color || '#3b82f6'
+      }));
+      if (mapped.length > 0) {
+        // Direct linkage to Registered Political Parties added under Elections > Setup
+        setParties(mapped);
+      } else {
         setParties(DEFAULT_FALLBACK_PARTIES);
       }
-    };
+    } catch (err) {
+      console.error("Failed to load parties from Elections Setup, using registered defaults:", err);
+      setParties(DEFAULT_FALLBACK_PARTIES);
+    }
+  };
+
+  useEffect(() => {
     fetchParties();
   }, []);
+
+  useEffect(() => {
+    if (isModalOpen) {
+      fetchParties(true);
+    }
+  }, [isModalOpen]);
 
   const loadVoterAssessments = async (voterDocId: string) => {
     if (!voterDocId) return;
@@ -1185,6 +1302,8 @@ function parseIdArray(...inputs: any[]): string[] {
     setSentimentAdminId(assessment.admin_id || '');
     setFormData(prev => ({
       ...prev,
+      boothId: prev.boothId || assessment.voter_booth_id || assessment.booth_id || '',
+      constituencyId: prev.constituencyId || assessment.voter_constituency_id || assessment.constituency_id || '',
       vitalStatus: assessment.vital_status || prev.vitalStatus,
       physicalProfile: assessment.physical_profile || prev.physicalProfile,
       disabilityCategory: assessment.disability_category || prev.disabilityCategory,
@@ -1206,19 +1325,37 @@ function parseIdArray(...inputs: any[]): string[] {
   };
 
   const loadVoterSentiment = async (voterDocId: string, targetAdminId: string) => {
-    if (!voterDocId || !targetAdminId) return;
+    if (!voterDocId) return;
     setLoadingSentiment(true);
     try {
-      const sentiments = await api.get<any[]>('/api/voter-sentiments');
-      const found = sentiments.find(s => s.voterDocId === voterDocId || s.id === `${targetAdminId}_${voterDocId}`);
+      const list = await api.get<any[]>(`/api/voters/${voterDocId}/assessments`).catch(() => []);
+      setVoterAssessments(list || []);
+      let found = (list || []).find(a => 
+        String(a.admin_id || a.adminId) === String(targetAdminId) || 
+        a.id === `${targetAdminId}_${voterDocId}`
+      );
+
+      // If Super Admin and targetAdminId has no assessment, but assessments exist for this voter:
+      if (!found && isSuperAdmin && list && list.length > 0) {
+        found = list[0];
+        const assessedAdminId = String(found.admin_id || found.adminId);
+        if (assessedAdminId) {
+          setSentimentAdminId(assessedAdminId);
+        }
+      }
+
       if (found) {
         setSentimentStatus(found.sentiment || 'Neutral');
         setSentimentNotes(found.notes || '');
-        setSentimentStrength(found.sentimentScore !== undefined ? Number(found.sentimentScore) : 3);
-        setSentimentFavoredPartyId(found.favoredPartyId || found.favored_party_id || '');
-        setSentimentIsKaryakarta(found.isKaryakarta || false);
-        setLastSentimentUpdatedBy(found.recordedByName || found.recordedBy || 'System');
-        setLastSentimentUpdatedAt(found.createdAt ? new Date(found.createdAt).toLocaleString() : '');
+        setSentimentStrength(found.sentiment_score !== undefined ? Number(found.sentiment_score) : (found.sentimentScore !== undefined ? Number(found.sentimentScore) : 3));
+        setSentimentFavoredPartyId(found.favored_party_id || found.favoredPartyId || '');
+        setSentimentIsKaryakarta(Boolean(found.is_karyakarta || found.isKaryakarta));
+        setLastSentimentUpdatedBy(found.recorded_by_display_name || found.recorded_by_name || found.recordedByName || found.admin_name || 'Staff');
+        setLastSentimentUpdatedAt(found.updated_at ? new Date(found.updated_at).toLocaleString() : (found.created_at ? new Date(found.created_at).toLocaleString() : ''));
+        const pName = found.favored_party_name || found.favoredPartyName;
+        if (pName) {
+          setFormData(prev => ({ ...prev, partyInclination: pName }));
+        }
       } else {
         setSentimentStatus('Neutral');
         setSentimentNotes('');
@@ -1239,7 +1376,7 @@ function parseIdArray(...inputs: any[]): string[] {
     if (editingVoter && sentimentAdminId) {
       loadVoterSentiment(editingVoter.id, sentimentAdminId);
     }
-  }, [sentimentAdminId, editingVoter]);
+  }, [sentimentAdminId, editingVoter?.id]);
 
   const handleCreateOrUpdate = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1247,8 +1384,14 @@ function parseIdArray(...inputs: any[]): string[] {
     setError('');
 
     try {
-      const targetAdmin = sentimentAdminId || profile?.parentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '';
-      const selectedPartyObj = parties.find(p => String(p.id) === String(sentimentFavoredPartyId) || p.name === sentimentFavoredPartyId);
+      const targetAdmin = (isSuperAdmin && sentimentAdminId)
+        ? sentimentAdminId 
+        : (profile?.parentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '');
+      const selectedPartyObj = parties.find(p => 
+        String(p.id) === String(sentimentFavoredPartyId) || 
+        p.name === sentimentFavoredPartyId ||
+        p.id === selectedPartyValue
+      );
       const voterData = {
         ...formData,
         state_id: formData.stateId || null,
@@ -1285,31 +1428,70 @@ function parseIdArray(...inputs: any[]): string[] {
         updatedVoterObj = { ...voterData, id: voterDocId } as Voter;
       }
 
-      // Save Political Sentiment if provided
+      // Save Political Sentiment explicitly to /api/voter-assessments
       if (targetAdmin && voterDocId) {
         try {
-          await api.post('/api/voter-sentiments', {
+          const assignedBooth = booths.find(b => b.id === formData.boothId);
+          const assignedConstituency = constituencies.find(c => c.id === formData.constituencyId);
+          const assessmentData = {
             id: `${targetAdmin}_${voterDocId}`,
             adminId: targetAdmin,
+            admin_id: targetAdmin,
+            voterId: voterDocId,
+            voter_id: voterDocId,
             voterDocId: voterDocId,
+            voterEpic: formData.voterId || voterDocId,
             voterName: formData.name,
-            sentimentScore: sentimentStrength,
+            boothId: formData.boothId || '',
+            booth_id: formData.boothId || '',
+            boothName: assignedBooth?.name || '',
+            booth_name: assignedBooth?.name || '',
+            boothNumber: assignedBooth?.boothNumber || '',
+            booth_number: assignedBooth?.boothNumber || '',
+            constituencyId: formData.constituencyId || '',
+            constituency_id: formData.constituencyId || '',
+            constituencyName: assignedConstituency?.name || '',
+            constituency_name: assignedConstituency?.name || '',
             sentiment: sentimentStatus,
+            sentimentScore: sentimentStrength,
+            sentiment_score: sentimentStrength,
             favoredPartyId: sentimentFavoredPartyId,
+            favored_party_id: sentimentFavoredPartyId,
             favoredPartyName: selectedPartyObj?.name || '',
+            favored_party_name: selectedPartyObj?.name || '',
             partyColor: selectedPartyObj?.color || '#3b82f6',
             partySymbol: selectedPartyObj?.symbol || '🗳️',
             notes: sentimentNotes,
             isKaryakarta: sentimentIsKaryakarta,
+            is_karyakarta: sentimentIsKaryakarta ? 1 : 0,
             recordedBy: user?.uid || '',
+            recorded_by: user?.uid || '',
             recordedByName: profile?.username || profile?.name || profile?.email?.split('@')[0] || 'Staff',
+            recorded_by_name: profile?.username || profile?.name || profile?.email?.split('@')[0] || 'Staff'
+          };
+
+          // Post to dedicated /api/voter-assessments endpoint
+          await api.post('/api/voter-assessments', assessmentData);
+
+          // Synchronize legacy voter-sentiments endpoint if needed
+          api.post('/api/voter-sentiments', {
+            ...assessmentData,
             constituencyId: formData.constituencyId,
             boothId: formData.boothId
-          });
-          setVoterSentiments(prev => ({
-            ...prev,
-            [voterDocId]: {
-              ...prev[voterDocId],
+          }).catch(() => {});
+
+          setVoterSentiments(prev => {
+            const newSentimentItem = {
+              ...(prev[voterDocId] || {}),
+              id: `${targetAdmin}_${voterDocId}`,
+              adminId: targetAdmin,
+              voterDocId,
+              voterEpic: formData.voterId || voterDocId,
+              boothId: formData.boothId || '',
+              boothName: assignedBooth?.name || '',
+              boothNumber: assignedBooth?.boothNumber || '',
+              constituencyId: formData.constituencyId || '',
+              constituencyName: assignedConstituency?.name || '',
               sentiment: sentimentStatus,
               sentimentScore: sentimentStrength,
               favoredPartyId: sentimentFavoredPartyId,
@@ -1320,8 +1502,13 @@ function parseIdArray(...inputs: any[]): string[] {
               isKaryakarta: sentimentIsKaryakarta,
               recordedByName: profile?.username || profile?.name || profile?.email?.split('@')[0] || 'Staff',
               createdAt: new Date().toISOString()
-            }
-          }));
+            };
+            return {
+              ...prev,
+              [voterDocId]: newSentimentItem,
+              ...(formData.voterId ? { [formData.voterId]: newSentimentItem } : {})
+            };
+          });
         } catch (sErr) {
           console.error("Error updating sentiment:", sErr);
         }
@@ -1330,6 +1517,7 @@ function parseIdArray(...inputs: any[]): string[] {
       setEditingVoter(null);
       setIsModalOpen(false);
       fetchVoters();
+      fetchVoterSentiments();
       setTimeout(() => setSuccessMessage(''), 3000);
     } catch (err: any) {
       setError(err?.message || 'Failed to save voter record');
@@ -1446,8 +1634,12 @@ function parseIdArray(...inputs: any[]): string[] {
     });
     
     // Default to target admin context
-    const currentAdminContext = profile?.parentAdminId || profile?.adminId || user?.uid || '';
-    setSentimentAdminId(currentAdminContext);
+    const currentAdminContext = (isSuperAdmin && sentimentAdminId)
+      ? sentimentAdminId 
+      : (localStorage.getItem('nextgencms_active_sentiment_admin') || profile?.parentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '');
+    if (currentAdminContext) {
+      setSentimentAdminId(currentAdminContext);
+    }
     
     // Explicitly load sentiment and assessments for this voter
     const initialParty = (v as any).partyInclination || (v as any).favoredPartyId || (v as any).favoredPartyName || '';
@@ -1513,7 +1705,7 @@ function parseIdArray(...inputs: any[]): string[] {
     setSentimentIsKaryakarta(false);
     setLastSentimentUpdatedBy('');
     setLastSentimentUpdatedAt('');
-    setSentimentAdminId(profile?.parentAdminId || profile?.adminId || user?.uid || '');
+    setSentimentAdminId((isSuperAdmin && sentimentAdminId) ? sentimentAdminId : (profile?.parentAdminId || profile?.adminId || user?.uid || ''));
     setVoterAssessments([]);
     setModalMode('edit');
     setActiveFormTab('main');
@@ -1568,8 +1760,12 @@ function parseIdArray(...inputs: any[]): string[] {
     });
     
     // Default to target admin context
-    const currentAdminContext = profile?.parentAdminId || profile?.adminId || user?.uid || '';
-    setSentimentAdminId(currentAdminContext);
+    const currentAdminContext = (isSuperAdmin && sentimentAdminId)
+      ? sentimentAdminId 
+      : (localStorage.getItem('nextgencms_active_sentiment_admin') || profile?.parentAdminId || profile?.adminId || profile?.creatorId || user?.uid || '');
+    if (currentAdminContext) {
+      setSentimentAdminId(currentAdminContext);
+    }
     
     // Explicitly load sentiment and assessments for this voter
     const initialParty = (v as any).partyInclination || (v as any).favoredPartyId || (v as any).favoredPartyName || '';
@@ -1689,7 +1885,7 @@ function parseIdArray(...inputs: any[]): string[] {
   // Determine if a voter is within the user's assigned scope
   const matchesUserScope = (v: Voter) => {
     if (!isRestrictedUser) return true;
-    if (!hasAssignedScope) return true;
+    if (!hasAssignedScope) return false;
 
     const loc = getVoterLocation(v);
 
@@ -1783,6 +1979,7 @@ function parseIdArray(...inputs: any[]): string[] {
   // Scoped State IDs for dropdown filters
   const validScopedStateIds = useMemo(() => {
     if (!isRestrictedUser) return null;
+    if (!hasAssignedScope) return [];
     if (allowedStateIds.length > 0) return allowedStateIds;
     if (allowedDistrictIds.length > 0) {
       const matched = districts.filter(d => allowedDistrictIds.includes(String(d.id))).map(d => String(d.stateId));
@@ -1809,12 +2006,13 @@ function parseIdArray(...inputs: any[]): string[] {
       const matched = districts.filter(d => distIds.includes(String(d.id))).map(d => String(d.stateId));
       return Array.from(new Set(matched));
     }
-    return null;
-  }, [isRestrictedUser, allowedStateIds, allowedDistrictIds, allowedConstituencyIds, allowedMandalIds, allowedBoothIds, districts, constituencies, mandals, booths]);
+    return [];
+  }, [isRestrictedUser, hasAssignedScope, allowedStateIds, allowedDistrictIds, allowedConstituencyIds, allowedMandalIds, allowedBoothIds, districts, constituencies, mandals, booths]);
 
   // Scoped District IDs for dropdown filters
   const validScopedDistrictIds = useMemo(() => {
     if (!isRestrictedUser) return null;
+    if (!hasAssignedScope) return [];
     if (allowedDistrictIds.length > 0) return allowedDistrictIds;
     if (allowedConstituencyIds.length > 0) {
       const consts = constituencies.filter(c => allowedConstituencyIds.includes(String(c.id)));
@@ -1835,12 +2033,13 @@ function parseIdArray(...inputs: any[]): string[] {
     if (allowedStateIds.length > 0) {
       return districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
     }
-    return null;
-  }, [isRestrictedUser, allowedDistrictIds, allowedConstituencyIds, allowedMandalIds, allowedBoothIds, allowedStateIds, districts, constituencies, mandals, booths]);
+    return [];
+  }, [isRestrictedUser, hasAssignedScope, allowedDistrictIds, allowedConstituencyIds, allowedMandalIds, allowedBoothIds, allowedStateIds, districts, constituencies, mandals, booths]);
 
   // Scoped Constituency IDs for dropdown filters
   const validScopedConstituencyIds = useMemo(() => {
     if (!isRestrictedUser) return null;
+    if (!hasAssignedScope) return [];
     if (allowedConstituencyIds.length > 0) return allowedConstituencyIds;
     if (allowedMandalIds.length > 0) {
       const mnds = mandals.filter(m => allowedMandalIds.includes(String(m.id)));
@@ -1863,12 +2062,13 @@ function parseIdArray(...inputs: any[]): string[] {
       const distIds = districts.filter(d => allowedStateIds.includes(String(d.stateId))).map(d => String(d.id));
       return constituencies.filter(c => distIds.includes(String(c.districtId))).map(c => String(c.id));
     }
-    return null;
-  }, [isRestrictedUser, allowedConstituencyIds, allowedMandalIds, allowedPanchayatIds, allowedBoothIds, allowedDistrictIds, allowedStateIds, constituencies, mandals, panchayats, districts, booths]);
+    return [];
+  }, [isRestrictedUser, hasAssignedScope, allowedConstituencyIds, allowedMandalIds, allowedPanchayatIds, allowedBoothIds, allowedDistrictIds, allowedStateIds, constituencies, mandals, panchayats, districts, booths]);
 
   // Scoped Mandal (Block/Area) IDs for dropdown filters
   const validScopedMandalIds = useMemo(() => {
     if (!isRestrictedUser) return null;
+    if (!hasAssignedScope) return [];
     if (allowedMandalIds.length > 0) return allowedMandalIds;
     if (allowedPanchayatIds.length > 0) {
       const pchs = panchayats.filter(p => allowedPanchayatIds.includes(String(p.id)));
@@ -1881,12 +2081,13 @@ function parseIdArray(...inputs: any[]): string[] {
       const consts = constituencies.filter(c => allowedDistrictIds.includes(String(c.districtId))).map(c => String(c.id));
       return mandals.filter(m => consts.includes(String(m.constituencyId)) || allowedDistrictIds.includes(String(m.districtId))).map(m => String(m.id));
     }
-    return null;
-  }, [isRestrictedUser, allowedMandalIds, allowedPanchayatIds, allowedConstituencyIds, allowedDistrictIds, mandals, panchayats, constituencies]);
+    return [];
+  }, [isRestrictedUser, hasAssignedScope, allowedMandalIds, allowedPanchayatIds, allowedConstituencyIds, allowedDistrictIds, mandals, panchayats, constituencies]);
 
   // Scoped Panchayat / ULB IDs for dropdown filters
   const validScopedPanchayatIds = useMemo(() => {
     if (!isRestrictedUser) return null;
+    if (!hasAssignedScope) return [];
     if (allowedPanchayatIds.length > 0) return allowedPanchayatIds;
     if (allowedWardIds.length > 0) {
       const wrds = wards.filter(w => allowedWardIds.includes(String(w.id)));
@@ -1895,23 +2096,38 @@ function parseIdArray(...inputs: any[]): string[] {
     if (allowedMandalIds.length > 0) {
       return panchayats.filter(p => allowedMandalIds.includes(String(p.mandalId))).map(p => String(p.id));
     }
-    return null;
-  }, [isRestrictedUser, allowedPanchayatIds, allowedWardIds, allowedMandalIds, panchayats, wards]);
+    return [];
+  }, [isRestrictedUser, hasAssignedScope, allowedPanchayatIds, allowedWardIds, allowedMandalIds, panchayats, wards]);
 
   // Scoped Ward / Village IDs for dropdown filters
   const validScopedWardIds = useMemo(() => {
     if (!isRestrictedUser) return null;
+    if (!hasAssignedScope) return [];
     if (allowedWardIds.length > 0) return allowedWardIds;
     if (allowedPanchayatIds.length > 0) {
       return wards.filter(w => allowedPanchayatIds.includes(String(w.panchayatId))).map(w => String(w.id));
     }
-    return null;
-  }, [isRestrictedUser, allowedWardIds, allowedPanchayatIds, wards]);
+    return [];
+  }, [isRestrictedUser, hasAssignedScope, allowedWardIds, allowedPanchayatIds, wards]);
 
   // Scoped Booth IDs for dropdown filters
   const validScopedBoothIds = useMemo(() => {
     if (!isRestrictedUser) return null;
-    if (allowedBoothIds.length > 0) return allowedBoothIds;
+    if (!hasAssignedScope) return [];
+    if (allowedBoothIds.length > 0) {
+      const matched = booths.filter(b => 
+        allowedBoothIds.some(ab => {
+          const nAb = normalize(ab);
+          return nAb === normalize(b.id) || 
+                 nAb === normalize(b.boothNumber) ||
+                 b.name?.trim() === ab;
+        })
+      );
+      if (matched.length > 0) {
+        return matched.map(b => String(b.id));
+      }
+      return allowedBoothIds;
+    }
     if (allowedWardIds.length > 0) {
       return booths.filter(b => allowedWardIds.includes(String(b.wardId))).map(b => String(b.id));
     }
@@ -1933,8 +2149,8 @@ function parseIdArray(...inputs: any[]): string[] {
       const consts = constituencies.filter(c => dsts.includes(String(c.districtId))).map(c => String(c.id));
       return booths.filter(b => consts.includes(String(b.constituencyId))).map(b => String(b.id));
     }
-    return null;
-  }, [isRestrictedUser, allowedBoothIds, allowedWardIds, allowedPanchayatIds, allowedMandalIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, wards, panchayats, mandals, constituencies, districts]);
+    return [];
+  }, [isRestrictedUser, hasAssignedScope, allowedBoothIds, allowedWardIds, allowedPanchayatIds, allowedMandalIds, allowedConstituencyIds, allowedDistrictIds, allowedStateIds, booths, wards, panchayats, mandals, constituencies, districts]);
 
   const filteredVoters = useMemo(() => {
     const seenKeys = new Set<string>();
@@ -2076,7 +2292,7 @@ function parseIdArray(...inputs: any[]): string[] {
 
       // Filter by Sentiment
       if (filterSentiment !== 'all') {
-        const sData = voterSentiments[v.id];
+        const sData = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
         const sVal = (sData?.sentiment as string) || 'Unassigned';
         if (filterSentiment !== sVal) return false;
       }
@@ -2090,7 +2306,8 @@ function parseIdArray(...inputs: any[]): string[] {
 
       // Filter by Karyakarta (Volunteer)
       if (filterIsKaryakarta !== 'all') {
-        const matchesKaryakarta = v.isKaryakarta === true;
+        const sData = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
+        const matchesKaryakarta = v.isKaryakarta === true || Boolean(sData?.isKaryakarta);
         if (filterIsKaryakarta === 'yes' && !matchesKaryakarta) return false;
         if (filterIsKaryakarta === 'no' && matchesKaryakarta) return false;
       }
@@ -2224,7 +2441,9 @@ function parseIdArray(...inputs: any[]): string[] {
   const filterableBooths = booths.filter(b => {
     const conn = constituencies.find(c => String(c.id) === String(b.constituencyId));
     const dist = districts.find(d => String(d.id) === String(conn?.districtId));
-    const isScoped = !validScopedBoothIds || validScopedBoothIds.includes(String(b.id));
+    const isScoped = validScopedBoothIds === null || 
+      validScopedBoothIds.includes(String(b.id)) || 
+      validScopedBoothIds.includes(String(b.boothNumber));
     const matchesSelectedState = selectedStateIds.length === 0 || (dist && selectedStateIds.includes(String(dist.stateId)));
     const matchesSelectedDistrict = selectedDistrictIds.length === 0 || (conn && selectedDistrictIds.includes(String(conn.districtId)));
     const matchesSelectedConstituency = selectedConstituencyIds.length === 0 || selectedConstituencyIds.includes(String(b.constituencyId));
@@ -2278,77 +2497,39 @@ function parseIdArray(...inputs: any[]): string[] {
           </p>
         </div>
 
-        <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
-          <button 
-            type="button"
-            onClick={() => setIsWhatsAppFeedModalOpen(true)}
-            className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20"
-            title="Generate WhatsApp Extension Stream URL for filtered voters"
-          >
-            <MessageCircle size={14} /> WhatsApp Link
-          </button>
-          {!isVolunteer && hasRight('voters', 'c') && (
-            <>
-              <button 
-                onClick={() => setIsImportModalOpen(true)}
-                className="h-9 px-3.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-semibold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-1.5 shadow-xs"
-              >
-                <Upload size={13} /> Import
-              </button>
-              <button 
-                onClick={startCreateVoter}
-                className="webapp-button-primary h-9 px-4 flex items-center justify-center gap-1.5 text-xs font-semibold shadow-xs"
-              >
-                <Plus size={15} /> Add Voter
-              </button>
-            </>
-          )}
-        </div>
+        {isAdmin && (
+          <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto">
+            <button 
+              type="button"
+              onClick={() => setIsWhatsAppFeedModalOpen(true)}
+              className="h-9 px-3.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold text-xs transition-all flex items-center justify-center gap-1.5 shadow-sm shadow-emerald-600/20"
+              title="Generate WhatsApp Extension Stream URL for filtered voters"
+            >
+              <MessageCircle size={14} /> WhatsApp Link
+            </button>
+            <button 
+              onClick={() => setIsImportModalOpen(true)}
+              className="h-9 px-3.5 rounded-lg bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 font-semibold text-xs hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-all flex items-center justify-center gap-1.5 shadow-xs"
+            >
+              <Upload size={13} /> Import
+            </button>
+            <button 
+              onClick={startCreateVoter}
+              className="webapp-button-primary h-9 px-4 flex items-center justify-center gap-1.5 text-xs font-semibold shadow-xs"
+            >
+              <Plus size={15} /> Add Voter
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Assigned Scope Indicator */}
-      {isRestrictedUser && (
-        <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 border border-blue-500/20 rounded-xl p-3 sm:p-4 text-xs">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="font-bold flex items-center gap-1.5 text-blue-700 dark:text-blue-300">
-              <MapPin size={14} className="text-blue-600 dark:text-blue-400" />
-              Assigned Election Scope:
-            </span>
-            {allowedStateIds.length > 0 && (
-              <span className="px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200 font-medium">
-                Assigned State(s): {allowedStateIds.length} chosen
-              </span>
-            )}
-            {allowedDistrictIds.length > 0 && (
-              <span className="px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-900/40 text-indigo-800 dark:text-indigo-200 font-medium">
-                Assigned District(s): {allowedDistrictIds.length} chosen
-              </span>
-            )}
-            {allowedConstituencyIds.length > 0 && (
-              <span className="px-2 py-0.5 rounded-md bg-purple-100 dark:bg-purple-900/40 text-purple-800 dark:text-purple-200 font-medium">
-                Assigned Constituency(s): {allowedConstituencyIds.length} chosen
-              </span>
-            )}
-            {allowedMandalIds.length > 0 && (
-              <span className="px-2 py-0.5 rounded-md bg-amber-100 dark:bg-amber-900/40 text-amber-800 dark:text-amber-200 font-medium">
-                Assigned Block / Area(s): {allowedMandalIds.length} chosen
-              </span>
-            )}
-            {allowedPanchayatIds.length > 0 && (
-              <span className="px-2 py-0.5 rounded-md bg-emerald-100 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 font-medium">
-                Assigned Panchayat / ULB(s): {allowedPanchayatIds.length} chosen
-              </span>
-            )}
-            {allowedWardIds.length > 0 && (
-              <span className="px-2 py-0.5 rounded-md bg-teal-100 dark:bg-teal-900/40 text-teal-800 dark:text-teal-200 font-medium">
-                Assigned Ward / Village(s): {allowedWardIds.length} chosen
-              </span>
-            )}
-            {allowedBoothIds.length > 0 && (
-              <span className="px-2 py-0.5 rounded-md bg-rose-100 dark:bg-rose-900/40 text-rose-800 dark:text-rose-200 font-medium">
-                Assigned Polling Booth(s): {allowedBoothIds.length} chosen
-              </span>
-            )}
+      {/* Scope Restriction Warning for Unassigned Users */}
+      {isRestrictedUser && !hasAssignedScope && (
+        <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-xs flex items-center gap-3 text-amber-800 dark:text-amber-300">
+          <AlertCircle size={18} className="text-amber-600 dark:text-amber-400 shrink-0" />
+          <div>
+            <p className="font-bold text-sm">No Polling Booth Assigned</p>
+            <p className="text-[11px] opacity-85">You have not been assigned to any polling booth. You can only view and manage voters for booths assigned to your account. Please contact your administrator to assign booth access.</p>
           </div>
         </div>
       )}
@@ -2501,15 +2682,44 @@ function parseIdArray(...inputs: any[]): string[] {
               </button>
 
               {/* WhatsApp Extension Feed Link Button */}
-              <button
-                type="button"
-                onClick={() => setIsWhatsAppFeedModalOpen(true)}
-                className="h-11 px-3.5 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold text-xs flex items-center gap-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all shrink-0 shadow-xs"
-                title="Generate WhatsApp Extension Stream URL for these filtered voters"
-              >
-                <MessageCircle size={14} className="text-emerald-600 dark:text-emerald-400" />
-                <span className="hidden md:inline">WhatsApp Link</span>
-              </button>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => setIsWhatsAppFeedModalOpen(true)}
+                  className="h-11 px-3.5 rounded-xl border border-emerald-500/40 bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold text-xs flex items-center gap-1.5 hover:bg-emerald-100 dark:hover:bg-emerald-900/50 transition-all shrink-0 shadow-xs"
+                  title="Generate WhatsApp Extension Stream URL for these filtered voters"
+                >
+                  <MessageCircle size={14} className="text-emerald-600 dark:text-emerald-400" />
+                  <span className="hidden md:inline">WhatsApp Link</span>
+                </button>
+              )}
+
+              {/* Super Admin Sentiment Lens Selector */}
+              {isSuperAdmin && (
+                <div 
+                  className="h-11 px-3 rounded-xl border border-blue-200 dark:border-blue-900/50 bg-blue-50/60 dark:bg-blue-950/30 flex items-center gap-2 shrink-0 shadow-xs" 
+                  title="Switch Admin Sentiment Lens: Views sentiments, party alignments, and assessments recorded under this specific administrator"
+                >
+                  <Eye size={14} className="text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span className="text-[10px] font-black uppercase text-blue-700 dark:text-blue-300 tracking-wider hidden xl:inline whitespace-nowrap">
+                    Sentiment Lens:
+                  </span>
+                  <select
+                    value={sentimentAdminId}
+                    onChange={e => setSentimentAdminId(e.target.value)}
+                    className="bg-transparent text-xs font-bold text-blue-900 dark:text-blue-100 outline-none cursor-pointer max-w-[170px] truncate"
+                  >
+                    <option value="" className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+                      All Admins Combined
+                    </option>
+                    {allAdmins.map(adm => (
+                      <option key={adm.uid} value={adm.uid} className="bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100">
+                        {adm.username} ({adm.role === 'super_admin' ? 'Super Admin' : 'Admin'})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
             </div>
 
             {/* Total Results Counter */}
@@ -3193,9 +3403,14 @@ function parseIdArray(...inputs: any[]): string[] {
                                 }`}>
                                   {selectedBoothIds.length === 0 && <span className="text-[9px] font-black">✓</span>}
                                 </div>
-                                All Booths
+                                {isRestrictedUser ? 'All Assigned Booths' : 'All Booths'}
                               </div>
-                              {searchedBooths.map(b => {
+                              {searchedBooths.length === 0 ? (
+                                <div className="px-2.5 py-3 text-[10px] text-zinc-400 text-center">
+                                  {isRestrictedUser ? 'No assigned booths available' : 'No booths found'}
+                                </div>
+                              ) : (
+                                searchedBooths.map(b => {
                                 const isChecked = selectedBoothIds.includes(b.id);
                                 return (
                                   <div 
@@ -3222,7 +3437,8 @@ function parseIdArray(...inputs: any[]): string[] {
                                     </div>
                                   </div>
                                 );
-                              })}
+                              })
+                              )}
                             </div>
                           </div>
                         )}
@@ -3449,7 +3665,9 @@ function parseIdArray(...inputs: any[]): string[] {
               ) : filteredVoters.length === 0 ? (
                 <tr>
                   <td colSpan={voterColumnManager.visibleColumns.length || 1} className="py-12 text-center text-zinc-400 text-xs">
-                    No voters found matching criteria.
+                    {!isSuperAdminUser && !hasAssignedScope
+                      ? "No polling booth assigned to your account. You can only view voters for your assigned booth(s)."
+                      : "No voters found matching criteria."}
                   </td>
                 </tr>
               ) : (
@@ -3711,7 +3929,7 @@ function parseIdArray(...inputs: any[]): string[] {
                             </td>
                           );
                         case 'sentiment': {
-                          const sentimentData = voterSentiments[v.id];
+                          const sentimentData = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
                           const sentiment = sentimentData?.sentiment as string || 'Unassigned';
                           let badgeColor = 'bg-zinc-100 text-zinc-650 dark:bg-zinc-900 dark:text-zinc-400';
                           if (sentiment === 'Support') badgeColor = 'bg-emerald-500/10 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400 border border-emerald-500/20';
@@ -3733,20 +3951,26 @@ function parseIdArray(...inputs: any[]): string[] {
                           );
                         }
                         case 'favoredParty': {
-                          const sData = voterSentiments[v.id];
+                          const sData = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
                           const rawParty = (sData as any)?.favoredPartyName || (sData as any)?.favored_party_name || (sData as any)?.favoredPartyId || (v as any).favoredPartyName || v.partyInclination || '';
-                          const partyObj = parties.find(p => p.id === rawParty || p.name?.toLowerCase() === rawParty.toLowerCase() || p.code?.toLowerCase() === rawParty.toLowerCase());
-                          const abbrev = getPartyAbbreviation(rawParty);
+                          const partyObj = parties.find(p => 
+                            String(p.id).toLowerCase() === rawParty.toLowerCase() || 
+                            p.name?.toLowerCase() === rawParty.toLowerCase() || 
+                            p.code?.toLowerCase() === rawParty.toLowerCase()
+                          );
+                          const abbrev = partyObj?.code || getPartyAbbreviation(rawParty);
                           const fullName = partyObj?.name || rawParty;
 
                           return (
                             <td key={col.id} className="px-4 py-2 text-xs font-bold text-zinc-700 dark:text-zinc-300">
                               {abbrev ? (
                                 <span 
-                                  className="inline-flex items-center px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white uppercase font-bold text-[11px]" 
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-white font-bold text-[11px] shadow-2xs" 
+                                  style={{ backgroundColor: partyObj?.color || '#3b82f6' }}
                                   title={fullName}
                                 >
-                                  {abbrev}
+                                  {partyObj?.symbol && <span className="text-[10px]">{partyObj.symbol}</span>}
+                                  <span>{abbrev}</span>
                                 </span>
                               ) : (
                                 <span className="text-zinc-400 font-bold text-xs">-</span>
@@ -3754,10 +3978,12 @@ function parseIdArray(...inputs: any[]): string[] {
                             </td>
                           );
                         }
-                        case 'isVolunteer':
+                        case 'isVolunteer': {
+                          const sData = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
+                          const isVol = (v as any).isVolunteer || (v as any).is_volunteer || (v as any).isKaryakarta || Boolean(sData?.isKaryakarta);
                           return (
                             <td key={col.id} className="px-4 py-2">
-                              {(v as any).isVolunteer || (v as any).is_volunteer || (v as any).isKaryakarta ? (
+                              {isVol ? (
                                 <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
                                   ★ Volunteer
                                 </span>
@@ -3766,6 +3992,7 @@ function parseIdArray(...inputs: any[]): string[] {
                               )}
                             </td>
                           );
+                        }
                         case 'profileComplete': {
                           const percent = getCompletenessPercent(v);
                           let barColor = 'bg-red-500';
@@ -3865,7 +4092,7 @@ function parseIdArray(...inputs: any[]): string[] {
                           </span>
                         )}
                         {(() => {
-                          const sentimentData = voterSentiments[v.id];
+                          const sentimentData = voterSentiments[v.id] || (v.voterId ? voterSentiments[v.voterId] : undefined);
                           const sentiment = sentimentData?.sentiment as string;
                           if (!sentiment) return null;
                           let badgeColor = 'bg-zinc-100 text-zinc-650 dark:bg-zinc-900 dark:text-zinc-400';
@@ -4172,7 +4399,7 @@ function parseIdArray(...inputs: any[]): string[] {
                     {(() => {
                       const loc = getVoterLocation(editingVoter);
                       const completeness = getCompletenessPercent(editingVoter);
-                      const sData = voterSentiments[editingVoter.id];
+                      const sData = voterSentiments[editingVoter.id] || (editingVoter.voterId ? voterSentiments[editingVoter.voterId] : undefined);
                       const currentSentiment = sentimentStatus || (sData?.sentiment as string) || 'Unassigned';
 
                       return (
@@ -4724,6 +4951,79 @@ function parseIdArray(...inputs: any[]): string[] {
                           {activeFormTab === 'political_sentiment' && (
                             <div className="space-y-6 animate-in fade-in duration-200">
                               
+                              {/* Elector Identity & Assigned Polling Booth Card */}
+                              {editingVoter && (() => {
+                                const vBooth = booths.find(b => b.id === editingVoter.boothId);
+                                const vConstituency = constituencies.find(c => c.id === editingVoter.constituencyId || c.id === vBooth?.constituencyId);
+                                return (
+                                  <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-indigo-50/70 via-blue-50/50 to-zinc-50 dark:from-indigo-950/30 dark:via-blue-950/20 dark:to-zinc-900 border border-indigo-200/80 dark:border-indigo-900/40 shadow-xs space-y-3">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-150 dark:border-indigo-900/50 pb-3">
+                                      <div>
+                                        <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400 block">
+                                          Elector Information
+                                        </span>
+                                        <div className="flex items-center gap-2 mt-0.5">
+                                          <h3 className="text-base font-black text-zinc-900 dark:text-white">
+                                            {editingVoter.name}
+                                          </h3>
+                                          <span className="text-xs font-mono font-bold text-zinc-500 bg-white/80 dark:bg-zinc-800/80 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700">
+                                            {editingVoter.voterId || editingVoter.id}
+                                          </span>
+                                        </div>
+                                      </div>
+
+                                      {/* Polling Booth Badge */}
+                                      <div>
+                                        {vBooth ? (
+                                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300">
+                                            <MapPin size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                            <div>
+                                              <span className="text-[10px] font-black uppercase tracking-wider block leading-none">Linked Booth</span>
+                                              <span className="text-xs font-bold block mt-0.5">#{vBooth.boothNumber} - {vBooth.name}</span>
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/30 text-amber-700 dark:text-amber-400">
+                                            <AlertCircle size={15} className="text-amber-600 shrink-0" />
+                                            <div>
+                                              <span className="text-[10px] font-black uppercase tracking-wider block leading-none">Booth Unassigned</span>
+                                              <span className="text-xs font-bold block mt-0.5">No polling station assigned</span>
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+                                      <div className="p-2.5 rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                                        <span className="text-[9px] font-black uppercase text-zinc-400 block tracking-wider">Constituency</span>
+                                        <span className="font-bold text-zinc-800 dark:text-zinc-200 truncate block mt-0.5">
+                                          {vConstituency?.name || 'General Area'}
+                                        </span>
+                                      </div>
+                                      <div className="p-2.5 rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                                        <span className="text-[9px] font-black uppercase text-zinc-400 block tracking-wider">Village / Ward</span>
+                                        <span className="font-bold text-zinc-800 dark:text-zinc-200 truncate block mt-0.5">
+                                          {editingVoter.village || editingVoter.wardId || '—'}
+                                        </span>
+                                      </div>
+                                      <div className="p-2.5 rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                                        <span className="text-[9px] font-black uppercase text-zinc-400 block tracking-wider">Booth ID</span>
+                                        <span className="font-mono text-[11px] font-bold text-zinc-800 dark:text-zinc-200 truncate block mt-0.5">
+                                          {editingVoter.boothId || 'Unassigned'}
+                                        </span>
+                                      </div>
+                                      <div className="p-2.5 rounded-xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800">
+                                        <span className="text-[9px] font-black uppercase text-zinc-400 block tracking-wider">Mobile Number</span>
+                                        <span className="font-mono text-[11px] font-bold text-zinc-800 dark:text-zinc-200 truncate block mt-0.5">
+                                          {editingVoter.mobile || '—'}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })()}
+
                               {/* Sentiment Header Card */}
                               <div className="p-5 rounded-3xl bg-zinc-50 dark:bg-zinc-900/60 border border-zinc-200 dark:border-zinc-800 space-y-4">
                                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-200/60 dark:border-zinc-800 pb-3">
@@ -4774,10 +5074,27 @@ function parseIdArray(...inputs: any[]): string[] {
                                 {/* Favored Political Party */}
                                 <div>
                                   <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block mb-1">Registered Party Alignment</span>
-                                  <div className="p-3 rounded-2xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
-                                    <span className="text-xs font-bold text-zinc-900 dark:text-white">
-                                      {parties.find(p => p.id === sentimentFavoredPartyId || p.name === sentimentFavoredPartyId)?.name || sentimentFavoredPartyId || (sData?.favoredPartyName as string) || '-'}
-                                    </span>
+                                  <div className="p-3 rounded-2xl bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 flex items-center gap-2.5">
+                                    {(() => {
+                                      const matchParty = parties.find(p => 
+                                        p.id === sentimentFavoredPartyId || 
+                                        p.name?.toLowerCase() === sentimentFavoredPartyId?.toLowerCase() || 
+                                        p.id === selectedPartyValue
+                                      );
+                                      const displayName = matchParty?.name || sentimentFavoredPartyId || (sData?.favoredPartyName as string) || '-';
+                                      return (
+                                        <>
+                                          {matchParty?.color && (
+                                            <span className="w-2.5 h-2.5 rounded-full shrink-0 shadow-xs" style={{ backgroundColor: matchParty.color }} />
+                                          )}
+                                          {matchParty?.symbol && <span className="text-xs shrink-0">{matchParty.symbol}</span>}
+                                          <span className="text-xs font-bold text-zinc-900 dark:text-white">
+                                            {displayName}
+                                            {matchParty?.code ? ` (${matchParty.code})` : ''}
+                                          </span>
+                                        </>
+                                      );
+                                    })()}
                                   </div>
                                 </div>
 
@@ -4814,10 +5131,15 @@ function parseIdArray(...inputs: any[]): string[] {
                                   
                                   <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
                                     {voterAssessments.map(a => (
-                                      <div key={a.id} className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2">
+                                      <div 
+                                        key={a.id} 
+                                        onClick={() => applyAdminAssessment(a)}
+                                        className="p-3 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 space-y-2 cursor-pointer hover:border-blue-400 dark:hover:border-blue-500 transition-all shadow-2xs"
+                                        title="Click to view and switch to this Admin's assessment context"
+                                      >
                                         <div className="flex items-center justify-between">
                                           <span className="text-xs font-bold text-zinc-900 dark:text-white">
-                                            👑 {a.admin_name}
+                                            👑 {a.admin_name || a.adminName || 'Admin'}
                                           </span>
                                           <span className={`px-2 py-0.5 rounded text-[9px] font-black uppercase ${
                                             a.sentiment === 'Support' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-400' :
@@ -4985,22 +5307,33 @@ function parseIdArray(...inputs: any[]): string[] {
                             </select>
                           </div>
                           <div className="space-y-1.5 flex flex-col">
-                            <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Party Alignment / Favored</label>
+                            <div className="flex items-center justify-between">
+                              <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider">Party Alignment / Favored</label>
+                              <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50 normal-case">
+                                From Elections Setup ({parties.length})
+                              </span>
+                            </div>
                             <select
-                              value={sentimentFavoredPartyId}
+                              value={selectedPartyValue}
                               onChange={e => {
-                                setSentimentFavoredPartyId(e.target.value);
-                                const sel = parties.find(p => p.id === e.target.value || p.name === e.target.value);
-                                setFormData(prev => ({ ...prev, partyInclination: sel?.name || e.target.value }));
+                                const chosenVal = e.target.value;
+                                setSentimentFavoredPartyId(chosenVal);
+                                const sel = parties.find(p => p.id === chosenVal || p.name === chosenVal);
+                                setFormData(prev => ({ ...prev, partyInclination: sel?.name || chosenVal }));
                               }}
                               className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900 cursor-pointer"
                             >
                               <option value="">-- Choose Inclined Party --</option>
                               {parties.map(p => (
                                 <option key={p.id} value={p.id}>
-                                  {p.name} {p.code ? `(${p.code})` : ''}
+                                  {p.symbol ? `${p.symbol} ` : ''}{p.name} {p.code ? `(${p.code})` : ''}
                                 </option>
                               ))}
+                              {sentimentFavoredPartyId && !parties.some(p => p.id === selectedPartyValue) && (
+                                <option value={sentimentFavoredPartyId}>
+                                  {sentimentFavoredPartyId} (Legacy / Unlisted)
+                                </option>
+                              )}
                             </select>
                           </div>
                         </div>
@@ -5517,6 +5850,121 @@ function parseIdArray(...inputs: any[]): string[] {
                         </div>
                       ) : (
                         <div className="space-y-4">
+                          {/* 1. Linked Polling Booth & Elector Context Banner */}
+                          {(() => {
+                            const currentBooth = booths.find(b => b.id === formData.boothId);
+                            const currentConstituency = constituencies.find(c => c.id === formData.constituencyId || c.id === currentBooth?.constituencyId);
+                            const currentMandal = mandals.find(m => m.id === formData.mandalId);
+                            const currentWard = wards.find(w => w.id === formData.wardId);
+                            const currentVillage = formData.village || '';
+                            const voterName = formData.name || editingVoter?.name || 'Voter';
+                            const voterEpic = formData.voterId || editingVoter?.voterId || 'No EPIC';
+
+                            return (
+                              <div className="p-4 sm:p-5 rounded-3xl bg-gradient-to-br from-indigo-50/70 via-blue-50/50 to-zinc-50 dark:from-indigo-950/30 dark:via-blue-950/20 dark:to-zinc-900 border border-indigo-200/80 dark:border-indigo-900/40 shadow-xs space-y-3.5">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-150 dark:border-indigo-900/50 pb-3">
+                                  <div className="space-y-0.5">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-[10px] font-black uppercase tracking-widest text-indigo-600 dark:text-indigo-400">
+                                        Target Elector
+                                      </span>
+                                      <span className="text-xs font-mono font-bold text-zinc-500 bg-white/80 dark:bg-zinc-800/80 px-2 py-0.5 rounded-md border border-zinc-200 dark:border-zinc-700">
+                                        {voterEpic}
+                                      </span>
+                                    </div>
+                                    <h3 className="text-base font-black text-zinc-900 dark:text-white flex items-center gap-2">
+                                      <span>{voterName}</span>
+                                      {formData.relationName && (
+                                        <span className="text-xs font-medium text-zinc-500">
+                                          ({formData.relationType || 'Relative'}: {formData.relationName})
+                                        </span>
+                                      )}
+                                    </h3>
+                                  </div>
+
+                                  {/* Current Booth Status Badge */}
+                                  <div>
+                                    {currentBooth ? (
+                                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-950/40 border border-emerald-500/30 text-emerald-700 dark:text-emerald-300">
+                                        <MapPin size={15} className="text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                        <div className="text-left">
+                                          <span className="text-[10px] font-black uppercase tracking-wider block leading-none">Assigned Booth</span>
+                                          <span className="text-xs font-bold leading-tight block mt-0.5">#{currentBooth.boothNumber} - {currentBooth.name}</span>
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-amber-500/10 dark:bg-amber-950/40 border border-amber-500/30 text-amber-700 dark:text-amber-400">
+                                        <AlertCircle size={15} className="text-amber-600 shrink-0" />
+                                        <div className="text-left">
+                                          <span className="text-[10px] font-black uppercase tracking-wider block leading-none">Booth Unassigned</span>
+                                          <span className="text-xs font-bold leading-tight block mt-0.5">Please link a booth below</span>
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Quick Polling Booth Selector & Metadata Bar */}
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 pt-0.5">
+                                  {/* Polling Booth Selector */}
+                                  <div className="sm:col-span-2 space-y-1.5">
+                                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 flex items-center justify-between">
+                                      <span className="flex items-center gap-1.5">
+                                        <MapPin size={12} className="text-indigo-600 dark:text-indigo-400" />
+                                        Linked Polling Booth
+                                      </span>
+                                      {currentBooth && (
+                                        <span className="text-[10px] font-mono text-zinc-400">ID: {currentBooth.id}</span>
+                                      )}
+                                    </label>
+                                    <select
+                                      value={formData.boothId}
+                                      onChange={e => {
+                                        const newBoothId = e.target.value;
+                                        const foundB = booths.find(b => b.id === newBoothId);
+                                        setFormData(prev => ({
+                                          ...prev,
+                                          boothId: newBoothId,
+                                          constituencyId: foundB?.constituencyId || prev.constituencyId
+                                        }));
+                                      }}
+                                      className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900 border border-indigo-200 dark:border-indigo-900/60 focus:ring-2 focus:ring-indigo-500"
+                                    >
+                                      <option value="">-- Select / Assign Polling Booth --</option>
+                                      {booths.map(b => (
+                                        <option key={b.id} value={b.id}>
+                                          #{b.boothNumber} - {b.name} {b.constituencyId && constituencies.find(c => c.id === b.constituencyId)?.name ? `(${constituencies.find(c => c.id === b.constituencyId)?.name})` : ''}
+                                        </option>
+                                      ))}
+                                    </select>
+                                  </div>
+
+                                  {/* Location Summary Pill */}
+                                  <div className="space-y-1.5">
+                                    <label className="text-[10px] font-black uppercase tracking-wider text-zinc-600 dark:text-zinc-300 block">
+                                      Constituency & Area
+                                    </label>
+                                    <div className="h-11 px-3.5 py-2 rounded-xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 flex flex-col justify-center text-xs">
+                                      <span className="font-bold text-zinc-800 dark:text-zinc-200 truncate">
+                                        {currentConstituency?.name || (currentBooth?.constituencyId ? constituencies.find(c => c.id === currentBooth.constituencyId)?.name : 'Constituency: —') || 'General Constituency'}
+                                      </span>
+                                      <span className="text-[10px] text-zinc-400 truncate">
+                                        {currentVillage ? `Village: ${currentVillage}` : (currentWard?.name ? `Ward: ${currentWard.name}` : (currentMandal?.name ? `Mandal: ${currentMandal.name}` : 'Electoral Ward / Village'))}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {!formData.boothId && (
+                                  <div className="p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-700 dark:text-amber-300 text-xs flex items-center gap-2 font-medium">
+                                    <AlertTriangle size={14} className="shrink-0 text-amber-600" />
+                                    <span>Assigning a polling booth links this sentiment record to that booth's analytics and predictions tally.</span>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })()}
+
                           <h4 className="text-[11px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-[0.2em] border-b border-zinc-200 dark:border-zinc-800 pb-1">Political Sentiment Profile</h4>
                           
                           {/* Admin Context Selector - visible to Super Admin or read-only info for other roles */}
@@ -5530,22 +5978,47 @@ function parseIdArray(...inputs: any[]): string[] {
                               </div>
                               <select 
                                 value={sentimentAdminId} 
-                                onChange={e => {
+                                onChange={async e => {
                                   const newAdmId = e.target.value;
                                   setSentimentAdminId(newAdmId);
-                                  const matching = voterAssessments.find(a => a.admin_id === newAdmId);
-                                  if (matching) {
-                                    applyAdminAssessment(matching);
+                                  if (editingVoter) {
+                                    await loadVoterSentiment(editingVoter.id, newAdmId);
+                                  } else {
+                                    setSentimentStatus('Neutral');
+                                    setSentimentNotes('');
+                                    setSentimentStrength(3);
+                                    setSentimentFavoredPartyId('');
+                                    setSentimentIsKaryakarta(false);
+                                    setLastSentimentUpdatedBy('');
+                                    setLastSentimentUpdatedAt('');
                                   }
                                 }} 
                                 className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900"
                               >
                                 <option value="">-- Choose Admin Context --</option>
-                                {allAdmins.map(adm => (
-                                  <option key={adm.uid} value={adm.uid}>{adm.username} ({adm.role === 'super_admin' ? 'Super Admin' : 'Admin'} - {adm.email})</option>
-                                ))}
+                                {allAdmins.map(adm => {
+                                  const hasAssessment = voterAssessments.some(a => String(a.admin_id || a.adminId) === String(adm.uid));
+                                  return (
+                                    <option key={adm.uid} value={adm.uid}>
+                                      {hasAssessment ? '✓ ' : '○ '} {adm.username} ({adm.role === 'super_admin' ? 'Super Admin' : 'Admin'} - {adm.email}) {hasAssessment ? '(Assessed)' : '(Not Assessed)'}
+                                    </option>
+                                  );
+                                })}
                               </select>
-                              <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">*As Super Admin, you can switch between any administrator to inspect or record their linked assessment.</p>
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
+                                <p className="text-[9px] text-zinc-500 dark:text-zinc-400 leading-tight">*As Super Admin, you can switch between any administrator to inspect or record their linked assessment.</p>
+                                {sentimentAdminId && (
+                                  <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full shrink-0 ${
+                                    voterAssessments.some(a => String(a.admin_id || a.adminId) === String(sentimentAdminId))
+                                      ? 'bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300'
+                                      : 'bg-amber-100 dark:bg-amber-950 text-amber-700 dark:text-amber-300'
+                                  }`}>
+                                    {voterAssessments.some(a => String(a.admin_id || a.adminId) === String(sentimentAdminId))
+                                      ? 'Existing Admin Assessment Loaded'
+                                      : 'New Assessment for this Admin'}
+                                  </span>
+                                )}
+                              </div>
                             </div>
                           ) : (
                             <div className="p-3 bg-zinc-50 dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 flex justify-between items-center">
@@ -5591,28 +6064,39 @@ function parseIdArray(...inputs: any[]): string[] {
                           {/* Registered Political Party Preference */}
                           <div className="space-y-2">
                             <label className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 tracking-wider block flex items-center justify-between">
-                              <span>Registered Political Party Preference / Alignment</span>
+                              <span className="flex items-center gap-1.5">
+                                <span>Registered Political Party Preference / Alignment</span>
+                                <span className="text-[9px] text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.5 rounded border border-emerald-200 dark:border-emerald-800/50 normal-case">
+                                  From Elections Setup ({parties.length})
+                                </span>
+                              </span>
                               {sentimentFavoredPartyId && (
                                 <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold lowercase">
-                                  Selected: {parties.find(p => p.id === sentimentFavoredPartyId || p.name === sentimentFavoredPartyId)?.name || sentimentFavoredPartyId}
+                                  Selected: {parties.find(p => p.id === sentimentFavoredPartyId || p.name === sentimentFavoredPartyId || p.id === selectedPartyValue)?.name || sentimentFavoredPartyId}
                                 </span>
                               )}
                             </label>
                             <select
-                              value={sentimentFavoredPartyId}
+                              value={selectedPartyValue}
                               onChange={e => {
-                                setSentimentFavoredPartyId(e.target.value);
-                                const sel = parties.find(p => p.id === e.target.value || p.name === e.target.value);
-                                setFormData(prev => ({ ...prev, partyInclination: sel?.name || e.target.value }));
+                                const chosenVal = e.target.value;
+                                setSentimentFavoredPartyId(chosenVal);
+                                const sel = parties.find(p => p.id === chosenVal || p.name === chosenVal);
+                                setFormData(prev => ({ ...prev, partyInclination: sel?.name || chosenVal }));
                               }}
                               className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 cursor-pointer focus:ring-2 focus:ring-blue-500"
                             >
                               <option value="">-- Choose Inclined / Favored Party --</option>
                               {parties.map(p => (
                                 <option key={p.id} value={p.id}>
-                                  {p.name} {p.code ? `(${p.code})` : ''}
+                                  {p.symbol ? `${p.symbol} ` : ''}{p.name} {p.code ? `(${p.code})` : ''}
                                 </option>
                               ))}
+                              {sentimentFavoredPartyId && !parties.some(p => p.id === selectedPartyValue) && (
+                                <option value={sentimentFavoredPartyId}>
+                                  {sentimentFavoredPartyId} (Legacy / Unlisted)
+                                </option>
+                              )}
                             </select>
                           </div>
 

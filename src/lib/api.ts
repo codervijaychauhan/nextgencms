@@ -152,7 +152,8 @@ export async function apiRequest<T = any>(
 
     // 2. SessionStorage cache for master routes and voters
     if (isMasterRoute(endpoint) || endpoint.includes('/api/voters') || endpoint.includes('/api/voter-sentiments')) {
-      const sessionData = getSessionCached<T>(endpoint);
+      const sessionKey = `${endpoint}#${authKey}`;
+      const sessionData = getSessionCached<T>(sessionKey);
       if (sessionData) {
         clientCache.set(cacheKey, { data: sessionData, expiresAt: Date.now() + 300_000 });
         return sessionData;
@@ -186,13 +187,16 @@ export async function apiRequest<T = any>(
 
     if (method === 'GET') {
       let ttl = 30_000; // default 30s
+      const sessionKey = `${endpoint}#${authKey}`;
       if (isMasterRoute(endpoint)) {
         ttl = 600_000; // 10 mins for demographics/parties/elections
-        setSessionCached(endpoint, data, ttl);
+        setSessionCached(sessionKey, data, ttl);
       } else if (endpoint.includes('/api/voters')) {
         ttl = 180_000; // 3 mins for voter list queries
+        setSessionCached(sessionKey, data, ttl);
       } else if (endpoint.includes('/api/voter-sentiments') || endpoint.includes('/api/users')) {
         ttl = 180_000; // 3 mins
+        setSessionCached(sessionKey, data, ttl);
       }
       clientCache.set(cacheKey, { data, expiresAt: Date.now() + ttl });
     }
