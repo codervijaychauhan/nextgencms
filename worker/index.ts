@@ -1442,7 +1442,8 @@ export default {
       }
 
       // ------------------------------------------------------------------------
-      // Mandals / Blocks / Areas Master
+      // ------------------------------------------------------------------------
+      // Mandals / Blocks / Areas Master (Synchronized with Voters, Booths & Members)
       // ------------------------------------------------------------------------
       if (pathname === '/api/mandals' && method === 'GET') {
         const constituencyId = url.searchParams.get('constituencyId') || url.searchParams.get('constituency_id') || '';
@@ -1451,25 +1452,55 @@ export default {
         const districtIds = url.searchParams.get('districtIds') || '';
         const stateId = url.searchParams.get('stateId') || url.searchParams.get('state_id') || '';
         const stateIds = url.searchParams.get('stateIds') || '';
+        const reqAdmin = url.searchParams.get('adminId') || adminCtx.requestedAdminId || '';
 
-        const cacheKey = `master_mandals_${constituencyId}_${constituencyIds}_${districtId}_${districtIds}_${stateId}_${stateIds}`;
-        const cached = getCached<any[]>(cacheKey);
-        if (cached) {
-          return jsonResponse(cached, 200, 120);
-        }
+        await env.DB.prepare(`
+          CREATE TABLE IF NOT EXISTS mandal_directories (
+            id TEXT PRIMARY KEY,
+            mandal_id TEXT NOT NULL,
+            admin_id TEXT NOT NULL,
+            category_key TEXT NOT NULL,
+            label TEXT NOT NULL,
+            english_label TEXT NOT NULL,
+            target_count INTEGER DEFAULT 10,
+            icon TEXT DEFAULT 'Users',
+            color_class TEXT DEFAULT 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+          )
+        `).run().catch(() => {});
 
         let query = `
           SELECT m.*, 
                  c.name as constituency_name, 
                  d.name as district_name, 
-                 s.name as state_name
+                 s.name as state_name,
+                 u.name as admin_name,
+                 u.email as admin_email,
+                 (SELECT COUNT(1) FROM mandal_members mm WHERE mm.mandal_id = m.id) as member_count,
+                 (SELECT COUNT(1) FROM booths b WHERE b.mandal_id = m.id) as booth_count,
+                 (SELECT COUNT(1) FROM voters v WHERE v.mandal_id = m.id OR v.booth_id IN (SELECT b2.id FROM booths b2 WHERE b2.mandal_id = m.id) OR v.booth_id IN (SELECT b3.booth_number FROM booths b3 WHERE b3.mandal_id = m.id)) as real_voter_count,
+                 (CASE 
+                    WHEN (SELECT COUNT(1) FROM mandal_directories md WHERE md.mandal_id = m.id) > 0 
+                    THEN (SELECT COUNT(1) FROM mandal_directories md WHERE md.mandal_id = m.id)
+                    ELSE 8 
+                  END) as committee_count
           FROM mandals m 
           LEFT JOIN constituencies c ON m.constituency_id = c.id
           LEFT JOIN districts d ON (m.district_id = d.id OR c.district_id = d.id)
           LEFT JOIN states s ON (m.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id)
+          LEFT JOIN users u ON (m.admin_id = u.id OR (m.admin_id IS NOT NULL AND LOWER(m.admin_id) = LOWER(u.email)))
         `;
         const binds: any[] = [];
         const whereParts: string[] = [];
+
+        if (reqAdmin && reqAdmin !== 'All') {
+          whereParts.push('(m.admin_id = ? OR LOWER(m.admin_id) = LOWER(?))');
+          binds.push(reqAdmin, reqAdmin);
+        } else if (!adminCtx.isSuperAdmin && adminCtx.adminId) {
+          whereParts.push('(m.admin_id = ? OR m.admin_id = ? OR LOWER(m.admin_id) = LOWER(?))');
+          binds.push(adminCtx.adminId, adminCtx.userId, adminCtx.user?.email || '');
+        }
 
         if (constituencyId && constituencyId !== 'all') {
           whereParts.push('m.constituency_id = ?');
@@ -1510,26 +1541,11 @@ export default {
         query += ' ORDER BY m.name ASC';
 
         const rows = await env.DB.prepare(query).bind(...binds).all<any>().catch(async () => {
-          await env.DB.prepare(`
-            CREATE TABLE IF NOT EXISTS mandals (
-              id TEXT PRIMARY KEY,
-              name TEXT NOT NULL,
-              mandal_code TEXT,
-              president_name TEXT,
-              president_phone TEXT,
-              voter_count INTEGER DEFAULT 0,
-              population INTEGER DEFAULT 0,
-              state_id TEXT,
-              district_id TEXT,
-              constituency_id TEXT,
-              admin_id TEXT,
-              created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            )
-          `).run();
-          return { results: [] };
+          let fallback = 'SELECT m.*, c.name as constituency_name, d.name as district_name, s.name as state_name FROM mandals m LEFT JOIN constituencies c ON m.constituency_id = c.id LEFT JOIN districts d ON (m.district_id = d.id OR c.district_id = d.id) LEFT JOIN states s ON (m.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id) ORDER BY m.name ASC';
+          return await env.DB.prepare(fallback).all<any>().catch(() => ({ results: [] }));
         });
-        setCached(cacheKey, rows?.results || [], 600_000);
-        return jsonResponse(rows?.results || [], 200, 120);
+
+        return jsonResponse(rows?.results || [], 200, 30);
       }
 
       if (pathname === '/api/mandals' && method === 'POST') {
@@ -2693,50 +2709,8 @@ export default {
       }
 
       // ------------------------------------------------------------------------
-      // 4. MANDALS & MANDAL MEMBERS (Admin Scoped)
+      // 4. MANDALS & MANDAL MEMBERS (Admin Scoped Operations)
       // ------------------------------------------------------------------------
-
-      if (pathname === '/api/mandals' && method === 'GET') {
-        let query = `
-          SELECT m.*, 
-                 c.name as constituency_name, 
-                 d.name as district_name, 
-                 s.name as state_name,
-                 u.name as admin_name,
-                 u.email as admin_email,
-                 (SELECT COUNT(*) FROM mandal_members mm WHERE mm.mandal_id = m.id) as member_count,
-                 (SELECT COUNT(*) FROM booths b WHERE b.mandal_id = m.id) as booth_count,
-                 (SELECT COUNT(*) FROM voters v WHERE v.mandal_id = m.id) as real_voter_count
-          FROM mandals m
-          LEFT JOIN constituencies c ON m.constituency_id = c.id
-          LEFT JOIN districts d ON m.district_id = d.id OR c.district_id = d.id
-          LEFT JOIN states s ON m.state_id = s.id OR d.state_id = s.id OR c.state_id = s.id
-          LEFT JOIN users u ON (m.admin_id = u.id OR (m.admin_id IS NOT NULL AND LOWER(m.admin_id) = LOWER(u.email)))
-        `;
-        const binds: any[] = [];
-        const reqAdmin = url.searchParams.get('adminId') || adminCtx.requestedAdminId;
-
-        if (adminCtx.isSuperAdmin) {
-          if (reqAdmin && reqAdmin !== 'All' && reqAdmin !== '') {
-            query += ' WHERE (m.admin_id = ? OR LOWER(m.admin_id) = LOWER(?))';
-            binds.push(reqAdmin, reqAdmin);
-          }
-        } else {
-          // Regular Admin only sees their own team mandals
-          query += ' WHERE (m.admin_id = ? OR m.admin_id = ? OR LOWER(m.admin_id) = LOWER(?))';
-          binds.push(adminCtx.adminId, adminCtx.userId, adminCtx.user?.email || '');
-        }
-
-        const constId = url.searchParams.get('constituencyId');
-        if (constId) {
-          query += (binds.length > 0 ? ' AND ' : ' WHERE ') + 'm.constituency_id = ?';
-          binds.push(constId);
-        }
-
-        query += ' ORDER BY m.name ASC';
-        const { results } = await env.DB.prepare(query).bind(...binds).all();
-        return jsonResponse(results);
-      }
 
       if (pathname === '/api/mandals' && method === 'POST') {
         const b: any = await request.json();
@@ -2915,6 +2889,200 @@ export default {
 
         await env.DB.prepare('DELETE FROM mandal_members WHERE id = ?').bind(memberId).run();
         return jsonResponse({ success: true });
+      }
+
+      // Mandal Custom Directories / Committees (Admin Scoped)
+      if (pathname.startsWith('/api/mandals/') && pathname.endsWith('/directories') && method === 'GET') {
+        const mandalId = decodeURIComponent(pathname.replace('/api/mandals/', '').replace('/directories', ''));
+        const mandal = await env.DB.prepare('SELECT * FROM mandals WHERE id = ?').bind(mandalId).first<any>();
+        if (!mandal) {
+          return jsonResponse({ error: 'Mandal not found' }, 404);
+        }
+
+        let query = 'SELECT * FROM mandal_directories WHERE mandal_id = ? ORDER BY created_at ASC';
+        const binds: any[] = [mandalId];
+
+        let { results } = await env.DB.prepare(query).bind(...binds).all<any>().catch(async (e: any) => {
+          if (String(e).includes('no such table')) {
+            await env.DB.prepare(`
+              CREATE TABLE IF NOT EXISTS mandal_directories (
+                id TEXT PRIMARY KEY,
+                mandal_id TEXT NOT NULL,
+                admin_id TEXT NOT NULL,
+                category_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                english_label TEXT NOT NULL,
+                target_count INTEGER DEFAULT 10,
+                icon TEXT DEFAULT 'Users',
+                color_class TEXT DEFAULT 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+              )
+            `).run();
+          }
+          return { results: [] };
+        });
+
+        // If no directories exist yet for this mandal, seed the 8 core categories
+        if (!results || results.length === 0) {
+          const DEFAULT_CATEGORIES = [
+            { key: 'office_bearers', label: 'मण्डल पदाधिकारी व कार्यसमिति सदस्य', english_label: 'Mandal Office Bearers & Executive Committee Members', target_count: 45, icon: 'Shield', color_class: 'text-blue-500 bg-blue-50 dark:bg-blue-950/20' },
+            { key: 'morcha_leaders', label: 'मोर्चा के अध्यक्ष व महामंत्री', english_label: 'Morcha Presidents & General Secretaries', target_count: 21, icon: 'Award', color_class: 'text-amber-500 bg-amber-50 dark:bg-amber-950/20' },
+            { key: 'district_representatives', label: 'मण्डल से जिला में पदाधिकारी व कार्यसमिति सदस्य', english_label: 'Mandal to District Office Bearers & Executive Members', target_count: 8, icon: 'Layers', color_class: 'text-purple-500 bg-purple-50 dark:bg-purple-950/20' },
+            { key: 'morcha_coordinators', label: 'मण्डल से जिला में मोर्चों में व प्रकोष्ठ में संयोजक / सह-संयोजक', english_label: 'Convenor / Co-convenor in Morchas & Cells (Mandal to District)', target_count: 10, icon: 'Briefcase', color_class: 'text-teal-500 bg-teal-50 dark:bg-teal-950/20' },
+            { key: 'state_representatives', label: 'मण्डल से प्रदेश भाजपा, मोर्चा एवं प्रकोष्ठ', english_label: 'Mandal to State BJP, Morcha & Cells', target_count: 10, icon: 'Globe', color_class: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-950/20' },
+            { key: 'cell_convenors', label: 'सभी प्रकोष्ठों के संयोजक', english_label: 'Convenors of all Cells', target_count: 17, icon: 'SlidersHorizontal', color_class: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' },
+            { key: 'former_representatives', label: 'चुने हुए पूर्व प्रतिनिधि', english_label: 'Elected Former Representatives', target_count: 20, icon: 'UserCheck', color_class: 'text-rose-500 bg-rose-50 dark:bg-rose-950/20' },
+            { key: 'gram_kendra_pramukh', label: 'ग्राम केन्द्र प्रमुख', english_label: 'Gram Kendra Pramukh (Village Center Chiefs)', target_count: 15, icon: 'MapPin', color_class: 'text-orange-500 bg-orange-50 dark:bg-orange-950/20' }
+          ];
+
+          for (const cat of DEFAULT_CATEGORIES) {
+            const dirId = `mdir_${cat.key}_${mandalId}`;
+            await env.DB.prepare(`
+              INSERT INTO mandal_directories (id, mandal_id, admin_id, category_key, label, english_label, target_count, icon, color_class)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+              dirId,
+              mandalId,
+              mandal.admin_id || 'default',
+              cat.key,
+              cat.label,
+              cat.english_label,
+              cat.target_count,
+              cat.icon,
+              cat.color_class
+            ).run().catch(() => {});
+          }
+
+          const seeded = await env.DB.prepare(query).bind(...binds).all<any>().catch(() => ({ results: [] }));
+          results = seeded.results;
+        }
+
+        return jsonResponse(results || []);
+      }
+
+      if (pathname.startsWith('/api/mandals/') && pathname.endsWith('/directories') && method === 'POST') {
+        const mandalId = decodeURIComponent(pathname.replace('/api/mandals/', '').replace('/directories', ''));
+        const mandal = await env.DB.prepare('SELECT * FROM mandals WHERE id = ?').bind(mandalId).first<any>();
+        if (!mandal) {
+          return jsonResponse({ error: 'Mandal not found' }, 404);
+        }
+
+        const b: any = await request.json();
+        const id = b.id || `mdir_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+        const dirAdminId = b.admin_id || b.adminId || mandal.admin_id || adminCtx.adminId || 'default';
+        const categoryKey = (b.category_key || b.categoryKey || `custom_${Date.now()}`).trim();
+        const label = (b.label || 'नई डायरेक्टरी').trim();
+        const englishLabel = (b.english_label || b.englishLabel || label).trim();
+        const targetCount = Number(b.target_count || b.targetCount || 10);
+        const icon = b.icon || 'Users';
+        const colorClass = b.color_class || b.colorClass || 'text-blue-500 bg-blue-50 dark:bg-blue-950/20';
+
+        await env.DB.prepare(`
+          INSERT INTO mandal_directories (id, mandal_id, admin_id, category_key, label, english_label, target_count, icon, color_class)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).bind(
+          id,
+          mandalId,
+          dirAdminId,
+          categoryKey,
+          label,
+          englishLabel,
+          targetCount,
+          icon,
+          colorClass
+        ).run().catch(async (e: any) => {
+          if (String(e).includes('no such table')) {
+            await env.DB.prepare(`
+              CREATE TABLE IF NOT EXISTS mandal_directories (
+                id TEXT PRIMARY KEY,
+                mandal_id TEXT NOT NULL,
+                admin_id TEXT NOT NULL,
+                category_key TEXT NOT NULL,
+                label TEXT NOT NULL,
+                english_label TEXT NOT NULL,
+                target_count INTEGER DEFAULT 10,
+                icon TEXT DEFAULT 'Users',
+                color_class TEXT DEFAULT 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+              )
+            `).run();
+
+            await env.DB.prepare(`
+              INSERT INTO mandal_directories (id, mandal_id, admin_id, category_key, label, english_label, target_count, icon, color_class)
+              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `).bind(
+              id,
+              mandalId,
+              dirAdminId,
+              categoryKey,
+              label,
+              englishLabel,
+              targetCount,
+              icon,
+              colorClass
+            ).run();
+          }
+        });
+
+        return jsonResponse({ 
+          success: true, 
+          id, 
+          mandal_id: mandalId, 
+          admin_id: dirAdminId, 
+          category_key: categoryKey, 
+          label, 
+          english_label: englishLabel, 
+          target_count: targetCount, 
+          icon, 
+          color_class: colorClass 
+        });
+      }
+
+      if (pathname.startsWith('/api/mandals/directories/') && method === 'PUT') {
+        const dirId = decodeURIComponent(pathname.substring('/api/mandals/directories/'.length));
+        let dir = await env.DB.prepare('SELECT * FROM mandal_directories WHERE id = ?').bind(dirId).first<any>();
+        if (!dir && dirId.startsWith('core_')) {
+          const catKey = dirId.replace('core_', '');
+          dir = await env.DB.prepare('SELECT * FROM mandal_directories WHERE category_key = ?').bind(catKey).first<any>();
+        }
+        if (!dir) {
+          return jsonResponse({ error: 'Directory not found' }, 404);
+        }
+
+        const realId = dir.id;
+        const b: any = await request.json();
+        await env.DB.prepare(`
+          UPDATE mandal_directories 
+          SET label = COALESCE(?, label), english_label = COALESCE(?, english_label), target_count = COALESCE(?, target_count), icon = COALESCE(?, icon), color_class = COALESCE(?, color_class), updated_at = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `).bind(
+          b.label || null,
+          b.english_label || b.englishLabel || null,
+          b.target_count !== undefined ? Number(b.target_count) : (b.targetCount !== undefined ? Number(b.targetCount) : null),
+          b.icon || null,
+          b.color_class || b.colorClass || null,
+          realId
+        ).run();
+        return jsonResponse({ success: true, id: realId });
+      }
+
+      if (pathname.startsWith('/api/mandals/directories/') && method === 'DELETE') {
+        const dirId = decodeURIComponent(pathname.substring('/api/mandals/directories/'.length));
+        let dir = await env.DB.prepare('SELECT * FROM mandal_directories WHERE id = ?').bind(dirId).first<any>();
+        if (!dir && dirId.startsWith('core_')) {
+          const catKey = dirId.replace('core_', '');
+          dir = await env.DB.prepare('SELECT * FROM mandal_directories WHERE category_key = ?').bind(catKey).first<any>();
+        }
+        if (!dir) {
+          return jsonResponse({ error: 'Directory not found' }, 404);
+        }
+
+        const realId = dir.id;
+        await env.DB.prepare('DELETE FROM mandal_directories WHERE id = ?').bind(realId).run();
+        await env.DB.prepare('DELETE FROM mandal_members WHERE mandal_id = ? AND category_key = ?').bind(dir.mandal_id, dir.category_key).run().catch(() => {});
+        return jsonResponse({ success: true, id: realId });
       }
 
       // ------------------------------------------------------------------------
@@ -3213,32 +3381,96 @@ export default {
       }
 
       // ------------------------------------------------------------------------
-      // 7. BENEFITS / WELFARE (Admin Scoped)
+      // 7. BENEFITS / WELFARE (Synchronized with Voters, Booths & Mandals)
       // ------------------------------------------------------------------------
 
       if (pathname === '/api/benefits' && method === 'GET') {
-        let query = 'SELECT * FROM benefits';
+        const voterId = url.searchParams.get('voterId') || url.searchParams.get('voter_id');
+        const voterDocId = url.searchParams.get('voterDocId') || url.searchParams.get('voter_doc_id');
+        const boothId = url.searchParams.get('boothId') || url.searchParams.get('booth_id');
+        const mandalId = url.searchParams.get('mandalId') || url.searchParams.get('mandal_id');
+
+        let query = `
+          SELECT b.*,
+                 v.mobile as voter_mobile,
+                 v.is_karyakarta as is_karyakarta,
+                 COALESCE(v.booth_id, '') as booth_id,
+                 COALESCE(booth.booth_number, '') as booth_number,
+                 COALESCE(booth.name, '') as booth_name,
+                 COALESCE(v.mandal_id, booth.mandal_id, '') as mandal_id,
+                 COALESCE(m.name, '') as mandal_name
+          FROM benefits b
+          LEFT JOIN voters v ON (b.voter_doc_id = v.id OR b.voter_id = v.voter_id)
+          LEFT JOIN booths booth ON (v.booth_id = booth.id OR v.booth_id = booth.booth_number)
+          LEFT JOIN mandals m ON (v.mandal_id = m.id OR booth.mandal_id = m.id)
+        `;
         const binds: any[] = [];
+        const whereParts: string[] = [];
+
         if (!adminCtx.isSuperAdmin || adminCtx.requestedAdminId) {
-          query += ' WHERE admin_id = ?';
+          whereParts.push('b.admin_id = ?');
           binds.push(adminCtx.adminId);
         }
-        query += ' ORDER BY distribution_date DESC, created_at DESC';
+        if (voterId) {
+          whereParts.push('(b.voter_id = ? OR v.voter_id = ?)');
+          binds.push(voterId, voterId);
+        }
+        if (voterDocId) {
+          whereParts.push('(b.voter_doc_id = ? OR v.id = ?)');
+          binds.push(voterDocId, voterDocId);
+        }
+        if (boothId) {
+          whereParts.push('(v.booth_id = ? OR booth.id = ? OR booth.booth_number = ?)');
+          binds.push(boothId, boothId, boothId);
+        }
+        if (mandalId) {
+          whereParts.push('(v.mandal_id = ? OR booth.mandal_id = ? OR m.id = ?)');
+          binds.push(mandalId, mandalId, mandalId);
+        }
 
-        const { results } = await env.DB.prepare(query).bind(...binds).all<any>();
+        if (whereParts.length > 0) {
+          query += ` WHERE ${whereParts.join(' AND ')}`;
+        }
+        query += ' ORDER BY b.distribution_date DESC, b.created_at DESC';
+
+        let results: any[] = [];
+        try {
+          const resp = await env.DB.prepare(query).bind(...binds).all<any>();
+          results = resp.results || [];
+        } catch {
+          // Fallback query if joins encounter legacy fields
+          let fbQuery = 'SELECT * FROM benefits';
+          const fbBinds: any[] = [];
+          if (!adminCtx.isSuperAdmin || adminCtx.requestedAdminId) {
+            fbQuery += ' WHERE admin_id = ?';
+            fbBinds.push(adminCtx.adminId);
+          }
+          fbQuery += ' ORDER BY distribution_date DESC, created_at DESC';
+          const fbResp = await env.DB.prepare(fbQuery).bind(...fbBinds).all<any>().catch(() => ({ results: [] }));
+          results = fbResp.results || [];
+        }
+
         const formatted = results.map(b => {
           let witnesses = [];
-          try { witnesses = b.witnesses ? JSON.parse(b.witnesses) : []; } catch { }
+          try { witnesses = b.witnesses ? (typeof b.witnesses === 'string' ? JSON.parse(b.witnesses) : b.witnesses) : []; } catch { }
           return {
             id: String(b.id),
             voterDocId: b.voter_doc_id,
             voterId: b.voter_id,
             voterName: b.voter_name,
             aadharNumber: b.aadhar_number,
+            mobile: b.voter_mobile || '',
+            isKaryakarta: Boolean(b.is_karyakarta === 1 || b.is_karyakarta === true),
+            boothId: b.booth_id || '',
+            boothNumber: b.booth_number || '',
+            boothName: b.booth_name || '',
+            mandalId: b.mandal_id || '',
+            mandalName: b.mandal_name || '',
             amount: parseFloat(b.amount) || 0,
             benefitName: b.benefit_name,
             benefitType: b.benefit_type,
             distributionDate: b.distribution_date,
+            date: b.distribution_date,
             adminId: b.admin_id,
             notes: b.notes,
             witnessName: b.witness_name,
@@ -4417,12 +4649,12 @@ export default {
           binds.push(...allPanchayatIds);
         }
 
-        // Mandal (Block/Area) filtering
+        // Mandal (Block/Area) filtering (synced with both direct mandal_id and booth mandal_id)
         const allMandalIds = (mandalIds ? mandalIds.split(',') : (mandalId && mandalId !== 'all' ? [mandalId] : [])).map(s => s.trim().replace(/\.0$/, '')).filter(Boolean);
         if (allMandalIds.length > 0) {
           const placeholders = allMandalIds.map(() => '?').join(',');
-          whereClauses.push(`v.mandal_id IN (${placeholders})`);
-          binds.push(...allMandalIds);
+          whereClauses.push(`(v.mandal_id IN (${placeholders}) OR v.booth_id IN (SELECT b_m.id FROM booths b_m WHERE b_m.mandal_id IN (${placeholders})) OR v.booth_id IN (SELECT b_m2.booth_number FROM booths b_m2 WHERE b_m2.mandal_id IN (${placeholders})))`);
+          binds.push(...allMandalIds, ...allMandalIds, ...allMandalIds);
         }
 
         // Constituency filtering
@@ -4462,6 +4694,13 @@ export default {
           binds.push(votingStatus);
         }
 
+        const hasBenefits = url.searchParams.get('hasBenefits');
+        if (hasBenefits === 'true' || hasBenefits === '1') {
+          whereClauses.push('(SELECT COUNT(1) FROM benefits bn WHERE bn.voter_doc_id = v.id OR bn.voter_id = v.voter_id) > 0');
+        } else if (hasBenefits === 'false' || hasBenefits === '0') {
+          whereClauses.push('(SELECT COUNT(1) FROM benefits bn WHERE bn.voter_doc_id = v.id OR bn.voter_id = v.voter_id) = 0');
+        }
+
         const whereSql = whereClauses.join(' AND ');
 
         const selectSql = `
@@ -4475,6 +4714,8 @@ export default {
             COALESCE(v.constituency_id, '') AS effective_constituency_id,
             COALESCE(v.district_id, '') AS effective_district_id,
             COALESCE(v.state_id, '') AS effective_state_id,
+            (SELECT COUNT(1) FROM benefits bn WHERE bn.voter_doc_id = v.id OR bn.voter_id = v.voter_id) as benefits_count,
+            (SELECT COALESCE(SUM(bn2.amount), 0) FROM benefits bn2 WHERE bn2.voter_doc_id = v.id OR bn2.voter_id = v.voter_id) as benefits_total_amount,
             va.vital_status AS admin_vital_status,
             va.physical_profile AS admin_physical_profile,
             va.disability_category AS admin_disability_category,
@@ -4556,6 +4797,8 @@ export default {
               wardId: v.effective_ward_id || v.ward_id || '',
               panchayatId: v.effective_panchayat_id || v.panchayat_id || '',
               mandalId: v.effective_mandal_id || v.mandal_id || '',
+              benefitsCount: Number(v.benefits_count || 0),
+              benefitsTotalAmount: Number(v.benefits_total_amount || 0),
               constituencyId: v.effective_constituency_id || v.constituency_id || '',
               districtId: v.effective_district_id || v.district_id || '',
               stateId: v.effective_state_id || v.state_id || '',

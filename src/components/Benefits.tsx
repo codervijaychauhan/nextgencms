@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, Search, Gift, X, Trash2, Calendar, 
   User, CreditCard, Banknote, Landmark, Filter, CheckCircle2, AlertCircle, RefreshCw,
-  Eye, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight
+  Eye, Edit2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight,
+  Building2, MapPin, Star, ExternalLink, Phone
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../AuthProvider';
@@ -19,6 +20,11 @@ interface BaseVoter {
   districtId: string;
   constituencyId: string;
   boothId: string;
+  boothNumber?: string | number;
+  boothName?: string;
+  mandalId?: string;
+  mandalName?: string;
+  isKaryakarta?: boolean | number;
 }
 
 interface Benefit {
@@ -42,6 +48,15 @@ interface Benefit {
     voterId?: string;
     voterDocId?: string;
   }[];
+  // Linked Elector & Geographical Metadata
+  voterMobile?: string;
+  isKaryakarta?: boolean | number;
+  boothId?: string;
+  boothNumber?: string | number;
+  boothName?: string;
+  mandalId?: string;
+  mandalName?: string;
+  mandalCode?: string;
 }
 
 const BENEFIT_SUGGESTIONS = [
@@ -79,6 +94,12 @@ export default function Benefits() {
   const [adminUsers, setAdminUsers] = useState<{ uid: string; username: string; email: string; role: string }[]>([]);
   const [selectedAdminId, setSelectedAdminId] = useState<string>('All');
   
+  // Geographical & Organization Filters
+  const [mandalsList, setMandalsList] = useState<{ id: string; name: string; mandalCode?: string }[]>([]);
+  const [boothsList, setBoothsList] = useState<{ id: string; boothNumber: string | number; name?: string }[]>([]);
+  const [mandalFilter, setMandalFilter] = useState<string>('All');
+  const [boothFilter, setBoothFilter] = useState<string>('All');
+
   // New States: Date Filter, Pagination, View Details popup
   const [startDateFilter, setStartDateFilter] = useState<string>('');
   const [endDateFilter, setEndDateFilter] = useState<string>('');
@@ -86,10 +107,27 @@ export default function Benefits() {
   const [pageSize, setPageSize] = useState<number>(10);
   const [detailBenefit, setDetailBenefit] = useState<Benefit | null>(null);
 
+  // Pre-load Mandals and Booths metadata for dropdown selectors
+  useEffect(() => {
+    api.get<any[]>('/api/mandals').then(data => {
+      const raw = Array.isArray(data) ? data : (data as any)?.data || [];
+      setMandalsList(raw.map((m: any) => ({ id: String(m.id), name: m.name, mandalCode: m.mandal_code || m.mandalCode })));
+    }).catch(() => {});
+
+    api.get<any[]>('/api/booths').then(data => {
+      const raw = Array.isArray(data) ? data : (data as any)?.data || [];
+      setBoothsList(raw.map((b: any) => ({ 
+        id: String(b.id), 
+        boothNumber: b.booth_number !== undefined ? b.booth_number : (b.boothNumber !== undefined ? b.boothNumber : ''), 
+        name: b.name 
+      })));
+    }).catch(() => {});
+  }, []);
+
   // Reset pagination to first page when standard or date filters change
   useEffect(() => {
     setCurrentPage(1);
-  }, [globalSearch, typeFilter, selectedAdminId, startDateFilter, endDateFilter, pageSize]);
+  }, [globalSearch, typeFilter, selectedAdminId, mandalFilter, boothFilter, startDateFilter, endDateFilter, pageSize]);
   
   // Registration slide-over state
   const [isOpen, setIsOpen] = useState(false);
@@ -172,26 +210,34 @@ export default function Benefits() {
     setError('');
 
     try {
-      const data = await api.get<Benefit[]>('/api/benefits');
+      const data = await api.get<any[]>('/api/benefits');
       const list: Benefit[] = (data || []).map(b => ({
         id: b.id,
-        voterDocId: b.voterDocId || '',
-        voterId: b.voterId || '',
-        voterName: b.voterName || '',
-        aadharNumber: b.aadharNumber || '',
+        voterDocId: b.voterDocId || b.voter_doc_id || '',
+        voterId: b.voterId || b.voter_id || '',
+        voterName: b.voterName || b.voter_name || '',
+        aadharNumber: b.aadharNumber || b.aadhar_number || '',
         amount: typeof b.amount === 'number' ? b.amount : Number(b.amount || 0),
-        benefitName: b.benefitName || '',
-        benefitType: b.benefitType || 'Government',
-        date: b.date || '',
-        adminId: b.adminId || '',
+        benefitName: b.benefitName || b.benefit_name || '',
+        benefitType: b.benefitType || b.benefit_type || 'Government',
+        date: b.date || b.distribution_date || '',
+        adminId: b.adminId || b.admin_id || '',
         notes: b.notes || '',
         createdAt: b.createdAt,
-        witnessName: b.witnessName || '',
-        witnessVoterId: b.witnessVoterId || '',
+        witnessName: b.witnessName || b.witness_name || '',
+        witnessVoterId: b.witnessVoterId || b.witness_voter_id || '',
         witnessVoterDocId: b.witnessVoterDocId || '',
-        witnesses: Array.isArray(b.witnesses) ? b.witnesses : []
+        witnesses: Array.isArray(b.witnesses) ? b.witnesses : [],
+        voterMobile: b.voterMobile || b.voter_mobile || '',
+        isKaryakarta: Boolean(b.isKaryakarta !== undefined ? b.isKaryakarta : (b.is_karyakarta === 1 || b.is_karyakarta === true)),
+        boothId: b.boothId || b.booth_id || '',
+        boothNumber: b.boothNumber !== undefined ? b.boothNumber : (b.booth_number !== undefined ? b.booth_number : ''),
+        boothName: b.boothName || b.booth_name || '',
+        mandalId: b.mandalId || b.mandal_id || '',
+        mandalName: b.mandalName || b.mandal_name || '',
+        mandalCode: b.mandalCode || b.mandal_code || ''
       }));
-      list.sort((a, b) => b.date.localeCompare(a.date));
+      list.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
       setBenefits(list);
     } catch (err) {
       console.error("Error fetching benefits:", err);
@@ -223,7 +269,12 @@ export default function Benefits() {
             stateId: String(d.state_id || d.stateId || ''),
             districtId: String(d.district_id || d.districtId || ''),
             constituencyId: String(d.constituency_id || d.constituencyId || ''),
-            boothId: String(d.booth_id || d.boothId || '')
+            boothId: String(d.booth_id || d.boothId || ''),
+            boothNumber: d.booth_number !== undefined ? d.booth_number : d.boothNumber,
+            boothName: d.booth_name || d.boothName,
+            mandalId: String(d.mandal_id || d.mandalId || ''),
+            mandalName: d.mandal_name || d.mandalName,
+            isKaryakarta: Boolean(d.is_karyakarta === 1 || d.is_karyakarta === true || d.isKaryakarta)
           }));
           setAllVoters(list);
         } catch (err) {
@@ -266,7 +317,10 @@ export default function Benefits() {
         (v.voterId || '').toLowerCase().includes(s) ||
         (v.name || '').toLowerCase().includes(s) ||
         (v.mobile || '').toLowerCase().includes(s) ||
-        (v.aadharNumber || '').toLowerCase().includes(s)
+        (v.aadharNumber || '').toLowerCase().includes(s) ||
+        (v.boothName || '').toLowerCase().includes(s) ||
+        String(v.boothNumber || '').toLowerCase().includes(s) ||
+        (v.mandalName || '').toLowerCase().includes(s)
       );
     });
   }, [allVoters, voterSearch]);
@@ -496,6 +550,16 @@ export default function Benefits() {
         return false;
       }
 
+      // Mandal filter
+      if (mandalFilter !== 'All' && b.mandalId !== mandalFilter) {
+        return false;
+      }
+
+      // Booth filter
+      if (boothFilter !== 'All' && b.boothId !== boothFilter && String(b.boothNumber) !== boothFilter) {
+        return false;
+      }
+
       // Start Date filter
       if (startDateFilter && b.date < startDateFilter) {
         return false;
@@ -515,12 +579,16 @@ export default function Benefits() {
         b.voterId.toLowerCase().includes(searchVal) ||
         b.aadharNumber.toLowerCase().includes(searchVal) ||
         b.benefitName.toLowerCase().includes(searchVal) ||
+        (b.voterMobile || '').toLowerCase().includes(searchVal) ||
+        (b.boothName || '').toLowerCase().includes(searchVal) ||
+        String(b.boothNumber || '').toLowerCase().includes(searchVal) ||
+        (b.mandalName || '').toLowerCase().includes(searchVal) ||
         (b.witnessName || '').toLowerCase().includes(searchVal) ||
         (b.witnesses || []).some(w => (w.name || '').toLowerCase().includes(searchVal) || (w.voterId || '').toLowerCase().includes(searchVal)) ||
         (b.notes || '').toLowerCase().includes(searchVal)
       );
     });
-  }, [benefitsFilteredByAdmin, globalSearch, typeFilter, startDateFilter, endDateFilter]);
+  }, [benefitsFilteredByAdmin, globalSearch, typeFilter, mandalFilter, boothFilter, startDateFilter, endDateFilter]);
 
   // Paginated benefits helper
   const paginatedBenefits = useMemo(() => {
@@ -576,14 +644,9 @@ export default function Benefits() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <div className="space-y-0.5">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
-              Benefits
-            </h1>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-pink-500/10 text-pink-600 dark:text-pink-400 border border-pink-500/20">
-              {benefits.length} Records
-            </span>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+            Benefits
+          </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Citizen welfare schemes and aid records.
           </p>
@@ -719,6 +782,46 @@ export default function Benefits() {
               </div>
             )}
 
+            {/* Mandal Selector Filter */}
+            {mandalsList.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 text-xs font-semibold text-zinc-400">
+                  <Building2 size={13} />
+                  <span className="uppercase text-[9px] tracking-wider font-bold">Mandal:</span>
+                </div>
+                <select
+                  value={mandalFilter}
+                  onChange={e => setMandalFilter(e.target.value)}
+                  className="bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-white border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs font-bold rounded-xl outline-none focus:ring-1 focus:ring-blue-500 h-9 max-w-[150px]"
+                >
+                  <option value="All">All Mandals</option>
+                  {mandalsList.map(m => (
+                    <option key={m.id} value={m.id}>{m.name}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Booth Selector Filter */}
+            {boothsList.length > 0 && (
+              <div className="flex items-center gap-1.5">
+                <div className="flex items-center gap-1 text-xs font-semibold text-zinc-400">
+                  <MapPin size={13} />
+                  <span className="uppercase text-[9px] tracking-wider font-bold">Booth:</span>
+                </div>
+                <select
+                  value={boothFilter}
+                  onChange={e => setBoothFilter(e.target.value)}
+                  className="bg-zinc-50 dark:bg-zinc-950 text-zinc-800 dark:text-white border border-zinc-200 dark:border-zinc-800 px-3 py-1.5 text-xs font-bold rounded-xl outline-none focus:ring-1 focus:ring-blue-500 h-9 max-w-[150px]"
+                >
+                  <option value="All">All Booths</option>
+                  {boothsList.map(b => (
+                    <option key={b.id} value={b.id}>Booth #{b.boothNumber}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="flex items-center gap-3 shrink-0">
               <div className="flex items-center gap-1.5 text-xs font-semibold text-zinc-400">
                 <Filter size={13} />
@@ -818,10 +921,11 @@ export default function Benefits() {
         ) : (
           <>
             <div className="overflow-x-auto custom-scrollbar">
-            <table className="w-full text-left border-collapse min-w-[800px] whitespace-nowrap">
+            <table className="w-full text-left border-collapse min-w-[850px] whitespace-nowrap">
               <thead>
                 <tr className="bg-zinc-50/70 dark:bg-zinc-950/50 text-[10px] font-black uppercase tracking-widest text-zinc-400 border-b border-zinc-100 dark:border-zinc-800">
                   <th className="py-2 px-3">Citizen (Recipient)</th>
+                  <th className="py-2 px-3">Booth & Mandal</th>
                   <th className="py-2 px-3">Benefit (Aid Scheme)</th>
                   <th className="py-2 px-3">Source Type</th>
                   <th className="py-2 px-3">Allocation Date</th>
@@ -834,9 +938,35 @@ export default function Benefits() {
                   <tr key={b.id} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-955/30 transition-all">
                     {/* Citizen ID details */}
                     <td className="py-2 px-3">
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <span className="font-bold text-zinc-900 dark:text-white truncate max-w-[160px]" title={b.voterName}>{b.voterName}</span>
                         <span className="text-[10px] text-blue-600 dark:text-blue-400 font-mono font-semibold shrink-0">({b.voterId})</span>
+                        {b.isKaryakarta ? (
+                          <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-500 text-white shrink-0">
+                            ⭐ Karyakarta
+                          </span>
+                        ) : null}
+                      </div>
+                      {b.voterMobile && (
+                        <div className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                          {b.voterMobile}
+                        </div>
+                      )}
+                    </td>
+
+                    {/* Booth & Mandal column */}
+                    <td className="py-2 px-3">
+                      <div className="flex flex-col gap-0.5">
+                        {b.boothNumber ? (
+                          <span className="inline-flex items-center text-[10px] font-bold text-blue-600 dark:text-blue-400">
+                            Booth #{b.boothNumber}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-zinc-400 italic">No Booth</span>
+                        )}
+                        <span className="text-[10px] text-zinc-500 dark:text-zinc-400 truncate max-w-[140px]">
+                          {b.mandalName || 'General Area'}
+                        </span>
                       </div>
                     </td>
 
@@ -1107,9 +1237,18 @@ export default function Benefits() {
                                 className="w-full text-left p-3 hover:bg-zinc-50 dark:hover:bg-zinc-900 flex justify-between items-center transition-all text-xs"
                               >
                                 <div className="min-w-0 pr-2">
-                                  <p className="font-bold text-zinc-900 dark:text-white truncate">{sv.name}</p>
+                                  <div className="flex items-center gap-1.5 flex-wrap">
+                                    <p className="font-bold text-zinc-900 dark:text-white truncate">{sv.name}</p>
+                                    {sv.isKaryakarta ? (
+                                      <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-full text-[9px] font-black bg-amber-500 text-white shrink-0">
+                                        ⭐ Karyakarta
+                                      </span>
+                                    ) : null}
+                                  </div>
                                   <p className="text-[10px] text-zinc-500 mt-0.5 truncate">
                                     EPIC: {sv.voterId} {sv.mobile ? `| Mobile: ${sv.mobile}` : ''}
+                                    {sv.boothNumber ? ` | Booth #${sv.boothNumber}` : ''}
+                                    {sv.mandalName ? ` | Mandal: ${sv.mandalName}` : ''}
                                   </p>
                                 </div>
                                 <span className="text-[10px] bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 px-2.5 py-1 rounded-lg font-bold uppercase tracking-wider shrink-0">
@@ -1127,22 +1266,53 @@ export default function Benefits() {
                         )}
                       </div>
                     ) : (
-                      <div className="bg-zinc-50 dark:bg-zinc-900 p-4 border border-zinc-100 dark:border-zinc-850 rounded-xl">
+                      <div className="bg-zinc-50 dark:bg-zinc-900 p-4 border border-zinc-200 dark:border-zinc-800 rounded-2xl space-y-3">
                         <div className="flex justify-between items-start">
                           <div>
-                            <p className="font-bold text-zinc-900 dark:text-white">{selectedVoter.name}</p>
-                            <p className="text-[10px] text-zinc-400 font-mono mt-0.5">EPIC: {selectedVoter.voterId}</p>
-                            {selectedVoter.mobile && (
-                              <p className="text-[10px] text-zinc-500 mt-0.5">Contact: {selectedVoter.mobile}</p>
-                            )}
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <p className="font-bold text-zinc-900 dark:text-white text-sm">{selectedVoter.name}</p>
+                              {selectedVoter.isKaryakarta ? (
+                                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-500 text-white shadow-xs">
+                                  ⭐ Active Karyakarta
+                                </span>
+                              ) : null}
+                            </div>
+                            <p className="text-[11px] text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">EPIC: {selectedVoter.voterId}</p>
                           </div>
                           <button
                             type="button"
                             onClick={() => setSelectedVoter(null)}
-                            className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 text-[10px] font-bold uppercase tracking-wider bg-white dark:bg-zinc-950 px-2 py-1 rounded border border-zinc-150 dark:border-zinc-800"
+                            className="text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200 text-[10px] font-bold uppercase tracking-wider bg-white dark:bg-zinc-950 px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800"
                           >
                             Change
                           </button>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 pt-2 border-t border-zinc-200/60 dark:border-zinc-800 text-[11px]">
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-zinc-400 block">Polling Booth</span>
+                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                              {selectedVoter.boothNumber ? `Booth #${selectedVoter.boothNumber}` : (selectedVoter.boothName || 'Not Assigned')}
+                            </span>
+                          </div>
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-zinc-400 block">Mandal</span>
+                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                              {selectedVoter.mandalName || 'General Area'}
+                            </span>
+                          </div>
+                          {selectedVoter.mobile && (
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-400 block">Mobile Contact</span>
+                              <span className="font-mono text-zinc-700 dark:text-zinc-300">{selectedVoter.mobile}</span>
+                            </div>
+                          )}
+                          {selectedVoter.aadharNumber && (
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-400 block">Aadhaar Linked</span>
+                              <span className="font-mono text-zinc-700 dark:text-zinc-300">•••• {selectedVoter.aadharNumber.slice(-4)}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
@@ -1466,20 +1636,58 @@ export default function Benefits() {
                       <div className="w-10 h-10 rounded-xl bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center shrink-0">
                         <User size={18} />
                       </div>
-                      <div>
-                        <h4 className="font-black text-sm text-zinc-900 dark:text-white">{detailBenefit.voterName}</h4>
-                        <p className="text-[11px] text-zinc-505 mt-0.5">EPIC/Voter ID: <span className="font-mono font-bold dark:text-zinc-350">{detailBenefit.voterId}</span></p>
-                        
-                        {detailBenefit.aadharNumber ? (
-                          <div className="mt-2 flex items-center gap-1.5 bg-zinc-100 dark:bg-zinc-950 px-2.5 py-1 rounded-lg border border-zinc-200 dark:border-zinc-800 inline-block animate-fade-in">
-                            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider font-sans">Aadhaar:</span>
-                            <span className="font-mono text-xs text-zinc-705 dark:text-zinc-305 font-bold">
-                              {detailBenefit.aadharNumber.replace(/(\d{4})(\d{4})(\d{4})/, '$1-$2-$3')}
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <h4 className="font-black text-sm text-zinc-900 dark:text-white">{detailBenefit.voterName}</h4>
+                          {detailBenefit.isKaryakarta ? (
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-500 text-white shadow-xs">
+                              <Star size={9} className="fill-white" />
+                              <span>Active Karyakarta</span>
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="text-[11px] text-zinc-500 mt-0.5">EPIC/Voter ID: <span className="font-mono font-bold dark:text-zinc-300">{detailBenefit.voterId}</span></p>
+
+                        <div className="mt-3 grid grid-cols-2 gap-2 text-xs pt-2 border-t border-zinc-200 dark:border-zinc-800">
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-zinc-400 block">Polling Booth</span>
+                            <span className="font-semibold text-blue-600 dark:text-blue-400">
+                              {detailBenefit.boothNumber ? `Booth #${detailBenefit.boothNumber}` : (detailBenefit.boothName || 'Not Assigned')}
                             </span>
                           </div>
-                        ) : (
-                          <p className="text-[10px] text-zinc-400 italic mt-1.5">No Aadhaar code logged</p>
-                        )}
+                          <div>
+                            <span className="text-[9px] uppercase font-bold text-zinc-400 block">Mandal</span>
+                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                              {detailBenefit.mandalName || 'General Area'}
+                            </span>
+                          </div>
+                          {detailBenefit.voterMobile && (
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-400 block">Mobile</span>
+                              <span className="font-mono text-zinc-700 dark:text-zinc-300">{detailBenefit.voterMobile}</span>
+                            </div>
+                          )}
+                          {detailBenefit.aadharNumber ? (
+                            <div>
+                              <span className="text-[9px] uppercase font-bold text-zinc-400 block">Aadhaar</span>
+                              <span className="font-mono text-zinc-700 dark:text-zinc-300">
+                                •••• {detailBenefit.aadharNumber.slice(-4)}
+                              </span>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="mt-3 pt-2 border-t border-zinc-200 dark:border-zinc-800 flex justify-end">
+                          <a
+                            href={`/voters?search=${encodeURIComponent(detailBenefit.voterId)}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                          >
+                            <ExternalLink size={12} />
+                            <span>View Full Elector Profile</span>
+                          </a>
+                        </div>
                       </div>
                     </div>
                   </div>

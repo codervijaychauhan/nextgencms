@@ -126,6 +126,26 @@ BEGIN
 END
 GO
 
+IF OBJECT_ID(N'dbo.mandal_directories', N'U') IS NULL
+BEGIN
+    CREATE TABLE dbo.mandal_directories (
+        id VARCHAR(64) NOT NULL PRIMARY KEY,
+        mandal_id VARCHAR(64) NOT NULL,
+        admin_id VARCHAR(64) NOT NULL,
+        category_key VARCHAR(100) NOT NULL,
+        label NVARCHAR(255) NOT NULL,
+        english_label NVARCHAR(255) NOT NULL,
+        target_count INT DEFAULT 10,
+        icon VARCHAR(50) DEFAULT 'Users',
+        color_class VARCHAR(100) DEFAULT 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+        created_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+        updated_at DATETIME2 DEFAULT SYSUTCDATETIME(),
+        CONSTRAINT fk_mandal_dirs_mandal FOREIGN KEY (mandal_id) REFERENCES dbo.mandals(id) ON DELETE CASCADE
+    );
+    CREATE INDEX idx_mandal_dirs_mandal_admin ON dbo.mandal_directories(mandal_id, admin_id);
+END
+GO
+
 -- ============================================================================
 -- 5. Booths Table
 -- ============================================================================

@@ -330,6 +330,9 @@ async function ensureDemographicSchema() {
       IF OBJECT_ID(N'dbo.mandals', N'U') IS NOT NULL AND COL_LENGTH('dbo.mandals', 'created_by') IS NULL
         ALTER TABLE dbo.mandals ADD created_by VARCHAR(128) NULL;
 
+      IF OBJECT_ID(N'dbo.mandals', N'U') IS NOT NULL AND COL_LENGTH('dbo.mandals', 'admin_id') IS NULL
+        ALTER TABLE dbo.mandals ADD admin_id VARCHAR(64) NULL;
+
       IF OBJECT_ID(N'dbo.booths', N'U') IS NOT NULL AND COL_LENGTH('dbo.booths', 'created_by') IS NULL
         ALTER TABLE dbo.booths ADD created_by VARCHAR(128) NULL;
 
@@ -569,6 +572,24 @@ async function ensureDemographicSchema() {
       BEGIN
         BEGIN TRY ALTER TABLE dbo.mandal_members ALTER COLUMN voter_id VARCHAR(128) NULL; END TRY BEGIN CATCH END CATCH
         BEGIN TRY ALTER TABLE dbo.mandal_members ALTER COLUMN mandal_id VARCHAR(64) NULL; END TRY BEGIN CATCH END CATCH
+      END
+
+      IF OBJECT_ID(N'dbo.mandal_directories', N'U') IS NULL
+      BEGIN
+        CREATE TABLE dbo.mandal_directories (
+          id VARCHAR(64) PRIMARY KEY,
+          mandal_id VARCHAR(64) NOT NULL,
+          admin_id VARCHAR(64) NOT NULL,
+          category_key VARCHAR(64) NOT NULL,
+          label NVARCHAR(255) NOT NULL,
+          english_label NVARCHAR(255) NOT NULL,
+          target_count INT DEFAULT 10,
+          icon VARCHAR(50) DEFAULT 'Users',
+          color_class VARCHAR(100) DEFAULT 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+          created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+          updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        );
+        BEGIN TRY CREATE INDEX idx_mandal_dirs_mandal_admin ON dbo.mandal_directories(mandal_id, admin_id); END TRY BEGIN CATCH END CATCH
       END
 
       IF OBJECT_ID(N'dbo.voters', N'U') IS NOT NULL
@@ -2784,7 +2805,12 @@ async function startServer() {
                u.email as admin_email,
                (SELECT COUNT(*) FROM dbo.mandal_members mm WHERE mm.mandal_id = m.id) as member_count,
                (SELECT COUNT(*) FROM dbo.booths b WHERE b.mandal_id = m.id) as booth_count,
-               (SELECT COUNT(*) FROM dbo.voters v WHERE v.mandal_id = m.id) as real_voter_count
+               (SELECT COUNT(*) FROM dbo.voters v WHERE v.mandal_id = m.id) as real_voter_count,
+               (CASE 
+                  WHEN EXISTS (SELECT 1 FROM dbo.mandal_directories md WHERE md.mandal_id = CAST(m.id AS NVARCHAR(100))) 
+                  THEN (SELECT COUNT(*) FROM dbo.mandal_directories md WHERE md.mandal_id = CAST(m.id AS NVARCHAR(100)))
+                  ELSE 8 
+                END) as committee_count
         FROM dbo.mandals m 
         LEFT JOIN dbo.constituencies c ON m.constituency_id = c.id
         LEFT JOIN dbo.districts d ON m.district_id = d.id OR c.district_id = d.id
@@ -2794,14 +2820,9 @@ async function startServer() {
       `;
       const params: Record<string, any> = {};
 
-      if (isSuperAdmin) {
-        if (adminId && adminId !== 'All' && String(adminId).trim() !== '') {
-          sqlQuery += ` AND (m.admin_id = @reqAdminId OR LOWER(m.admin_id) = LOWER(@reqAdminId))`;
-          params.reqAdminId = String(adminId).trim();
-        }
-      } else if (effectiveAdminId) {
-        sqlQuery += ` AND (m.admin_id = @effAdminId OR LOWER(m.admin_id) = LOWER(@effAdminId))`;
-        params.effAdminId = effectiveAdminId;
+      if (adminId && adminId !== 'All' && String(adminId).trim() !== '') {
+        sqlQuery += ` AND (m.admin_id = @reqAdminId OR LOWER(m.admin_id) = LOWER(@reqAdminId))`;
+        params.reqAdminId = String(adminId).trim();
       }
 
       const cstClause = buildSafeInClause(constituencyId || constituencyIds, 'mnd_cst', ['m.constituency_id', 'c.id'], params);
@@ -2913,9 +2934,6 @@ async function startServer() {
 
       const mandal = existing[0];
       const effectiveAdminId = userRow?.parent_admin_id || reqUid;
-      if (!isSuperAdmin && mandal.admin_id && mandal.admin_id !== effectiveAdminId && mandal.admin_id !== reqUid && mandal.admin_id !== caller?.email) {
-        return res.status(403).json({ error: 'Forbidden: You cannot modify another admin’s mandal.' });
-      }
 
       const rawCid = constituency_id !== undefined ? constituency_id : constituencyId;
       let finalCid = rawCid && String(rawCid).trim() !== '' ? (!isNaN(Number(rawCid)) ? Number(rawCid) : String(rawCid)) : (mandal.constituency_id || null);
@@ -2942,14 +2960,14 @@ async function startServer() {
       }
 
       const mcode = (mandal_code || mandalCode || code) ? String(mandal_code || mandalCode || code).trim().toUpperCase() : null;
-      const targetAdmin = isSuperAdmin ? (admin_id || adminId || mandal.admin_id || effectiveAdminId) : mandal.admin_id;
+      const targetAdmin = (admin_id || adminId) ? (admin_id || adminId) : (mandal.admin_id || effectiveAdminId || null);
 
       await execute(
         `UPDATE dbo.mandals 
          SET name = COALESCE(NULLIF(@name, ''), name),
              mandal_code = COALESCE(NULLIF(@mandal_code, ''), mandal_code),
-             president_name = COALESCE(@president_name, president_name),
-             president_phone = COALESCE(@president_phone, president_phone),
+             president_name = @president_name,
+             president_phone = @president_phone,
              voter_count = COALESCE(@voter_count, voter_count),
              population = COALESCE(@population, population),
              state_id = COALESCE(@state_id, state_id),
@@ -2961,10 +2979,10 @@ async function startServer() {
           id: parsedId, 
           name: name ? String(name).trim() : null, 
           mandal_code: mcode, 
-          president_name: president_name !== undefined ? president_name : (presidentName !== undefined ? presidentName : null), 
-          president_phone: president_phone !== undefined ? president_phone : (presidentPhone !== undefined ? presidentPhone : null), 
-          voter_count: voter_count !== undefined ? parseInt(voter_count, 10) : (voterCount !== undefined ? parseInt(voterCount, 10) : null), 
-          population: population !== undefined ? parseInt(population, 10) : null,
+          president_name: president_name !== undefined ? president_name : (presidentName !== undefined ? presidentName : mandal.president_name), 
+          president_phone: president_phone !== undefined ? president_phone : (presidentPhone !== undefined ? presidentPhone : mandal.president_phone), 
+          voter_count: (voter_count !== undefined && voter_count !== '') ? parseInt(voter_count, 10) : ((voterCount !== undefined && voterCount !== '') ? parseInt(voterCount, 10) : null), 
+          population: (population !== undefined && population !== '') ? parseInt(population, 10) : null,
           state_id: finalSid,
           district_id: finalDid,
           constituency_id: finalCid,
@@ -2990,18 +3008,17 @@ async function startServer() {
       }
 
       const mandal = existing[0];
-      const effectiveAdminId = userRow?.parent_admin_id || reqUid;
-      if (!isSuperAdmin && mandal.admin_id && mandal.admin_id !== effectiveAdminId && mandal.admin_id !== reqUid) {
-        return res.status(403).json({ error: 'Forbidden: You cannot delete another admin’s mandal.' });
-      }
+      const strId = String(mandalId);
 
       // 1. Delete mandal members
-      await execute(`DELETE FROM dbo.mandal_members WHERE mandal_id = @mandalId`, { mandalId: parsedId });
-      // 2. Unlink booths and voters
-      await execute(`UPDATE dbo.booths SET mandal_id = NULL WHERE mandal_id = @mandalId`, { mandalId: parsedId });
-      await execute(`UPDATE dbo.voters SET mandal_id = NULL WHERE mandal_id = @mandalId`, { mandalId: parsedId });
-      // 3. Delete mandal
-      await execute(`DELETE FROM dbo.mandals WHERE id = @mandalId`, { mandalId: parsedId });
+      await execute(`DELETE FROM dbo.mandal_members WHERE mandal_id = @strId OR mandal_id = @numId`, { strId, numId: parsedId });
+      // 2. Delete mandal custom directories
+      await execute(`DELETE FROM dbo.mandal_directories WHERE mandal_id = @strId OR mandal_id = @numId`, { strId, numId: parsedId });
+      // 3. Unlink booths and voters
+      await execute(`UPDATE dbo.booths SET mandal_id = NULL WHERE mandal_id = @strId OR mandal_id = @numId`, { strId, numId: parsedId });
+      await execute(`UPDATE dbo.voters SET mandal_id = NULL WHERE mandal_id = @strId OR mandal_id = @numId`, { strId, numId: parsedId });
+      // 4. Delete mandal
+      await execute(`DELETE FROM dbo.mandals WHERE id = @numId`, { numId: parsedId });
       res.json({ success: true, message: 'Mandal removed successfully' });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
@@ -3127,6 +3144,136 @@ async function startServer() {
 
       await execute(`DELETE FROM dbo.mandal_members WHERE id = @id`, { id: parsedId });
       res.json({ success: true });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  // Mandal Custom Directories / Committees
+  app.get("/api/mandals/:mandalId/directories", optionalAuth, async (req, res) => {
+    try {
+      const { mandalId } = req.params;
+      const parsedMandalId = !isNaN(Number(mandalId)) ? Number(mandalId) : String(mandalId);
+
+      // Directories belong to the mandal and are visible to everyone viewing this mandal
+      const sql = `SELECT * FROM dbo.mandal_directories WHERE mandal_id = @mandalId ORDER BY created_at ASC`;
+      let dirs = await query(sql, { mandalId: String(parsedMandalId) }).catch(() => []);
+
+      // If no directories exist yet for this mandal, seed the 8 core directories so they can be modified/updated/deleted
+      if (!dirs || dirs.length === 0) {
+        const DEFAULT_CATEGORIES = [
+          { key: 'office_bearers', label: 'मण्डल पदाधिकारी व कार्यसमिति सदस्य', english_label: 'Mandal Office Bearers & Executive Committee Members', target_count: 45, icon: 'Shield', color_class: 'text-blue-500 bg-blue-50 dark:bg-blue-950/20' },
+          { key: 'morcha_leaders', label: 'मोर्चा के अध्यक्ष व महामंत्री', english_label: 'Morcha Presidents & General Secretaries', target_count: 21, icon: 'Award', color_class: 'text-amber-500 bg-amber-50 dark:bg-amber-950/20' },
+          { key: 'district_representatives', label: 'मण्डल से जिला में पदाधिकारी व कार्यसमिति सदस्य', english_label: 'Mandal to District Office Bearers & Executive Members', target_count: 8, icon: 'Layers', color_class: 'text-purple-500 bg-purple-50 dark:bg-purple-950/20' },
+          { key: 'morcha_coordinators', label: 'मण्डल से जिला में मोर्चों में व प्रकोष्ठ में संयोजक / सह-संयोजक', english_label: 'Convenor / Co-convenor in Morchas & Cells (Mandal to District)', target_count: 10, icon: 'Briefcase', color_class: 'text-teal-500 bg-teal-50 dark:bg-teal-950/20' },
+          { key: 'state_representatives', label: 'मण्डल से प्रदेश भाजपा, मोर्चा एवं प्रकोष्ठ', english_label: 'Mandal to State BJP, Morcha & Cells', target_count: 10, icon: 'Globe', color_class: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-950/20' },
+          { key: 'cell_convenors', label: 'सभी प्रकोष्ठों के संयोजक', english_label: 'Convenors of all Cells', target_count: 17, icon: 'SlidersHorizontal', color_class: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20' },
+          { key: 'former_representatives', label: 'चुने हुए पूर्व प्रतिनिधि', english_label: 'Elected Former Representatives', target_count: 20, icon: 'UserCheck', color_class: 'text-rose-500 bg-rose-50 dark:bg-rose-950/20' },
+          { key: 'gram_kendra_pramukh', label: 'ग्राम केन्द्र प्रमुख', english_label: 'Gram Kendra Pramukh (Village Center Chiefs)', target_count: 15, icon: 'MapPin', color_class: 'text-orange-500 bg-orange-50 dark:bg-orange-950/20' }
+        ];
+
+        for (const cat of DEFAULT_CATEGORIES) {
+          const dirId = `mdir_${cat.key}_${parsedMandalId}`;
+          await execute(
+            `INSERT INTO dbo.mandal_directories (id, mandal_id, admin_id, category_key, label, english_label, target_count, icon, color_class)
+             VALUES (@id, @mandal_id, @admin_id, @category_key, @label, @english_label, @target_count, @icon, @color_class)`,
+            { id: dirId, mandal_id: String(parsedMandalId), admin_id: 'default', category_key: cat.key, label: cat.label, english_label: cat.english_label, target_count: cat.target_count, icon: cat.icon, color_class: cat.color_class }
+          ).catch(() => {});
+        }
+        dirs = await query(sql, { mandalId: String(parsedMandalId) }).catch(() => []);
+      }
+
+      res.json(dirs || []);
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.post("/api/mandals/:mandalId/directories", authenticateUser, async (req, res) => {
+    try {
+      const caller = (req as any).user;
+      const { reqUid, userRow } = await getRequesterInfo(caller);
+      const { mandalId } = req.params;
+      const { id, category_key, categoryKey, label, english_label, englishLabel, target_count, targetCount, icon, color_class, colorClass, admin_id, adminId } = req.body;
+      const parsedMandalId = !isNaN(Number(mandalId)) ? Number(mandalId) : String(mandalId);
+
+      const mandals = await query(`SELECT * FROM dbo.mandals WHERE id = @id`, { id: parsedMandalId });
+      const mandal = mandals && mandals.length > 0 ? mandals[0] : null;
+
+      const effectiveAdminId = userRow?.parent_admin_id || reqUid;
+      const dirId = id || `mdir_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const catKey = String(category_key || categoryKey || `custom_${Date.now()}`).trim();
+      const lbl = String(label || 'नई डायरेक्टरी').trim();
+      const engLbl = String(english_label || englishLabel || lbl).trim();
+      const target = Number(target_count || targetCount || 10);
+      const ic = String(icon || 'Users').trim();
+      const clr = String(color_class || colorClass || 'text-blue-500 bg-blue-50 dark:bg-blue-950/20').trim();
+      const assignedAdmin = admin_id || adminId || mandal?.admin_id || effectiveAdminId || 'default';
+
+      await execute(
+        `INSERT INTO dbo.mandal_directories (id, mandal_id, admin_id, category_key, label, english_label, target_count, icon, color_class)
+         VALUES (@id, @mandal_id, @admin_id, @category_key, @label, @english_label, @target_count, @icon, @color_class)`,
+        { id: dirId, mandal_id: String(parsedMandalId), admin_id: assignedAdmin, category_key: catKey, label: lbl, english_label: engLbl, target_count: target, icon: ic, color_class: clr }
+      );
+
+      res.json({ id: dirId, mandal_id: String(parsedMandalId), admin_id: assignedAdmin, category_key: catKey, label: lbl, english_label: engLbl, target_count: target, icon: ic, color_class: clr });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.put("/api/mandals/directories/:id", authenticateUser, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { label, english_label, englishLabel, target_count, targetCount, icon, color_class, colorClass } = req.body;
+
+      let dirs = await query(`SELECT * FROM dbo.mandal_directories WHERE id = @id`, { id });
+      if ((!dirs || dirs.length === 0) && id.startsWith('core_')) {
+        const catKey = id.replace('core_', '');
+        dirs = await query(`SELECT * FROM dbo.mandal_directories WHERE category_key = @catKey`, { catKey });
+      }
+      if (!dirs || dirs.length === 0) {
+        return res.status(404).json({ error: 'Directory not found' });
+      }
+
+      const dir = dirs[0];
+      const realId = dir.id;
+      const lbl = label !== undefined ? String(label).trim() : dir.label;
+      const engLbl = (english_label !== undefined ? english_label : (englishLabel !== undefined ? englishLabel : dir.english_label));
+      const target = (target_count !== undefined ? Number(target_count) : (targetCount !== undefined ? Number(targetCount) : dir.target_count));
+      const ic = icon !== undefined ? String(icon).trim() : dir.icon;
+      const clr = (color_class !== undefined ? color_class : (colorClass !== undefined ? colorClass : dir.color_class));
+
+      await execute(
+        `UPDATE dbo.mandal_directories 
+         SET label = @label, english_label = @english_label, target_count = @target_count, icon = @icon, color_class = @color_class, updated_at = CURRENT_TIMESTAMP
+         WHERE id = @id`,
+        { id: realId, label: lbl, english_label: engLbl, target_count: target, icon: ic, color_class: clr }
+      );
+
+      res.json({ success: true, id: realId, label: lbl, english_label: engLbl, target_count: target, icon: ic, color_class: clr });
+    } catch (error: any) {
+      res.status(500).json({ error: sanitizeError(error) });
+    }
+  });
+
+  app.delete("/api/mandals/directories/:id", authenticateUser, async (req, res) => {
+    try {
+      const { id } = req.params;
+
+      let dirs = await query(`SELECT * FROM dbo.mandal_directories WHERE id = @id`, { id });
+      if ((!dirs || dirs.length === 0) && id.startsWith('core_')) {
+        const catKey = id.replace('core_', '');
+        dirs = await query(`SELECT * FROM dbo.mandal_directories WHERE category_key = @catKey`, { catKey });
+      }
+      if (!dirs || dirs.length === 0) {
+        return res.status(404).json({ error: 'Directory not found' });
+      }
+
+      const dir = dirs[0];
+      await execute(`DELETE FROM dbo.mandal_directories WHERE id = @id`, { id: dir.id });
+      await execute(`DELETE FROM dbo.mandal_members WHERE mandal_id = @mandalId AND category_key = @catKey`, { mandalId: dir.mandal_id, catKey: dir.category_key }).catch(() => {});
+      res.json({ success: true, id: dir.id });
     } catch (error: any) {
       res.status(500).json({ error: sanitizeError(error) });
     }
@@ -5685,7 +5832,57 @@ async function startServer() {
 
   app.get("/api/benefits", optionalAuth, async (req, res) => {
     try {
-      const benefits = await query(`SELECT * FROM dbo.benefits ORDER BY distribution_date DESC, created_at DESC`);
+      const { voterId, voter_id, voterDocId, voter_doc_id, boothId, booth_id, mandalId, mandal_id, adminId } = req.query;
+      const targetVoterId = String(voterId || voter_id || '').trim();
+      const targetVoterDocId = String(voterDocId || voter_doc_id || '').trim();
+      const targetBoothId = String(boothId || booth_id || '').trim();
+      const targetMandalId = String(mandalId || mandal_id || '').trim();
+      const targetAdminId = String(adminId || '').trim();
+
+      let sqlQuery = `
+        SELECT b.*,
+               v.mobile as voter_mobile,
+               v.is_karyakarta as is_karyakarta,
+               COALESCE(v.booth_id, '') as booth_id,
+               COALESCE(booth.booth_number, '') as booth_number,
+               COALESCE(booth.name, '') as booth_name,
+               COALESCE(v.mandal_id, booth.mandal_id, '') as mandal_id,
+               COALESCE(m.name, '') as mandal_name
+        FROM dbo.benefits b
+        LEFT JOIN dbo.voters v ON (CAST(b.voter_doc_id AS NVARCHAR(100)) = CAST(v.id AS NVARCHAR(100)) OR b.voter_id = v.voter_id)
+        LEFT JOIN dbo.booths booth ON (v.booth_id = CAST(booth.id AS NVARCHAR(100)) OR v.booth_id = booth.booth_number)
+        LEFT JOIN dbo.mandals m ON (v.mandal_id = CAST(m.id AS NVARCHAR(100)) OR booth.mandal_id = CAST(m.id AS NVARCHAR(100)))
+        WHERE 1=1
+      `;
+      const params: Record<string, any> = {};
+
+      if (targetAdminId && targetAdminId !== 'All') {
+        sqlQuery += ` AND b.admin_id = @adminId`;
+        params.adminId = targetAdminId;
+      }
+      if (targetVoterId) {
+        sqlQuery += ` AND (b.voter_id = @voterId OR v.voter_id = @voterId)`;
+        params.voterId = targetVoterId;
+      }
+      if (targetVoterDocId) {
+        sqlQuery += ` AND (CAST(b.voter_doc_id AS NVARCHAR(100)) = @voterDocId OR CAST(v.id AS NVARCHAR(100)) = @voterDocId)`;
+        params.voterDocId = targetVoterDocId;
+      }
+      if (targetBoothId) {
+        sqlQuery += ` AND (v.booth_id = @boothId OR CAST(booth.id AS NVARCHAR(100)) = @boothId OR booth.booth_number = @boothId)`;
+        params.boothId = targetBoothId;
+      }
+      if (targetMandalId) {
+        sqlQuery += ` AND (v.mandal_id = @mandalId OR CAST(booth.mandal_id AS NVARCHAR(100)) = @mandalId OR CAST(m.id AS NVARCHAR(100)) = @mandalId)`;
+        params.mandalId = targetMandalId;
+      }
+
+      sqlQuery += ` ORDER BY b.distribution_date DESC, b.created_at DESC`;
+
+      const benefits = await query(sqlQuery, params).catch(async () => {
+        return await query(`SELECT * FROM dbo.benefits ORDER BY distribution_date DESC, created_at DESC`);
+      });
+
       const formatted = benefits.map(b => {
         let witnesses = [];
         try { witnesses = b.witnesses ? (typeof b.witnesses === 'string' ? JSON.parse(b.witnesses) : b.witnesses) : []; } catch {}
@@ -5695,10 +5892,18 @@ async function startServer() {
           voterId: b.voter_id || '',
           voterName: b.voter_name || '',
           aadharNumber: b.aadhar_number || '',
+          mobile: b.voter_mobile || '',
+          isKaryakarta: Boolean(b.is_karyakarta === 1 || b.is_karyakarta === true),
+          boothId: b.booth_id || '',
+          boothNumber: b.booth_number || '',
+          boothName: b.booth_name || '',
+          mandalId: b.mandal_id || '',
+          mandalName: b.mandal_name || '',
           amount: typeof b.amount === 'number' ? b.amount : parseFloat(b.amount || '0'),
           benefitName: b.benefit_name || '',
           benefitType: b.benefit_type || 'Government',
           date: b.distribution_date ? new Date(b.distribution_date).toISOString().split('T')[0] : '',
+          distributionDate: b.distribution_date ? new Date(b.distribution_date).toISOString().split('T')[0] : '',
           adminId: b.admin_id || '',
           notes: b.notes || '',
           createdAt: b.created_at,

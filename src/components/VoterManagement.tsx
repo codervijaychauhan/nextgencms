@@ -42,7 +42,9 @@ import {
   GraduationCap,
   Filter,
   RotateCcw,
-  MessageCircle
+  MessageCircle,
+  Gift,
+  Star
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
@@ -212,6 +214,8 @@ interface Voter {
   rationCardType?: string;
   rationCardNo?: string;
   housingType?: string;
+  benefitsCount?: number;
+  benefitsTotalAmount?: number;
   createdAt?: any;
   updatedAt?: any;
 }
@@ -318,6 +322,7 @@ const VoterManagement: React.FC = () => {
   const [filterSentiment, setFilterSentiment] = useState<string>('all');
   const [filterCompleteness, setFilterCompleteness] = useState<string>('all');
   const [filterIsKaryakarta, setFilterIsKaryakarta] = useState<string>('all');
+  const [filterBeneficiary, setFilterBeneficiary] = useState<string>('all');
   const [filterVitalStatus, setFilterVitalStatus] = useState<string>('Active');
   
   // Filter Modal popup state
@@ -343,6 +348,7 @@ const VoterManagement: React.FC = () => {
     if (filterSentiment !== 'all') count++;
     if (filterCompleteness !== 'all') count++;
     if (filterIsKaryakarta !== 'all') count++;
+    if (filterBeneficiary !== 'all') count++;
     if (filterVitalStatus !== 'Active') count++;
     return count;
   }, [
@@ -360,6 +366,7 @@ const VoterManagement: React.FC = () => {
     filterSentiment,
     filterCompleteness,
     filterIsKaryakarta,
+    filterBeneficiary,
     filterVitalStatus
   ]);
 
@@ -432,6 +439,7 @@ const VoterManagement: React.FC = () => {
     setFilterSentiment('all');
     setFilterCompleteness('all');
     setFilterIsKaryakarta('all');
+    setFilterBeneficiary('all');
     setFilterVitalStatus('Active');
   };
 
@@ -455,8 +463,26 @@ const VoterManagement: React.FC = () => {
   };
 
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
-  const [activeFormTab, setActiveFormTab] = useState<'main' | 'contact' | 'health_economy' | 'political_sentiment'>('main');
+  const [activeFormTab, setActiveFormTab] = useState<'main' | 'contact' | 'health_economy' | 'political_sentiment' | 'benefits'>('main');
   const [editingVoter, setEditingVoter] = useState<Voter | null>(null);
+
+  // Welfare & Benefits history state for active viewed voter
+  const [voterBenefits, setVoterBenefits] = useState<any[]>([]);
+  const [loadingVoterBenefits, setLoadingVoterBenefits] = useState(false);
+
+  const fetchVoterBenefits = async (voter: Voter) => {
+    setLoadingVoterBenefits(true);
+    try {
+      const res = await api.get<any[]>(`/api/benefits?voterId=${encodeURIComponent(voter.voterId || '')}`);
+      const raw = Array.isArray(res) ? res : ((res as any)?.data || []);
+      setVoterBenefits(raw);
+    } catch (err) {
+      console.error('Failed to load voter benefits:', err);
+      setVoterBenefits([]);
+    } finally {
+      setLoadingVoterBenefits(false);
+    }
+  };
 
   // Quick Status Switcher State (1-click active/deceased/shifted popup)
   const [quickStatusVoter, setQuickStatusVoter] = useState<Voter | null>(null);
@@ -1059,7 +1085,9 @@ function parseIdArray(...inputs: any[]): string[] {
         stateId: String(d.state_id || d.stateId || ''),
         stateName: d.state_name || d.stateName || '',
         districtId: String(d.district_id || d.districtId || ''),
-        districtName: d.district_name || d.districtName || ''
+        districtName: d.district_name || d.districtName || '',
+        benefitsCount: Number(d.benefitsCount !== undefined ? d.benefitsCount : (d.benefits_count || 0)),
+        benefitsTotalAmount: Number(d.benefitsTotalAmount !== undefined ? d.benefitsTotalAmount : (d.benefits_total_amount || 0))
       })) as Voter[];
       
       setVoters(newVoters);
@@ -1641,11 +1669,12 @@ function parseIdArray(...inputs: any[]): string[] {
       setSentimentAdminId(currentAdminContext);
     }
     
-    // Explicitly load sentiment and assessments for this voter
+    // Explicitly load sentiment, assessments, and benefits for this voter
     const initialParty = (v as any).partyInclination || (v as any).favoredPartyId || (v as any).favoredPartyName || '';
     setSentimentFavoredPartyId(initialParty);
     loadVoterSentiment(v.id, currentAdminContext);
     loadVoterAssessments(v.id);
+    fetchVoterBenefits(v);
 
     setModalMode('view');
     setActiveFormTab('main');
@@ -2312,6 +2341,13 @@ function parseIdArray(...inputs: any[]): string[] {
         if (filterIsKaryakarta === 'no' && matchesKaryakarta) return false;
       }
 
+      // Filter by Welfare Beneficiary Status
+      if (filterBeneficiary !== 'all') {
+        const bCount = v.benefitsCount || 0;
+        if (filterBeneficiary === 'beneficiaries' && bCount === 0) return false;
+        if (filterBeneficiary === 'non_beneficiaries' && bCount > 0) return false;
+      }
+
       return true;
     });
   }, [
@@ -2324,6 +2360,7 @@ function parseIdArray(...inputs: any[]): string[] {
     filterSentiment,
     filterCompleteness,
     filterIsKaryakarta,
+    filterBeneficiary,
     filterVitalStatus,
     selectedStateId,
     selectedStateIds,
@@ -2484,14 +2521,9 @@ function parseIdArray(...inputs: any[]): string[] {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <div className="space-y-0.5">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
-              Voters
-            </h1>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-              {voters.length.toLocaleString()} Total
-            </span>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+            Voters
+          </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Electorate directory and registration records.
           </p>
@@ -3577,6 +3609,20 @@ function parseIdArray(...inputs: any[]): string[] {
                         </select>
                       </div>
 
+                      {/* Welfare & Benefits Filter */}
+                      <div className="space-y-1.5 flex flex-col">
+                        <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest">Welfare & Benefits</label>
+                        <select 
+                          value={filterBeneficiary} 
+                          onChange={e => setFilterBeneficiary(e.target.value)} 
+                          className="webapp-input w-full h-11 text-xs font-bold bg-zinc-50 dark:bg-zinc-955 border-zinc-200 dark:border-zinc-800 rounded-xl"
+                        >
+                          <option value="all">All Electors</option>
+                          <option value="beneficiaries">Only Beneficiaries (Received Aid)</option>
+                          <option value="non_beneficiaries">No Benefits Logged</option>
+                        </select>
+                      </div>
+
                       {/* Vital Status Filter */}
                       <div className="space-y-1.5 flex flex-col">
                         <label className="text-[10px] font-black uppercase text-zinc-400 px-1 tracking-widest font-bold">Vital Status</label>
@@ -3983,13 +4029,20 @@ function parseIdArray(...inputs: any[]): string[] {
                           const isVol = (v as any).isVolunteer || (v as any).is_volunteer || (v as any).isKaryakarta || Boolean(sData?.isKaryakarta);
                           return (
                             <td key={col.id} className="px-4 py-2">
-                              {isVol ? (
-                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
-                                  ★ Volunteer
-                                </span>
-                              ) : (
-                                <span className="text-[10px] text-zinc-400 font-medium">Voter</span>
-                              )}
+                              <div className="flex flex-col gap-1 items-start">
+                                {isVol ? (
+                                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-black uppercase bg-purple-500/10 text-purple-600 dark:text-purple-400 border border-purple-500/20">
+                                    ★ Volunteer
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-zinc-400 font-medium">Voter</span>
+                                )}
+                                {(v.benefitsCount || 0) > 0 && (
+                                  <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] font-bold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/50">
+                                    🎁 {v.benefitsCount} Aid
+                                  </span>
+                                )}
+                              </div>
                             </td>
                           );
                         }
@@ -4373,12 +4426,18 @@ function parseIdArray(...inputs: any[]): string[] {
                   { id: 'main', label: modalMode === 'view' ? '1. Overview & Identity' : '1. Main Details' },
                   { id: 'contact', label: '2. Address & Contacts' },
                   { id: 'health_economy', label: '3. Health & Economy' },
-                  { id: 'political_sentiment', label: '4. Political Sentiment' }
+                  { id: 'political_sentiment', label: '4. Political Sentiment' },
+                  ...(modalMode === 'view' ? [{ id: 'benefits', label: `5. Welfare & Benefits${(editingVoter?.benefitsCount || voterBenefits.length) ? ` (${editingVoter?.benefitsCount || voterBenefits.length})` : ''}` }] : [])
                 ].map(tab => (
                   <button
                     key={tab.id}
                     type="button"
-                    onClick={() => setActiveFormTab(tab.id as 'main' | 'contact' | 'health_economy' | 'political_sentiment')}
+                    onClick={() => {
+                      setActiveFormTab(tab.id as any);
+                      if (tab.id === 'benefits' && editingVoter) {
+                        fetchVoterBenefits(editingVoter);
+                      }
+                    }}
                     className={`px-4 sm:px-5 py-2 text-[11px] uppercase tracking-wider font-extrabold rounded-xl whitespace-nowrap transition-all cursor-pointer ${
                       activeFormTab === tab.id
                         ? 'bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-950 shadow-sm'
@@ -4421,7 +4480,7 @@ function parseIdArray(...inputs: any[]): string[] {
                                     <div className="text-xs text-zinc-500 dark:text-zinc-400 font-medium">
                                       {editingVoter.relationName ? `${editingVoter.relationType || 'Father'}: ${editingVoter.relationName}` : 'No relative specified'}
                                     </div>
-                                    <div className="flex flex-wrap items-center gap-2 mt-1">
+                                    <div className="flex flex-wrap items-center gap-2 mt-1.5">
                                       <span className="text-xs font-bold text-zinc-700 dark:text-zinc-300">
                                         {editingVoter.gender}, {editingVoter.age} Yrs
                                       </span>
@@ -4429,6 +4488,25 @@ function parseIdArray(...inputs: any[]): string[] {
                                         <span className="text-[10px] font-black uppercase text-zinc-500 dark:text-zinc-400 bg-zinc-200/60 dark:bg-zinc-800 px-2 py-0.5 rounded">
                                           {editingVoter.caste}
                                         </span>
+                                      )}
+                                      {editingVoter.isKaryakarta && (
+                                        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-amber-500 text-white shadow-xs">
+                                          <Star size={9} className="fill-white" />
+                                          <span>Active Karyakarta</span>
+                                        </span>
+                                      )}
+                                      {(editingVoter.benefitsCount || 0) > 0 && (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setActiveFormTab('benefits');
+                                            fetchVoterBenefits(editingVoter);
+                                          }}
+                                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-bold bg-purple-100 dark:bg-purple-950/60 text-purple-700 dark:text-purple-300 border border-purple-200/60 hover:bg-purple-200 transition-colors cursor-pointer"
+                                        >
+                                          <Gift size={9} />
+                                          <span>{editingVoter.benefitsCount} Benefits (₹{editingVoter.benefitsTotalAmount?.toLocaleString('en-IN')})</span>
+                                        </button>
                                       )}
                                     </div>
                                   </div>
@@ -5161,6 +5239,143 @@ function parseIdArray(...inputs: any[]): string[] {
                               )}
                             </div>
                           )}
+
+                          {/* TAB 5: WELFARE & BENEFITS (VIEW MODE) */}
+                          {activeFormTab === 'benefits' && (
+                            <div className="space-y-6 animate-in fade-in duration-200">
+                              {/* Elector Header Card with Booth & Mandal */}
+                              <div className="p-5 rounded-3xl bg-gradient-to-r from-purple-50/70 via-indigo-50/40 to-zinc-50 dark:from-purple-950/20 dark:via-indigo-950/15 dark:to-zinc-900/30 border border-purple-100 dark:border-purple-900/30 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                                <div className="flex items-center gap-4">
+                                  <div className="w-14 h-14 rounded-2xl bg-white dark:bg-zinc-900 border border-purple-200 dark:border-purple-800/50 flex items-center justify-center text-purple-600 dark:text-purple-400 shadow-sm shrink-0">
+                                    <Gift size={30} />
+                                  </div>
+                                  <div>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white">
+                                        {editingVoter.name}
+                                      </h3>
+                                      {editingVoter.isKaryakarta && (
+                                        <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-black bg-amber-500 text-white shadow-xs">
+                                          <Star size={10} className="fill-white" />
+                                          <span>Active Karyakarta</span>
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="text-xs text-zinc-500 mt-0.5">
+                                      EPIC: <span className="font-mono font-bold dark:text-zinc-300">{editingVoter.voterId}</span> • 
+                                      {editingVoter.mobile ? ` Mobile: ${editingVoter.mobile} • ` : ' '}
+                                      {editingVoter.boothName || `Booth #${editingVoter.boothId}`} • 
+                                      {editingVoter.mandalName || 'Mandal General'}
+                                    </p>
+                                  </div>
+                                </div>
+
+                                <a
+                                  href={`/benefits`}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl text-xs font-bold bg-purple-600 hover:bg-purple-700 text-white shadow-sm transition-all self-start md:self-center"
+                                >
+                                  <Plus size={14} />
+                                  <span>Grant / Record Benefit</span>
+                                </a>
+                              </div>
+
+                              {/* Benefit Metric Cards */}
+                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                                <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Total Aid Received</span>
+                                  <p className="text-2xl font-black font-mono text-zinc-900 dark:text-white mt-1">
+                                    ₹{voterBenefits.reduce((sum, b) => sum + (Number(b.amount) || 0), 0).toLocaleString('en-IN')}
+                                  </p>
+                                </div>
+                                <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Government Schemes</span>
+                                  <p className="text-2xl font-black font-mono text-purple-600 dark:text-purple-400 mt-1">
+                                    {voterBenefits.filter(b => (b.benefitType || b.benefit_type) === 'Government').length} Schemes
+                                  </p>
+                                </div>
+                                <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xs">
+                                  <span className="text-[10px] font-black uppercase tracking-wider text-zinc-400 block">Party / Campaign Grants</span>
+                                  <p className="text-2xl font-black font-mono text-orange-600 dark:text-orange-400 mt-1">
+                                    {voterBenefits.filter(b => (b.benefitType || b.benefit_type) === 'Party').length} Grants
+                                  </p>
+                                </div>
+                              </div>
+
+                              {/* Benefits List Table */}
+                              <div className="rounded-2xl border border-zinc-200 dark:border-zinc-800 overflow-hidden bg-white dark:bg-zinc-900 shadow-xs">
+                                <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/50 flex items-center justify-between">
+                                  <h4 className="text-xs font-black uppercase tracking-wider text-zinc-900 dark:text-white flex items-center gap-2">
+                                    <Gift size={14} className="text-purple-600" />
+                                    Aid & Benefit History
+                                  </h4>
+                                  <span className="text-[10px] font-bold font-mono px-2 py-0.5 rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400">
+                                    {voterBenefits.length} records
+                                  </span>
+                                </div>
+
+                                {loadingVoterBenefits ? (
+                                  <div className="p-12 text-center">
+                                    <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin mx-auto mb-2"></div>
+                                    <p className="text-xs text-zinc-400">Loading benefits history...</p>
+                                  </div>
+                                ) : voterBenefits.length === 0 ? (
+                                  <div className="p-12 text-center">
+                                    <Gift size={32} className="mx-auto text-zinc-300 dark:text-zinc-700 mb-2 opacity-60" />
+                                    <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300">No Welfare Benefits Logged</p>
+                                    <p className="text-xs text-zinc-400 mt-1 max-w-sm mx-auto">
+                                      This citizen has not been recorded as a beneficiary of Government schemes or Party grants yet.
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <div className="overflow-x-auto">
+                                    <table className="w-full text-left text-xs">
+                                      <thead className="bg-zinc-50 dark:bg-zinc-950 text-zinc-400 text-[10px] uppercase font-bold tracking-wider border-b border-zinc-200 dark:border-zinc-800">
+                                        <tr>
+                                          <th className="py-2.5 px-4">Scheme / Program</th>
+                                          <th className="py-2.5 px-4">Type</th>
+                                          <th className="py-2.5 px-4">Date</th>
+                                          <th className="py-2.5 px-4">Witness / Proof</th>
+                                          <th className="py-2.5 px-4 text-right">Value (INR)</th>
+                                        </tr>
+                                      </thead>
+                                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800 font-medium">
+                                        {voterBenefits.map((b, idx) => (
+                                          <tr key={b.id || idx} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-800/40">
+                                            <td className="py-3 px-4 font-bold text-zinc-900 dark:text-white">
+                                              {b.benefitName || b.benefit_name}
+                                              {b.notes && (
+                                                <p className="text-[10px] text-zinc-400 font-normal mt-0.5">{b.notes}</p>
+                                              )}
+                                            </td>
+                                            <td className="py-3 px-4">
+                                              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider ${
+                                                (b.benefitType || b.benefit_type) === 'Government'
+                                                  ? 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/50'
+                                                  : 'bg-orange-50 dark:bg-orange-950/40 text-orange-700 dark:text-orange-300 border border-orange-200/50'
+                                              }`}>
+                                                {b.benefitType || b.benefit_type || 'Government'}
+                                              </span>
+                                            </td>
+                                            <td className="py-3 px-4 font-mono text-zinc-500">
+                                              {b.date || b.distribution_date || 'N/A'}
+                                            </td>
+                                            <td className="py-3 px-4 text-zinc-500">
+                                              {b.witnessName || b.witness_name || 'Direct / None'}
+                                            </td>
+                                            <td className="py-3 px-4 text-right font-mono font-bold text-zinc-900 dark:text-white">
+                                              ₹{Number(b.amount || 0).toLocaleString('en-IN')}
+                                            </td>
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
                         </>
                       );
                     })()}
@@ -5453,7 +5668,15 @@ function parseIdArray(...inputs: any[]): string[] {
                               disabled={isVolunteer} 
                               required 
                               value={formData.boothId} 
-                              onChange={e => setFormData({ ...formData, boothId: e.target.value })} 
+                              onChange={e => {
+                                const selectedBid = e.target.value;
+                                const matchedBooth = booths.find(b => String(b.id) === String(selectedBid));
+                                setFormData(prev => ({ 
+                                  ...prev, 
+                                  boothId: selectedBid,
+                                  ...(matchedBooth?.mandalId && !prev.mandalId ? { mandalId: matchedBooth.mandalId } : {})
+                                }));
+                              }} 
                               className={`webapp-input w-full h-11 text-sm font-bold ${isVolunteer ? 'opacity-70 bg-zinc-100 dark:bg-zinc-900 cursor-not-allowed' : ''}`}
                             >
                               <option value="" disabled>Select Polling Booth</option>
@@ -5925,7 +6148,8 @@ function parseIdArray(...inputs: any[]): string[] {
                                         setFormData(prev => ({
                                           ...prev,
                                           boothId: newBoothId,
-                                          constituencyId: foundB?.constituencyId || prev.constituencyId
+                                          constituencyId: foundB?.constituencyId || prev.constituencyId,
+                                          ...(foundB?.mandalId && !prev.mandalId ? { mandalId: foundB.mandalId } : {})
                                         }));
                                       }}
                                       className="webapp-input w-full h-11 text-sm font-bold bg-white dark:bg-zinc-900 border border-indigo-200 dark:border-indigo-900/60 focus:ring-2 focus:ring-indigo-500"

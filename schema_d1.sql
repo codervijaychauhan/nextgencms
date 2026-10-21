@@ -69,6 +69,22 @@ CREATE INDEX IF NOT EXISTS idx_mandal_members_mandal_cat ON mandal_members(manda
 CREATE INDEX IF NOT EXISTS idx_mandal_members_admin ON mandal_members(admin_id);
 CREATE INDEX IF NOT EXISTS idx_mandal_members_mandal ON mandal_members(mandal_id);
 
+CREATE TABLE IF NOT EXISTS mandal_directories (
+    id TEXT NOT NULL PRIMARY KEY,
+    mandal_id TEXT NOT NULL,
+    admin_id TEXT NOT NULL,
+    category_key TEXT NOT NULL,
+    label TEXT NOT NULL,
+    english_label TEXT NOT NULL,
+    target_count INTEGER DEFAULT 10,
+    icon TEXT DEFAULT 'Users',
+    color_class TEXT DEFAULT 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (mandal_id) REFERENCES mandals(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_mandal_directories_mandal_admin ON mandal_directories(mandal_id, admin_id);
+
 CREATE TABLE IF NOT EXISTS panchayats (
     id TEXT NOT NULL PRIMARY KEY,
     name TEXT NOT NULL,

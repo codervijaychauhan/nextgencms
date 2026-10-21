@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   Search, 
@@ -27,7 +27,16 @@ import {
   Network,
   Building2,
   LayoutGrid,
-  List
+  List,
+  ExternalLink,
+  FolderPlus,
+  Flag,
+  Heart,
+  Megaphone,
+  Sparkles,
+  Check,
+  Lock,
+  Filter
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { api } from '../lib/api';
@@ -42,6 +51,10 @@ interface Mandal {
   presidentName?: string;
   presidentPhone?: string;
   voterCount?: number;
+  realVoterCount?: number;
+  boothCount?: number;
+  memberCount?: number;
+  committeeCount?: number;
   population?: number;
   stateId: string;
   stateName?: string;
@@ -105,8 +118,88 @@ interface Volunteer {
   id: string;
   name: string;
   mobile: string;
+  voterId?: string;
+  voter_id?: string;
   adminId: string;
+  admin_id?: string;
+  status?: string;
+  assignedBoothId?: string;
+  assignedBoothName?: string;
+  assignedBoothNumber?: string;
+  village?: string;
+  performanceRating?: number;
 }
+
+export interface MandalDirectory {
+  id: string;
+  mandalId: string;
+  adminId: string;
+  categoryKey: string;
+  label: string;
+  englishLabel: string;
+  targetCount: number;
+  icon?: string;
+  colorClass?: string;
+  isCustom?: boolean;
+}
+
+// Icon choices for directories
+export const DIRECTORY_ICON_CHOICES = [
+  { name: 'Users', label: 'Users / Members', icon: Users },
+  { name: 'Shield', label: 'Shield / Office Bearers', icon: Shield },
+  { name: 'Award', label: 'Award / Leadership', icon: Award },
+  { name: 'Briefcase', label: 'Briefcase / Coordinator', icon: Briefcase },
+  { name: 'Globe', label: 'Globe / Regional', icon: Globe },
+  { name: 'SlidersHorizontal', label: 'Sliders / Cells & Convenors', icon: SlidersHorizontal },
+  { name: 'UserCheck', label: 'UserCheck / Representatives', icon: UserCheck },
+  { name: 'Star', label: 'Star / Special Wing', icon: Star },
+  { name: 'Heart', label: 'Heart / Welfare Wing', icon: Heart },
+  { name: 'Megaphone', label: 'Megaphone / Publicity', icon: Megaphone },
+  { name: 'Flag', label: 'Flag / Morcha', icon: Flag },
+  { name: 'Building2', label: 'Building / Urban Unit', icon: Building2 },
+  { name: 'MapPin', label: 'MapPin / Village Center', icon: MapPin },
+  { name: 'Layers', label: 'Layers / Executive', icon: Layers },
+  { name: 'Sparkles', label: 'Sparkles / Youth & IT', icon: Sparkles }
+];
+
+export const resolveDirectoryIcon = (name?: string) => {
+  if (!name) return Users;
+  const found = DIRECTORY_ICON_CHOICES.find(ic => ic.name.toLowerCase() === name.toLowerCase());
+  if (found) return found.icon;
+  if (name.includes('Shield')) return Shield;
+  if (name.includes('Award')) return Award;
+  if (name.includes('Briefcase')) return Briefcase;
+  if (name.includes('Globe')) return Globe;
+  if (name.includes('Sliders')) return SlidersHorizontal;
+  if (name.includes('UserCheck')) return UserCheck;
+  if (name.includes('MapPin')) return MapPin;
+  if (name.includes('Layers')) return Layers;
+  return Users;
+};
+
+// Color presets for custom directories
+export const DIRECTORY_COLOR_PRESETS = [
+  { label: 'Blue', value: 'text-blue-500 bg-blue-50 dark:bg-blue-950/20', dotClass: 'bg-blue-500' },
+  { label: 'Amber', value: 'text-amber-500 bg-amber-50 dark:bg-amber-950/20', dotClass: 'bg-amber-500' },
+  { label: 'Emerald', value: 'text-emerald-500 bg-emerald-50 dark:bg-emerald-950/20', dotClass: 'bg-emerald-500' },
+  { label: 'Purple', value: 'text-purple-500 bg-purple-50 dark:bg-purple-950/20', dotClass: 'bg-purple-500' },
+  { label: 'Rose', value: 'text-rose-500 bg-rose-50 dark:bg-rose-950/20', dotClass: 'bg-rose-500' },
+  { label: 'Indigo', value: 'text-indigo-500 bg-indigo-50 dark:bg-indigo-950/20', dotClass: 'bg-indigo-500' },
+  { label: 'Teal', value: 'text-teal-500 bg-teal-50 dark:bg-teal-950/20', dotClass: 'bg-teal-500' },
+  { label: 'Orange', value: 'text-orange-500 bg-orange-50 dark:bg-orange-950/20', dotClass: 'bg-orange-500' },
+  { label: 'Cyan', value: 'text-cyan-500 bg-cyan-50 dark:bg-cyan-950/20', dotClass: 'bg-cyan-500' },
+];
+
+export const DESIGNATION_PRESETS = [
+  'अध्यक्ष (President)',
+  'उपाध्यक्ष (Vice President)',
+  'महामंत्री (General Secretary)',
+  'संयोजक (Convenor)',
+  'सह-संयोजक (Co-Convenor)',
+  'प्रभारी (In-charge)',
+  'कोषाध्यक्ष (Treasurer)',
+  'कार्यसमिति सदस्य (Executive Member)'
+];
 
 // Design-approved 8 categories matching the uploaded document
 const MANDAL_CATEGORIES = [
@@ -176,14 +269,39 @@ const MANDAL_CATEGORIES = [
   }
 ];
 
+export const CORE_KEYS = [
+  'office_bearers',
+  'morcha_leaders',
+  'district_representatives',
+  'morcha_coordinators',
+  'state_representatives',
+  'cell_convenors',
+  'former_representatives',
+  'gram_kendra_pramukh'
+];
+
+export const DEFAULT_DIRECTORIES: MandalDirectory[] = MANDAL_CATEGORIES.map(c => ({
+  id: `core_${c.key}`,
+  mandalId: '',
+  adminId: 'default',
+  categoryKey: c.key,
+  label: c.label,
+  englishLabel: c.englishLabel,
+  targetCount: c.targetCount,
+  icon: c.key === 'cell_convenors' ? 'SlidersHorizontal' : (c.key === 'former_representatives' ? 'UserCheck' : (c.key === 'district_representatives' ? 'Layers' : (c.key === 'morcha_coordinators' ? 'Briefcase' : (c.key === 'state_representatives' ? 'Globe' : (c.key === 'gram_kendra_pramukh' ? 'MapPin' : (c.key === 'morcha_leaders' ? 'Award' : 'Shield')))))),
+  colorClass: c.colorClass,
+  isCustom: false
+}));
+
 export default function MandalManagement() {
   const { user, isSuperAdmin, isAdmin, profile, hasPermission } = useAuth();
 
-  // Permission rights check
-  const canView = isSuperAdmin || hasPermission('mandals', 'v');
-  const canCreate = isSuperAdmin || hasPermission('mandals', 'c');
-  const canUpdate = isSuperAdmin || hasPermission('mandals', 'u');
-  const canDelete = isSuperAdmin || hasPermission('mandals', 'd');
+  // Permission rights check - superadmin, admin, and user all have full CRUD access
+  const isAuthorized = isSuperAdmin || isAdmin || profile?.role === 'user' || !!user;
+  const canView = isAuthorized || hasPermission('mandals', 'v');
+  const canCreate = isAuthorized || hasPermission('mandals', 'c');
+  const canUpdate = isAuthorized || hasPermission('mandals', 'u');
+  const canDelete = isAuthorized || hasPermission('mandals', 'd');
 
   // Component states
   const [mandals, setMandals] = useState<Mandal[]>([]);
@@ -225,6 +343,30 @@ export default function MandalManagement() {
   // Delete confirmation
   const [deleteConfirmId, setDeleteConfirmId] = useState('');
 
+  // Mandal Voters Modal state
+  const [selectedMandalForVoters, setSelectedMandalForVoters] = useState<Mandal | null>(null);
+  const [mandalVoters, setMandalVoters] = useState<any[]>([]);
+  const [loadingMandalVoters, setLoadingMandalVoters] = useState(false);
+  const [mandalVoterSearch, setMandalVoterSearch] = useState('');
+  const [mandalVoterFilter, setMandalVoterFilter] = useState<'all' | 'karyakarta' | 'beneficiary' | 'voted'>('all');
+
+  const openMandalVoters = async (mandal: Mandal) => {
+    setSelectedMandalForVoters(mandal);
+    setLoadingMandalVoters(true);
+    setMandalVoterSearch('');
+    setMandalVoterFilter('all');
+    try {
+      const res = await api.get<any>(`/api/voters?mandalId=${encodeURIComponent(mandal.id)}&limit=500`);
+      const raw = Array.isArray(res) ? res : (res?.data || []);
+      setMandalVoters(raw);
+    } catch (err) {
+      console.error('Failed to load mandal voters:', err);
+      setMandalVoters([]);
+    } finally {
+      setLoadingMandalVoters(false);
+    }
+  };
+
   // --- MEMBER/LIST MANAGEMENT STATES ---
   const [selectedMandalForMembers, setSelectedMandalForMembers] = useState<Mandal | null>(null);
   const [members, setMembers] = useState<MandalMember[]>([]);
@@ -232,6 +374,21 @@ export default function MandalManagement() {
   const [isMemberModalOpen, setIsMemberModalOpen] = useState(false);
   const [editingMember, setEditingMember] = useState<MandalMember | null>(null);
   
+  // Custom & Core Directories State
+  const [customDirectories, setCustomDirectories] = useState<MandalDirectory[]>(DEFAULT_DIRECTORIES);
+  const [customDirsLoading, setCustomDirsLoading] = useState(false);
+  const [directoryFilterTab, setDirectoryFilterTab] = useState<'all' | 'core' | 'custom'>('all');
+  const [isDirModalOpen, setIsDirModalOpen] = useState(false);
+  const [editingDir, setEditingDir] = useState<MandalDirectory | null>(null);
+  const [dirFormLabel, setDirFormLabel] = useState('');
+  const [dirFormEnglishLabel, setDirFormEnglishLabel] = useState('');
+  const [dirFormTargetCount, setDirFormTargetCount] = useState<number | ''>(15);
+  const [dirFormIcon, setDirFormIcon] = useState('Users');
+  const [dirFormColor, setDirFormColor] = useState('text-blue-500 bg-blue-50 dark:bg-blue-950/20');
+
+  // Permission rights check - superadmin, admin, and user all have full CRUD access on directory lists
+  const canManageDirectories = isAuthorized || canUpdate || canCreate;
+
   // Member Form fields
   const [memberFormCategory, setMemberFormCategory] = useState('');
   const [memberFormName, setMemberFormName] = useState('');
@@ -239,6 +396,13 @@ export default function MandalManagement() {
   const [memberFormVoterId, setMemberFormVoterId] = useState('');
   const [memberFormDesignation, setMemberFormDesignation] = useState('');
   
+  // Member modal mode: Karyakarta Link, Voter Link, or Manual Entry
+  const [memberModalTab, setMemberModalTab] = useState<'karyakarta' | 'voter' | 'manual'>('karyakarta');
+  const [karyakartaSearchText, setKaryakartaSearchText] = useState('');
+  const [selectedKaryakartaForLink, setSelectedKaryakartaForLink] = useState<Volunteer | null>(null);
+  const [directoryMemberSearch, setDirectoryMemberSearch] = useState('');
+  const [directoryMemberFilter, setDirectoryMemberFilter] = useState<'all' | 'karyakarta' | 'other'>('all');
+
   // Voter list linkage search fields
   const [isVoterSearchOpen, setIsVoterSearchOpen] = useState(false);
   const [constituencyVoters, setConstituencyVoters] = useState<Voter[]>([]);
@@ -248,6 +412,44 @@ export default function MandalManagement() {
 
   // Active expanded list key in members detail view
   const [expandedCategoryKey, setExpandedCategoryKey] = useState<string | null>('office_bearers');
+
+  // Dynamic directory categories for this mandal
+  const allCategories = useMemo(() => {
+    const list = customDirectories.length > 0 ? customDirectories : DEFAULT_DIRECTORIES;
+    return list.map(cd => ({
+      key: cd.categoryKey,
+      label: cd.label,
+      englishLabel: cd.englishLabel,
+      targetCount: cd.targetCount,
+      icon: resolveDirectoryIcon(cd.icon),
+      iconName: cd.icon || 'Users',
+      colorClass: cd.colorClass || 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+      isCustom: cd.isCustom !== undefined ? cd.isCustom : !CORE_KEYS.includes(cd.categoryKey),
+      id: cd.id,
+      adminId: cd.adminId,
+      rawDir: cd
+    }));
+  }, [customDirectories]);
+
+  // Dynamic total target quota across all directories
+  const totalTargetQuota = useMemo(() => {
+    return allCategories.reduce((sum, c) => sum + (Number(c.targetCount) || 0), 0);
+  }, [allCategories]);
+
+  // Overall completion percentage
+  const completionRate = useMemo(() => {
+    if (totalTargetQuota === 0) return 0;
+    return Math.min(100, Math.round((members.length / totalTargetQuota) * 100));
+  }, [members.length, totalTargetQuota]);
+
+  // Helper: check if a member is an active karyakarta
+  const isMemberKaryakarta = (member: MandalMember) => {
+    return volunteers.some(v => 
+      (v.voterId && member.voterId && v.voterId.trim().toLowerCase() === member.voterId.trim().toLowerCase()) ||
+      (v.mobile && member.phone && v.mobile.replace(/\D/g, '') === member.phone.replace(/\D/g, '') && v.mobile.length >= 10) ||
+      (v.name && member.name && v.name.trim().toLowerCase() === member.name.trim().toLowerCase())
+    );
+  };
 
   // Load admins list for Super Admin
   useEffect(() => {
@@ -281,6 +483,18 @@ export default function MandalManagement() {
     if (admEmail) return admEmail.split('@')[0];
     if (admId) return admId.length > 12 ? `${admId.slice(0, 10)}...` : admId;
     return 'Campaign Admin';
+  };
+
+  // Helper to resolve real-time committee count for any Mandal (localStorage + DB sync)
+  const getMandalCommitteeCount = (mandal: Mandal) => {
+    try {
+      const cached = localStorage.getItem(`mandal_custom_dirs_${mandal.id}`);
+      if (cached) {
+        const parsed = JSON.parse(cached);
+        if (Array.isArray(parsed) && parsed.length >= 0) return parsed.length;
+      }
+    } catch {}
+    return Number(mandal.committeeCount !== undefined && mandal.committeeCount !== null ? mandal.committeeCount : 8);
   };
 
   // Fetch initial configuration / metadata
@@ -326,13 +540,263 @@ export default function MandalManagement() {
       try {
         const url = adminFilter !== 'All' ? `/api/volunteers?adminId=${adminFilter}` : '/api/volunteers';
         const volList = await api.get<any[]>(url).catch(() => []);
-        setVolunteers(volList.map(v => ({ ...v, id: String(v.id) })));
+        setVolunteers(volList.map((v: any) => ({
+          ...v,
+          id: String(v.id),
+          voterId: v.voter_id || v.voterId || '',
+          adminId: v.admin_id || v.adminId || '',
+          assignedBoothName: v.assigned_booth_name || v.assignedBoothName || '',
+          assignedBoothNumber: v.assigned_booth_number || v.assignedBoothNumber || '',
+          village: v.village || '',
+          status: v.status || 'Active'
+        })));
       } catch (e) {
         console.error('Error loading volunteers for mandals:', e);
       }
     };
     loadVolunteers();
   }, [user, adminFilter]);
+
+  // Fetch Directories for selected Mandal (Visible across the mandal to all users)
+  const fetchCustomDirectories = async (mandalId: string) => {
+    try {
+      setCustomDirsLoading(true);
+      const storageKey = `mandal_custom_dirs_${mandalId}`;
+      
+      let localCached: MandalDirectory[] = [];
+      const rawCached = localStorage.getItem(storageKey);
+      if (rawCached) {
+        try {
+          localCached = JSON.parse(rawCached);
+          if (Array.isArray(localCached) && localCached.length > 0) {
+            setCustomDirectories(localCached);
+          }
+        } catch {}
+      } else {
+        setCustomDirectories(DEFAULT_DIRECTORIES);
+      }
+
+      try {
+        const apiDirs = await api.get<any[]>(`/api/mandals/${mandalId}/directories`);
+        if (Array.isArray(apiDirs) && apiDirs.length > 0) {
+          const mapped: MandalDirectory[] = apiDirs.map((d: any) => ({
+            id: String(d.id),
+            mandalId: String(d.mandal_id || d.mandalId || mandalId),
+            adminId: String(d.admin_id || d.adminId || 'default'),
+            categoryKey: d.category_key || d.categoryKey,
+            label: d.label,
+            englishLabel: d.english_label || d.englishLabel || d.label,
+            targetCount: Number(d.target_count || d.targetCount || 10),
+            icon: d.icon || 'Users',
+            colorClass: d.color_class || d.colorClass || 'text-blue-500 bg-blue-50 dark:bg-blue-950/20',
+            isCustom: d.is_custom !== undefined ? Boolean(d.is_custom) : !CORE_KEYS.includes(d.category_key || d.categoryKey)
+          }));
+          setCustomDirectories(mapped);
+          localStorage.setItem(storageKey, JSON.stringify(mapped));
+          setMandals(mPrev => mPrev.map(m => m.id === mandalId ? { ...m, committeeCount: mapped.length } : m));
+          return;
+        }
+      } catch (e) {
+        // Cached version in localCached is active
+      }
+    } catch (err) {
+      console.error('Error in fetchCustomDirectories:', err);
+    } finally {
+      setCustomDirsLoading(false);
+    }
+  };
+
+  // Open directory modal
+  const openDirModal = (dir?: MandalDirectory) => {
+    if (dir) {
+      setEditingDir(dir);
+      setDirFormLabel(dir.label);
+      setDirFormEnglishLabel(dir.englishLabel);
+      setDirFormTargetCount(dir.targetCount);
+      setDirFormIcon(dir.icon || 'Users');
+      setDirFormColor(dir.colorClass || 'text-blue-500 bg-blue-50 dark:bg-blue-950/20');
+    } else {
+      setEditingDir(null);
+      setDirFormLabel('');
+      setDirFormEnglishLabel('');
+      setDirFormTargetCount(15);
+      setDirFormIcon('Users');
+      setDirFormColor('text-blue-500 bg-blue-50 dark:bg-blue-950/20');
+    }
+    setIsDirModalOpen(true);
+  };
+
+  // Save directory (persists to backend & localStorage fallback)
+  const handleSaveDirectory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedMandalForMembers) return;
+    if (!dirFormLabel.trim()) {
+      setError('Directory title is required.');
+      return;
+    }
+
+    const effectiveAdmin = selectedMandalForMembers.adminId || user?.uid || profile?.adminId || 'default';
+    const targetCountNum = Number(dirFormTargetCount) || 10;
+    const storageKey = `mandal_custom_dirs_${selectedMandalForMembers.id}`;
+
+    try {
+      setError('');
+      setSuccess('');
+
+      if (editingDir) {
+        const payload = {
+          id: editingDir.id,
+          mandal_id: selectedMandalForMembers.id,
+          category_key: editingDir.categoryKey,
+          label: dirFormLabel.trim(),
+          english_label: dirFormEnglishLabel.trim() || dirFormLabel.trim(),
+          target_count: targetCountNum,
+          icon: dirFormIcon,
+          color_class: dirFormColor,
+          admin_id: effectiveAdmin
+        };
+
+        try {
+          await api.put(`/api/mandals/directories/${editingDir.id}`, payload);
+        } catch (err) {
+          try {
+            await api.post(`/api/mandals/${selectedMandalForMembers.id}/directories`, payload);
+          } catch (e) {
+            console.warn('API directory update fallback:', e);
+          }
+        }
+
+        setCustomDirectories(prev => {
+          const baseList = prev.length > 0 ? prev : DEFAULT_DIRECTORIES;
+          const exists = baseList.some(d => d.id === editingDir.id || d.categoryKey === editingDir.categoryKey);
+          let updated: MandalDirectory[];
+          if (exists) {
+            updated = baseList.map(d => (d.id === editingDir.id || d.categoryKey === editingDir.categoryKey) ? {
+              ...d,
+              label: payload.label,
+              englishLabel: payload.english_label,
+              targetCount: targetCountNum,
+              icon: payload.icon,
+              colorClass: payload.color_class
+            } : d);
+          } else {
+            updated = [...baseList, {
+              id: editingDir.id,
+              mandalId: selectedMandalForMembers.id,
+              adminId: effectiveAdmin,
+              categoryKey: editingDir.categoryKey,
+              label: payload.label,
+              englishLabel: payload.english_label,
+              targetCount: targetCountNum,
+              icon: payload.icon,
+              colorClass: payload.color_class,
+              isCustom: editingDir.isCustom
+            }];
+          }
+          localStorage.setItem(storageKey, JSON.stringify(updated));
+          return updated;
+        });
+
+        setSuccess(`Directory "${payload.label}" updated successfully.`);
+      } else {
+        const catKey = `custom_${Date.now()}`;
+        const payload = {
+          mandal_id: selectedMandalForMembers.id,
+          category_key: catKey,
+          label: dirFormLabel.trim(),
+          english_label: dirFormEnglishLabel.trim() || dirFormLabel.trim(),
+          target_count: targetCountNum,
+          icon: dirFormIcon,
+          color_class: dirFormColor,
+          admin_id: effectiveAdmin
+        };
+
+        let newId = `mdir_${Date.now()}`;
+        try {
+          const res = await api.post<any>(`/api/mandals/${selectedMandalForMembers.id}/directories`, payload);
+          if (res?.id) newId = String(res.id);
+        } catch (err) {
+          console.warn('API directory create fallback:', err);
+        }
+
+        const newDir: MandalDirectory = {
+          id: newId,
+          mandalId: selectedMandalForMembers.id,
+          adminId: effectiveAdmin,
+          categoryKey: catKey,
+          label: payload.label,
+          englishLabel: payload.english_label,
+          targetCount: targetCountNum,
+          icon: payload.icon,
+          colorClass: payload.color_class,
+          isCustom: true
+        };
+
+        setCustomDirectories(prev => {
+          const baseList = prev.length > 0 ? prev : DEFAULT_DIRECTORIES;
+          const updated = [...baseList, newDir];
+          localStorage.setItem(storageKey, JSON.stringify(updated));
+          setMandals(mPrev => mPrev.map(m => m.id === selectedMandalForMembers.id ? { ...m, committeeCount: updated.length } : m));
+          return updated;
+        });
+
+        setExpandedCategoryKey(catKey);
+        setSuccess(`New directory "${payload.label}" created successfully.`);
+      }
+
+      setIsDirModalOpen(false);
+      setEditingDir(null);
+    } catch (err: any) {
+      setError(err?.response?.data?.error || err?.message || 'Failed to save directory.');
+    }
+  };
+
+  // Delete directory
+  const handleDeleteDirectory = async (dir: MandalDirectory) => {
+    if (!selectedMandalForMembers) return;
+    if (!window.confirm(`Are you sure you want to remove the directory "${dir.label}"? All members assigned to this directory will also be unassigned.`)) {
+      return;
+    }
+
+    const storageKey = `mandal_custom_dirs_${selectedMandalForMembers.id}`;
+
+    try {
+      setError('');
+      setSuccess('');
+
+      try {
+        await api.delete(`/api/mandals/directories/${dir.id}`);
+      } catch (err) {
+        console.warn('API delete directory fallback:', err);
+      }
+
+      setCustomDirectories(prev => {
+        const baseList = prev.length > 0 ? prev : DEFAULT_DIRECTORIES;
+        const updated = baseList.filter(d => d.id !== dir.id && d.categoryKey !== dir.categoryKey);
+        localStorage.setItem(storageKey, JSON.stringify(updated));
+        setMandals(mPrev => mPrev.map(m => m.id === selectedMandalForMembers.id ? { ...m, committeeCount: updated.length } : m));
+        return updated;
+      });
+
+      setMembers(prev => prev.filter(m => m.categoryKey !== dir.categoryKey));
+
+      if (expandedCategoryKey === dir.categoryKey) {
+        setCustomDirectories(prev => {
+          const remaining = prev.filter(d => d.id !== dir.id && d.categoryKey !== dir.categoryKey);
+          if (remaining.length > 0) {
+            setExpandedCategoryKey(remaining[0].categoryKey);
+          } else {
+            setExpandedCategoryKey(null);
+          }
+          return remaining;
+        });
+      }
+
+      setSuccess(`Directory "${dir.label}" removed.`);
+    } catch (err: any) {
+      setError(err?.message || 'Failed to delete directory.');
+    }
+  };
 
   // Fetch Mandals from API
   const fetchMandals = async () => {
@@ -348,7 +812,15 @@ export default function MandalManagement() {
         mandalCode: m.mandal_code || m.mandalCode || '',
         presidentName: m.president_name || m.presidentName || '',
         presidentPhone: m.president_phone || m.presidentPhone || '',
-        voterCount: m.voter_count !== undefined ? m.voter_count : (m.voterCount || 0),
+        voterCount: Number(m.real_voter_count !== undefined && m.real_voter_count !== null 
+          ? m.real_voter_count 
+          : (m.voter_count !== undefined ? m.voter_count : (m.voterCount || 0))),
+        realVoterCount: Number(m.real_voter_count || 0),
+        boothCount: Number(m.booth_count || 0),
+        memberCount: Number(m.member_count || 0),
+        committeeCount: Number(m.committee_count !== undefined && m.committee_count !== null 
+          ? m.committee_count 
+          : (m.committeeCount !== undefined && m.committeeCount !== null ? m.committeeCount : 8)),
         population: m.population || 0,
         stateId: String(m.state_id || m.stateId || ''),
         stateName: m.state_name || m.stateName || '',
@@ -421,6 +893,7 @@ export default function MandalManagement() {
     setSelectedMandalForMembers(mandal);
     fetchMandalMembers(mandal.id);
     fetchConstituencyVoters(mandal.constituencyId);
+    fetchCustomDirectories(mandal.id);
   };
 
   // Handle Volunteer/Karyakarta President assignment selection
@@ -508,7 +981,7 @@ export default function MandalManagement() {
         state_id: selectedState,
         district_id: selectedDistrict,
         constituency_id: selectedConstituency,
-        admin_id: isSuperAdmin && formAdminId ? formAdminId : undefined
+        admin_id: (isSuperAdmin && formAdminId) ? formAdminId : (formAdminId || user?.uid || profile?.adminId || undefined)
       };
 
       if (isEditMode) {
@@ -560,7 +1033,9 @@ export default function MandalManagement() {
   const openMemberModal = (categoryKey: string, member?: MandalMember) => {
     setMemberFormCategory(categoryKey);
     setSelectedVoterForLink(null);
+    setSelectedKaryakartaForLink(null);
     setVoterSearchText('');
+    setKaryakartaSearchText('');
     
     if (member) {
       setEditingMember(member);
@@ -568,21 +1043,47 @@ export default function MandalManagement() {
       setMemberFormPhone(member.phone || '');
       setMemberFormVoterId(member.voterId || '');
       setMemberFormDesignation(member.designation || '');
+      
+      const matchedK = volunteers.find(v => 
+        (v.voterId && member.voterId && v.voterId.trim().toLowerCase() === member.voterId.trim().toLowerCase()) ||
+        (v.mobile && member.phone && v.mobile === member.phone)
+      );
+      if (matchedK) {
+        setSelectedKaryakartaForLink(matchedK);
+        setMemberModalTab('karyakarta');
+      } else {
+        setMemberModalTab('manual');
+      }
     } else {
       setEditingMember(null);
       setMemberFormName('');
       setMemberFormPhone('');
       setMemberFormVoterId('');
+      setMemberModalTab('karyakarta'); // Default to Karyakarta linking tab
       
-      const matchedCat = MANDAL_CATEGORIES.find(c => c.key === categoryKey);
+      const matchedCat = allCategories.find(c => c.key === categoryKey);
       setMemberFormDesignation(matchedCat ? matchedCat.englishLabel : '');
     }
     setIsMemberModalOpen(true);
   };
 
+  // Handle selecting a Karyakarta from volunteer list
+  const handleSelectKaryakarta = (karyakarta: Volunteer) => {
+    setSelectedKaryakartaForLink(karyakarta);
+    setSelectedVoterForLink(null);
+    setMemberFormName(karyakarta.name);
+    setMemberFormPhone(karyakarta.mobile || '');
+    setMemberFormVoterId(karyakarta.voterId || '');
+    if (!memberFormDesignation) {
+      const matchedCat = allCategories.find(c => c.key === memberFormCategory);
+      setMemberFormDesignation(matchedCat ? matchedCat.englishLabel : 'Mandal Committee Member');
+    }
+  };
+
   // Handle linking selected voter from list
   const handleLinkVoter = (voter: Voter) => {
     setSelectedVoterForLink(voter);
+    setSelectedKaryakartaForLink(null);
     setMemberFormName(voter.name);
     setMemberFormPhone(voter.mobile || '');
     setMemberFormVoterId(voter.voterId);
@@ -614,12 +1115,63 @@ export default function MandalManagement() {
         setSuccess('Member assignment updated successfully.');
       } else {
         await api.post(`/api/mandals/${selectedMandalForMembers.id}/members`, payload);
-        setSuccess('Member added to list successfully.');
+        setSuccess('Member added to directory successfully.');
+      }
+
+      // Automatically synchronize Karyakarta / Volunteer record to link to this Mandal
+      if (selectedKaryakartaForLink) {
+        if (selectedKaryakartaForLink.id) {
+          try {
+            await api.put(`/api/volunteers/${selectedKaryakartaForLink.id}`, {
+              mandal_id: selectedMandalForMembers.id,
+              status: 'Active'
+            });
+          } catch (syncErr) {
+            console.warn('Volunteer mandal sync note:', syncErr);
+          }
+        }
+        if (selectedKaryakartaForLink.voterId) {
+          try {
+            const vRes = await api.get<{ data: any[] }>(`/api/voters?search=${encodeURIComponent(selectedKaryakartaForLink.voterId)}&limit=1`);
+            const matched = vRes?.data?.[0];
+            if (matched?.id) {
+              await api.put(`/api/voters/${matched.id}`, {
+                is_karyakarta: 1,
+                mandal_id: selectedMandalForMembers.id
+              });
+            }
+          } catch (syncErr) {
+            console.warn('Voter karyakarta sync note:', syncErr);
+          }
+        }
+      } else if (selectedVoterForLink?.id) {
+        try {
+          await api.put(`/api/voters/${selectedVoterForLink.id}`, {
+            is_karyakarta: 1,
+            mandal_id: selectedMandalForMembers.id
+          });
+        } catch (syncErr) {
+          console.warn('Voter karyakarta sync note:', syncErr);
+        }
+      } else if (memberFormVoterId.trim()) {
+        try {
+          const vRes = await api.get<{ data: any[] }>(`/api/voters?search=${encodeURIComponent(memberFormVoterId.trim())}&limit=1`);
+          const matched = vRes?.data?.[0];
+          if (matched?.id) {
+            await api.put(`/api/voters/${matched.id}`, {
+              is_karyakarta: 1,
+              mandal_id: selectedMandalForMembers.id
+            });
+          }
+        } catch (syncErr) {
+          console.warn('Voter sync by EPIC note:', syncErr);
+        }
       }
 
       setIsMemberModalOpen(false);
       setEditingMember(null);
       fetchMandalMembers(selectedMandalForMembers.id);
+      fetchMandals();
     } catch (err: any) {
       console.error('Error saving member:', err);
       const msg = err?.response?.data?.error || err?.message || 'Failed to save list member.';
@@ -711,19 +1263,44 @@ export default function MandalManagement() {
               </p>
             </div>
             
-            <div className="grid grid-cols-2 gap-4 text-center bg-zinc-50 dark:bg-zinc-950 p-4 rounded-xl border border-zinc-100 dark:border-zinc-800/40">
-              <div>
-                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Total Commitee Members</span>
-                <p className="text-xl font-extrabold text-zinc-800 dark:text-zinc-100 mt-1">
-                  {members.length} / 146
-                </p>
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center bg-zinc-50 dark:bg-zinc-950 p-3 rounded-xl border border-zinc-150 dark:border-zinc-800/40">
+                <div className="px-2">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Total Members</span>
+                  <p className="text-lg font-extrabold text-zinc-800 dark:text-zinc-100 mt-0.5">
+                    {members.length} / {totalTargetQuota}
+                  </p>
+                </div>
+                <div className="px-2 border-l border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] font-bold text-emerald-500 uppercase tracking-wider block">Karyakartas</span>
+                  <p className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    {members.filter(m => isMemberKaryakarta(m)).length}
+                  </p>
+                </div>
+                <div className="px-2 border-l border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Directories</span>
+                  <p className="text-lg font-extrabold text-zinc-800 dark:text-zinc-100 mt-0.5">
+                    {allCategories.length}
+                  </p>
+                </div>
+                <div className="px-2 border-l border-zinc-200 dark:border-zinc-800">
+                  <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider block">Completion</span>
+                  <p className="text-lg font-extrabold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    {completionRate}%
+                  </p>
+                </div>
               </div>
-              <div>
-                <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Completion Rate</span>
-                <p className="text-xl font-extrabold text-emerald-600 dark:text-emerald-400 mt-1">
-                  {Math.round((members.length / 146) * 100)}%
-                </p>
-              </div>
+
+              {canManageDirectories && (
+                <button
+                  id="header-add-directory-btn"
+                  onClick={() => openDirModal()}
+                  className="flex items-center gap-1.5 px-3.5 py-2.5 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 text-xs font-bold rounded-xl transition-all shadow-sm"
+                >
+                  <FolderPlus className="h-4 w-4" />
+                  <span>+ Add Directory / List</span>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -750,86 +1327,216 @@ export default function MandalManagement() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">
             
-            {/* Left Column: List of 8 categories with progress bars */}
+            {/* Left Column: List of Core + Custom Directories */}
             <div className="lg:col-span-5 space-y-3">
-              <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider px-1">
-                8 Core Directories
-              </h3>
-              
-              {MANDAL_CATEGORIES.map((category, idx) => {
-                const categoryMembers = members.filter(m => m.categoryKey === category.key);
-                const count = categoryMembers.length;
-                const percent = Math.min(100, Math.round((count / category.targetCount) * 100));
-                const isSelected = expandedCategoryKey === category.key;
-                const Icon = category.icon;
-
-                return (
+              <div className="flex items-center justify-between px-1">
+                <div className="flex items-center gap-2">
+                  <h3 className="text-xs font-bold text-zinc-400 uppercase tracking-wider">
+                    Directories ({allCategories.length})
+                  </h3>
+                </div>
+                {canManageDirectories && (
                   <button
-                    key={category.key}
-                    onClick={() => setExpandedCategoryKey(category.key)}
-                    className={`w-full text-left p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 ${
-                      isSelected 
-                        ? 'bg-white dark:bg-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-md ring-1 ring-zinc-900 dark:ring-zinc-100' 
-                        : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 shadow-sm'
-                    }`}
+                    id="left-add-directory-btn"
+                    onClick={() => openDirModal()}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold text-blue-600 dark:text-blue-400 hover:underline"
                   >
-                    <div className="flex items-start justify-between w-full">
-                      <div className="flex items-start gap-3">
-                        <div className={`p-2 rounded-lg shrink-0 ${category.colorClass}`}>
-                          <Icon className="h-4.5 w-4.5" />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-bold text-zinc-400 tracking-wide uppercase">
-                            Category {idx + 1}
-                          </p>
-                          <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 leading-snug">
-                            {category.label}
-                          </h4>
-                          <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5 line-clamp-1">
-                            {category.englishLabel}
-                          </p>
-                        </div>
-                      </div>
-                      
-                      <div className="text-right shrink-0">
-                        <span className="text-xs font-extrabold text-zinc-900 dark:text-zinc-100">
-                          {count} / {category.targetCount}
-                        </span>
-                        <p className="text-[9px] text-zinc-400 font-semibold mt-0.5">Target</p>
-                      </div>
-                    </div>
-
-                    {/* Progress Bar */}
-                    <div className="w-full">
-                      <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
-                        <div 
-                          className={`h-full rounded-full transition-all duration-500 ${
-                            percent === 100 
-                              ? 'bg-emerald-600' 
-                              : percent > 50 
-                              ? 'bg-zinc-700 dark:bg-zinc-300' 
-                              : 'bg-amber-500'
-                          }`}
-                          style={{ width: `${percent}%` }}
-                        />
-                      </div>
-                      <div className="flex justify-between items-center mt-1 text-[10px] text-zinc-400 font-medium">
-                        <span>{percent}% Completed</span>
-                        <span>{category.targetCount - count} Needed</span>
-                      </div>
-                    </div>
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add New List</span>
                   </button>
-                );
-              })}
+                )}
+              </div>
+
+              {/* Directory Filter Tabs: All, Core, Custom */}
+              <div className="flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-800/60 rounded-lg text-xs">
+                <button
+                  type="button"
+                  onClick={() => setDirectoryFilterTab('all')}
+                  className={`flex-1 py-1 px-2 rounded-md font-semibold transition-all text-center ${
+                    directoryFilterTab === 'all'
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  All ({allCategories.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDirectoryFilterTab('core')}
+                  className={`flex-1 py-1 px-2 rounded-md font-semibold transition-all text-center ${
+                    directoryFilterTab === 'core'
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Core ({allCategories.filter(c => !c.isCustom).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDirectoryFilterTab('custom')}
+                  className={`flex-1 py-1 px-2 rounded-md font-semibold transition-all text-center ${
+                    directoryFilterTab === 'custom'
+                      ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                      : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                  }`}
+                >
+                  Custom ({allCategories.filter(c => c.isCustom).length})
+                </button>
+              </div>
+              
+              {allCategories
+                .filter(cat => {
+                  if (directoryFilterTab === 'core') return !cat.isCustom;
+                  if (directoryFilterTab === 'custom') return cat.isCustom;
+                  return true;
+                })
+                .map((category, idx) => {
+                  const categoryMembers = members.filter(m => m.categoryKey === category.key);
+                  const count = categoryMembers.length;
+                  const percent = Math.min(100, Math.round((count / (category.targetCount || 1)) * 100));
+                  const isSelected = expandedCategoryKey === category.key;
+                  const Icon = category.icon;
+
+                  return (
+                    <button
+                      key={category.key}
+                      id={`directory-tab-${category.key}`}
+                      onClick={() => setExpandedCategoryKey(category.key)}
+                      className={`w-full text-left p-4 rounded-xl border transition-all flex flex-col justify-between gap-3 relative group ${
+                        isSelected 
+                          ? 'bg-white dark:bg-zinc-900 border-zinc-900 dark:border-zinc-100 shadow-md ring-1 ring-zinc-900 dark:ring-zinc-100' 
+                          : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 shadow-sm'
+                      }`}
+                    >
+                      <div className="flex items-start justify-between w-full">
+                        <div className="flex items-start gap-3">
+                          <div className={`p-2 rounded-lg shrink-0 ${category.colorClass}`}>
+                            <Icon className="h-4.5 w-4.5" />
+                          </div>
+                          <div>
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[10px] font-bold text-zinc-400 tracking-wide uppercase">
+                                {category.isCustom ? 'Custom List' : `Category ${idx + 1}`}
+                              </span>
+                              {category.isCustom && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 bg-amber-50 dark:bg-amber-950/40 text-[9px] font-bold text-amber-700 dark:text-amber-300 rounded border border-amber-200 dark:border-amber-800/40">
+                                  <Lock className="h-2.5 w-2.5" />
+                                  Admin
+                                </span>
+                              )}
+                            </div>
+                            <h4 className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5 leading-snug">
+                              {category.label}
+                            </h4>
+                            <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5 line-clamp-1">
+                              {category.englishLabel}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <div className="text-right shrink-0">
+                          <span className="text-xs font-extrabold text-zinc-900 dark:text-zinc-100">
+                            {count} / {category.targetCount}
+                          </span>
+                          <p className="text-[9px] text-zinc-400 font-semibold mt-0.5">Target</p>
+                          
+                          {/* Quick Edit/Delete on any directory */}
+                          {canManageDirectories && (
+                            <div className="flex items-center justify-end gap-1 mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                title="Edit Directory"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  openDirModal(category.rawDir);
+                                }}
+                                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-amber-500 cursor-pointer"
+                              >
+                                <Edit2 className="h-3 w-3" />
+                              </span>
+                              <span
+                                role="button"
+                                tabIndex={0}
+                                title="Delete Directory"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleDeleteDirectory(category.rawDir);
+                                }}
+                                className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-400 hover:text-red-500 cursor-pointer"
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Progress Bar */}
+                      <div className="w-full">
+                        <div className="h-1.5 w-full bg-zinc-100 dark:bg-zinc-800 rounded-full overflow-hidden">
+                          <div 
+                            className={`h-full rounded-full transition-all duration-500 ${
+                              percent === 100 
+                                ? 'bg-emerald-600' 
+                                : percent > 50 
+                                ? 'bg-zinc-700 dark:bg-zinc-300' 
+                                : 'bg-amber-500'
+                            }`}
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between items-center mt-1 text-[10px] text-zinc-400 font-medium">
+                          <span>{percent}% Completed</span>
+                          <span>{Math.max(0, category.targetCount - count)} Needed</span>
+                        </div>
+                      </div>
+                    </button>
+                  );
+                })}
+
+              {allCategories.filter(cat => {
+                if (directoryFilterTab === 'core') return !cat.isCustom;
+                if (directoryFilterTab === 'custom') return cat.isCustom;
+                return true;
+              }).length === 0 && (
+                <div className="text-center py-8 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl">
+                  <p className="text-xs text-zinc-400 font-medium">No custom directories created yet.</p>
+                  {canUpdate && (
+                    <button
+                      onClick={() => openDirModal()}
+                      className="mt-2 text-xs font-bold text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      + Create First Custom Directory
+                    </button>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Right Column: Assigned members of the selected category */}
             <div className="lg:col-span-7">
-              {expandedCategoryKey && (() => {
-                const activeCat = MANDAL_CATEGORIES.find(c => c.key === expandedCategoryKey);
+              {(() => {
+                const activeCat = allCategories.find(c => c.key === expandedCategoryKey) || allCategories[0];
                 if (!activeCat) return null;
-                const activeMembers = members.filter(m => m.categoryKey === expandedCategoryKey);
+                const rawCategoryMembers = members.filter(m => m.categoryKey === activeCat.key);
+                
+                // Filter and search inside active category members
+                const activeMembers = rawCategoryMembers.filter(m => {
+                  if (directoryMemberFilter === 'karyakarta' && !isMemberKaryakarta(m)) return false;
+                  if (directoryMemberFilter === 'other' && isMemberKaryakarta(m)) return false;
+                  if (!directoryMemberSearch.trim()) return true;
+                  const q = directoryMemberSearch.toLowerCase();
+                  return (
+                    m.name.toLowerCase().includes(q) ||
+                    (m.phone || '').includes(q) ||
+                    (m.voterId || '').toLowerCase().includes(q) ||
+                    (m.designation || '').toLowerCase().includes(q)
+                  );
+                });
+
                 const Icon = activeCat.icon;
+                const karyakartasInCat = rawCategoryMembers.filter(m => isMemberKaryakarta(m)).length;
 
                 return (
                   <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-sm p-6 space-y-6">
@@ -840,106 +1547,209 @@ export default function MandalManagement() {
                           <Icon className="h-6 w-6" />
                         </div>
                         <div>
-                          <h3 className="text-lg font-extrabold text-zinc-800 dark:text-zinc-100">
-                            {activeCat.label}
-                          </h3>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h3 className="text-lg font-extrabold text-zinc-800 dark:text-zinc-100">
+                              {activeCat.label}
+                            </h3>
+                            {activeCat.isCustom ? (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 flex items-center gap-1">
+                                <Lock className="h-3 w-3" />
+                                Admin Custom List
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800">
+                                Core Standard Directory
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-zinc-400 dark:text-zinc-500 mt-0.5">
-                            {activeCat.englishLabel}
+                            {activeCat.englishLabel} • Quota Target: <strong>{activeCat.targetCount}</strong> ({rawCategoryMembers.length} assigned, {karyakartasInCat} active karyakartas)
                           </p>
                         </div>
                       </div>
 
-                      {canUpdate && (
-                        <button
-                          id="add-member-btn"
-                          onClick={() => openMemberModal(activeCat.key)}
-                          className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 text-xs font-bold rounded-lg transition-colors shadow-sm"
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Add Member
-                        </button>
-                      )}
-                    </div>
-
-                    {/* Member rows list */}
-                    {activeMembers.length === 0 ? (
-                      <div className="text-center py-16 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl">
-                        <User className="h-10 w-10 mx-auto text-zinc-300 dark:text-zinc-600 mb-2" />
-                        <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">No members assigned yet</p>
-                        <p className="text-xs text-zinc-400 mt-0.5 max-w-xs mx-auto">
-                          Assign active volunteers or link voters directly from the constituency to fill the target quota of {activeCat.targetCount} members.
-                        </p>
+                      <div className="flex items-center gap-2">
+                        {canManageDirectories && (
+                          <>
+                            <button
+                              id="edit-active-directory-btn"
+                              onClick={() => {
+                                openDirModal(activeCat.rawDir);
+                              }}
+                              className="px-2.5 py-2 border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-300 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                              title="Edit Directory details"
+                            >
+                              <Edit2 className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Edit List</span>
+                            </button>
+                            <button
+                              id="delete-active-directory-btn"
+                              onClick={() => {
+                                handleDeleteDirectory(activeCat.rawDir);
+                              }}
+                              className="px-2.5 py-2 border border-zinc-200 dark:border-zinc-700 hover:bg-red-50 dark:hover:bg-red-950/30 text-red-600 dark:text-red-400 text-xs font-semibold rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                              title="Delete this directory list"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                              <span className="hidden sm:inline">Delete List</span>
+                            </button>
+                          </>
+                        )}
                         {canUpdate && (
                           <button
+                            id="add-member-btn"
                             onClick={() => openMemberModal(activeCat.key)}
-                            className="mt-4 px-3.5 py-1.5 border border-zinc-300 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-xs font-bold rounded-lg text-zinc-700 dark:text-zinc-300 transition-colors"
+                            className="flex items-center gap-1.5 px-3.5 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 text-xs font-bold rounded-lg transition-colors shadow-sm cursor-pointer"
                           >
-                            Assign First Member
+                            <Plus className="h-3.5 w-3.5" />
+                            Add Member
                           </button>
                         )}
                       </div>
+                    </div>
+
+                    {/* Member Filter & Search Bar */}
+                    {rawCategoryMembers.length > 0 && (
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                        <div className="relative flex-1 max-w-sm">
+                          <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                          <input
+                            type="text"
+                            placeholder="Filter members by name, phone, or EPIC..."
+                            value={directoryMemberSearch}
+                            onChange={(e) => setDirectoryMemberSearch(e.target.value)}
+                            className="w-full pl-9 pr-3 py-1.5 text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                          />
+                        </div>
+                        <div className="flex items-center gap-1 text-[11px]">
+                          <button
+                            onClick={() => setDirectoryMemberFilter('all')}
+                            className={`px-2.5 py-1 rounded-md font-semibold transition-colors ${
+                              directoryMemberFilter === 'all'
+                                ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
+                                : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400'
+                            }`}
+                          >
+                            All ({rawCategoryMembers.length})
+                          </button>
+                          <button
+                            onClick={() => setDirectoryMemberFilter('karyakarta')}
+                            className={`px-2.5 py-1 rounded-md font-semibold transition-colors flex items-center gap-1 ${
+                              directoryMemberFilter === 'karyakarta'
+                                ? 'bg-emerald-600 text-white'
+                                : 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40'
+                            }`}
+                          >
+                            <UserCheck className="h-3 w-3" />
+                            Karyakartas ({karyakartasInCat})
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Member rows list */}
+                    {rawCategoryMembers.length === 0 ? (
+                      <div className="text-center py-16 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl">
+                        <User className="h-10 w-10 mx-auto text-zinc-300 dark:text-zinc-600 mb-2" />
+                        <p className="text-sm font-semibold text-zinc-600 dark:text-zinc-400">No members assigned yet</p>
+                        <p className="text-xs text-zinc-400 mt-0.5 max-w-sm mx-auto">
+                          Link active karyakartas directly from the volunteer list or constituency voter roll to fulfill the target quota of {activeCat.targetCount} members.
+                        </p>
+                        {canUpdate && (
+                          <div className="flex items-center justify-center gap-3 mt-4">
+                            <button
+                              onClick={() => openMemberModal(activeCat.key)}
+                              className="px-3.5 py-1.5 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 text-xs font-bold rounded-lg transition-colors shadow-sm"
+                            >
+                              + Link First Karyakarta
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    ) : activeMembers.length === 0 ? (
+                      <div className="text-center py-10 text-xs text-zinc-400">
+                        No members match your search or filter.
+                      </div>
                     ) : (
                       <div className="space-y-3">
-                        {activeMembers.map((member) => (
-                          <div
-                            key={member.id}
-                            className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800/40 rounded-xl hover:shadow-sm transition-shadow"
-                          >
-                            <div className="flex items-center gap-3">
-                              <div className="h-9 w-9 rounded-full bg-zinc-200 dark:bg-zinc-800 flex items-center justify-center font-bold text-zinc-600 dark:text-zinc-300 text-sm">
-                                {member.name.charAt(0).toUpperCase()}
-                              </div>
-                              <div>
-                                <h5 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
-                                  {member.name}
-                                </h5>
-                                <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-0.5 text-xs text-zinc-400">
-                                  {member.designation && (
-                                    <span className="font-semibold text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
-                                      <Star className="h-3 w-3 text-amber-500 shrink-0 fill-amber-500" />
-                                      {member.designation}
-                                    </span>
-                                  )}
-                                  {member.phone && (
-                                    <span className="flex items-center gap-1">
-                                      <Phone className="h-3 w-3 shrink-0" />
-                                      {member.phone}
-                                    </span>
-                                  )}
-                                  {member.voterId && (
-                                    <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-[10px] text-zinc-500 dark:text-zinc-400 rounded-md font-mono font-bold uppercase shrink-0">
-                                      EPIC: {member.voterId}
-                                    </span>
-                                  )}
+                        {activeMembers.map((member) => {
+                          const isKaryakarta = isMemberKaryakarta(member);
+                          return (
+                            <div
+                              key={member.id}
+                              className="flex items-center justify-between p-4 bg-zinc-50 dark:bg-zinc-950 border border-zinc-100 dark:border-zinc-800/40 rounded-xl hover:shadow-sm transition-shadow"
+                            >
+                              <div className="flex items-center gap-3">
+                                <div className={`h-9 w-9 rounded-full flex items-center justify-center font-bold text-sm ${
+                                  isKaryakarta 
+                                    ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300 dark:border-emerald-700'
+                                    : 'bg-zinc-200 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'
+                                }`}>
+                                  {member.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <h5 className="text-sm font-bold text-zinc-800 dark:text-zinc-200">
+                                      {member.name}
+                                    </h5>
+                                    {isKaryakarta && (
+                                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800/40">
+                                        <UserCheck className="h-3 w-3" />
+                                        Active Karyakarta
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 mt-0.5 text-xs text-zinc-400">
+                                    {member.designation && (
+                                      <span className="font-semibold text-zinc-600 dark:text-zinc-300 flex items-center gap-1">
+                                        <Star className="h-3 w-3 text-amber-500 shrink-0 fill-amber-500" />
+                                        {member.designation}
+                                      </span>
+                                    )}
+                                    {member.phone && (
+                                      <a 
+                                        href={`tel:${member.phone}`}
+                                        className="flex items-center gap-1 hover:text-zinc-700 dark:hover:text-zinc-200"
+                                      >
+                                        <Phone className="h-3 w-3 shrink-0 text-zinc-400" />
+                                        {member.phone}
+                                      </a>
+                                    )}
+                                    {member.voterId && (
+                                      <span className="px-1.5 py-0.5 bg-zinc-100 dark:bg-zinc-800 text-[10px] text-zinc-500 dark:text-zinc-400 rounded-md font-mono font-bold uppercase shrink-0">
+                                        EPIC: {member.voterId}
+                                      </span>
+                                    )}
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            {/* Remove button */}
-                            {canUpdate && (
-                              <div className="flex items-center gap-1.5">
-                                <button
-                                  id={`edit-member-btn-${member.id}`}
-                                  onClick={() => openMemberModal(activeCat.key, member)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
-                                  title="Edit member designation/phone"
-                                >
-                                  <Edit2 className="h-3 w-3" />
-                                  <span>Edit</span>
-                                </button>
-                                <button
-                                  id={`remove-member-btn-${member.id}`}
-                                  onClick={() => handleDeleteMember(member.id)}
-                                  className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
-                                  title="Remove from list"
-                                >
-                                  <Trash2 className="h-3 w-3" />
-                                  <span>Delete</span>
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        ))}
+                              {/* Action buttons */}
+                              {canUpdate && (
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    id={`edit-member-btn-${member.id}`}
+                                    onClick={() => openMemberModal(activeCat.key, member)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-amber-600 dark:hover:text-amber-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-amber-50 dark:hover:bg-amber-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                    title="Edit member designation/phone"
+                                  >
+                                    <Edit2 className="h-3 w-3" />
+                                    <span>Edit</span>
+                                  </button>
+                                  <button
+                                    id={`remove-member-btn-${member.id}`}
+                                    onClick={() => handleDeleteMember(member.id)}
+                                    className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold text-zinc-600 dark:text-zinc-300 hover:text-red-600 dark:hover:text-red-400 bg-zinc-100 dark:bg-zinc-800 hover:bg-red-50 dark:hover:bg-red-900/20 border border-zinc-200 dark:border-zinc-700 transition-colors"
+                                    title="Remove from directory"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                    <span>Delete</span>
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
@@ -950,15 +1760,181 @@ export default function MandalManagement() {
           </div>
         )}
 
-        {/* MEMBER DETAILS / REGISTER MODAL */}
+        {/* CUSTOM DIRECTORY MODAL (Add / Edit Custom List) */}
         <AnimatePresence>
-          {isMemberModalOpen && (
-            <div id="member-form-modal" className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
+          {isDirModalOpen && selectedMandalForMembers && (
+            <div id="mandal-directory-modal" className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 overflow-y-auto">
               <motion.div
                 initial={{ scale: 0.95, opacity: 0 }}
                 animate={{ scale: 1, opacity: 1 }}
                 exit={{ scale: 0.95, opacity: 0 }}
-                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md p-6 relative"
+                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-lg p-6 relative shadow-2xl"
+              >
+                <button
+                  id="close-directory-modal-btn"
+                  onClick={() => setIsDirModalOpen(false)}
+                  className="absolute right-4 top-4 p-1 rounded-full text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+
+                <div className="flex items-center gap-2.5">
+                  <div className="p-2 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600 dark:text-blue-400">
+                    <FolderPlus className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                      {editingDir ? 'Edit Directory / Committee' : 'Add New Directory / List'}
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      Under Mandal: <strong className="text-zinc-700 dark:text-zinc-300">{selectedMandalForMembers.name}</strong>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-3 bg-blue-50/60 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-xl text-xs text-blue-800 dark:text-blue-300 flex items-start gap-2">
+                  <FolderPlus className="h-4 w-4 shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
+                  <span>
+                    <strong>Mandal Directory:</strong> Directory lists configured here are visible across this mandal to all authorized members.
+                  </span>
+                </div>
+
+                <form onSubmit={handleSaveDirectory} className="mt-5 space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                      Directory / Committee Name (Hindi / Primary) *
+                    </label>
+                    <input
+                      id="dir-form-label-input"
+                      type="text"
+                      required
+                      placeholder="e.g. युवा मोर्चा मंडल कार्यकारिणी / किसान मोर्चा समिति"
+                      value={dirFormLabel}
+                      onChange={(e) => setDirFormLabel(e.target.value)}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-sm text-zinc-900 dark:text-zinc-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                      English / Subtitle Label
+                    </label>
+                    <input
+                      id="dir-form-eng-label-input"
+                      type="text"
+                      placeholder="e.g. Youth Wing Mandal Executive Committee"
+                      value={dirFormEnglishLabel}
+                      onChange={(e) => setDirFormEnglishLabel(e.target.value)}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-sm text-zinc-900 dark:text-zinc-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
+                      Target Member Quota *
+                    </label>
+                    <input
+                      id="dir-form-target-input"
+                      type="number"
+                      min="1"
+                      required
+                      placeholder="e.g. 15, 20, 25"
+                      value={dirFormTargetCount}
+                      onChange={(e) => setDirFormTargetCount(e.target.value === '' ? '' : Number(e.target.value))}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-sm text-zinc-900 dark:text-zinc-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                    />
+                  </div>
+
+                  {/* Icon Selector */}
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      Choose Directory Icon
+                    </label>
+                    <div className="grid grid-cols-4 sm:grid-cols-6 gap-2">
+                      {DIRECTORY_ICON_CHOICES.map(item => {
+                        const IconComponent = item.icon;
+                        const isSelected = dirFormIcon === item.name;
+                        return (
+                          <button
+                            key={item.name}
+                            type="button"
+                            onClick={() => setDirFormIcon(item.name)}
+                            title={item.label}
+                            className={`p-2.5 rounded-xl border flex flex-col items-center justify-center gap-1 transition-all ${
+                              isSelected
+                                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                                : 'border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 text-zinc-500'
+                            }`}
+                          >
+                            <IconComponent className="h-5 w-5" />
+                            <span className="text-[9px] font-medium truncate max-w-full">{item.name}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Color Preset Selector */}
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-2">
+                      Color Theme Accent
+                    </label>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      {DIRECTORY_COLOR_PRESETS.map(preset => {
+                        const isSelected = dirFormColor === preset.value;
+                        return (
+                          <button
+                            key={preset.label}
+                            type="button"
+                            onClick={() => setDirFormColor(preset.value)}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                              isSelected
+                                ? 'border-zinc-900 dark:border-zinc-100 bg-zinc-100 dark:bg-zinc-800 shadow-sm'
+                                : 'border-zinc-200 dark:border-zinc-800 text-zinc-600 dark:text-zinc-400'
+                            }`}
+                          >
+                            <span className={`h-2.5 w-2.5 rounded-full ${preset.dotClass}`} />
+                            <span>{preset.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Modal Footer */}
+                  <div className="flex justify-end gap-3 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+                    <button
+                      id="cancel-dir-save-btn"
+                      type="button"
+                      onClick={() => setIsDirModalOpen(false)}
+                      className="px-4 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-sm font-medium rounded-lg transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      id="save-dir-submit-btn"
+                      type="submit"
+                      className="flex items-center gap-1.5 px-4 py-2 bg-zinc-900 hover:bg-zinc-800 text-white dark:bg-zinc-100 dark:hover:bg-zinc-200 dark:text-zinc-950 text-sm font-semibold rounded-lg transition-colors shadow-sm"
+                    >
+                      <Save className="h-4 w-4" />
+                      Save Directory
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>
+
+        {/* MEMBER DETAILS / REGISTER MODAL WITH KARYAKARTA LINKING */}
+        <AnimatePresence>
+          {isMemberModalOpen && (
+            <div id="member-form-modal" className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50 overflow-y-auto">
+              <motion.div
+                initial={{ scale: 0.95, opacity: 0 }}
+                animate={{ scale: 1, opacity: 1 }}
+                exit={{ scale: 0.95, opacity: 0 }}
+                className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-lg p-6 relative shadow-2xl"
               >
                 <button
                   id="close-member-modal-btn"
@@ -968,17 +1944,195 @@ export default function MandalManagement() {
                   <X className="h-5 w-5" />
                 </button>
 
-                <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                  <UserCheck className="h-5 w-5 text-zinc-500" />
-                  {editingMember ? 'Edit Member Assignment' : 'Assign New Member'}
-                </h3>
-                <p className="text-xs text-zinc-400 mt-1">
-                  Assign a voter to the directory list or write down custom profile fields.
-                </p>
+                <div className="flex items-center gap-2">
+                  <div className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+                    <UserCheck className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">
+                      {editingMember ? 'Edit Member Assignment' : 'Assign Directory Member'}
+                    </h3>
+                    <p className="text-xs text-zinc-400 mt-0.5">
+                      Assign a verified Karyakarta, link from constituency voter roll, or input custom profile fields.
+                    </p>
+                  </div>
+                </div>
 
-                <form onSubmit={handleSaveMember} className="mt-6 space-y-4">
-                  {/* Link existing voter action */}
-                  {!editingMember && (
+                {/* Linking Mode Tab Switcher */}
+                {!editingMember && (
+                  <div className="mt-4 flex items-center gap-1 p-1 bg-zinc-100 dark:bg-zinc-800/60 rounded-xl text-xs">
+                    <button
+                      type="button"
+                      id="tab-link-karyakarta-btn"
+                      onClick={() => setMemberModalTab('karyakarta')}
+                      className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        memberModalTab === 'karyakarta'
+                          ? 'bg-white dark:bg-zinc-900 text-emerald-600 dark:text-emerald-400 shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                      }`}
+                    >
+                      <UserCheck className="h-3.5 w-3.5" />
+                      <span>Karyakarta List</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="tab-link-voter-btn"
+                      onClick={() => setMemberModalTab('voter')}
+                      className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        memberModalTab === 'voter'
+                          ? 'bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                      }`}
+                    >
+                      <Search className="h-3.5 w-3.5" />
+                      <span>Voter Roll</span>
+                    </button>
+                    <button
+                      type="button"
+                      id="tab-manual-entry-btn"
+                      onClick={() => setMemberModalTab('manual')}
+                      className={`flex-1 py-1.5 px-2 rounded-lg font-bold transition-all flex items-center justify-center gap-1.5 ${
+                        memberModalTab === 'manual'
+                          ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 shadow-sm'
+                          : 'text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-200'
+                      }`}
+                    >
+                      <User className="h-3.5 w-3.5" />
+                      <span>Manual Entry</span>
+                    </button>
+                  </div>
+                )}
+
+                <form onSubmit={handleSaveMember} className="mt-4 space-y-4">
+                  
+                  {/* TAB 1: KARYAKARTA QUICK LINKING */}
+                  {!editingMember && memberModalTab === 'karyakarta' && (
+                    <div className="bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-150 dark:border-emerald-800/40 p-3.5 rounded-xl space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-emerald-700 dark:text-emerald-300 uppercase tracking-wider flex items-center gap-1">
+                          <UserCheck className="h-3.5 w-3.5" />
+                          Link Active Karyakarta ({volunteers.length} available)
+                        </span>
+                        {selectedKaryakartaForLink && (
+                          <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                            ✓ Selected
+                          </span>
+                        )}
+                      </div>
+
+                      {/* If Karyakarta already selected */}
+                      {selectedKaryakartaForLink ? (
+                        <div className="bg-white dark:bg-zinc-900 border border-emerald-300 dark:border-emerald-700 p-3 rounded-xl flex items-center justify-between shadow-sm">
+                          <div className="flex items-center gap-2.5">
+                            <div className="h-9 w-9 rounded-full bg-emerald-600 text-white flex items-center justify-center font-bold text-sm">
+                              <Check className="h-4 w-4" />
+                            </div>
+                            <div>
+                              <div className="flex items-center gap-1.5">
+                                <span className="font-bold text-sm text-zinc-900 dark:text-zinc-100">
+                                  {selectedKaryakartaForLink.name}
+                                </span>
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200">
+                                  Active Karyakarta
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap items-center gap-2 text-[11px] text-zinc-500 dark:text-zinc-400 mt-0.5">
+                                {selectedKaryakartaForLink.mobile && <span>📱 {selectedKaryakartaForLink.mobile}</span>}
+                                {selectedKaryakartaForLink.voterId && <span>EPIC: <strong className="font-mono">{selectedKaryakartaForLink.voterId}</strong></span>}
+                                {(selectedKaryakartaForLink.assignedBoothName || selectedKaryakartaForLink.village) && (
+                                  <span>📍 {selectedKaryakartaForLink.assignedBoothName || selectedKaryakartaForLink.village}</span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedKaryakartaForLink(null);
+                              setMemberFormName('');
+                              setMemberFormPhone('');
+                              setMemberFormVoterId('');
+                            }}
+                            className="text-xs text-red-600 hover:text-red-700 dark:text-red-400 font-semibold px-2 py-1 rounded hover:bg-red-50 dark:hover:bg-red-950/40"
+                          >
+                            Change
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="relative">
+                            <Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                            <input
+                              id="karyakarta-link-search-input"
+                              type="text"
+                              placeholder="Search active karyakartas by name, phone, booth, or EPIC..."
+                              value={karyakartaSearchText}
+                              onChange={(e) => setKaryakartaSearchText(e.target.value)}
+                              className="w-full pl-9 pr-3 py-2 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-lg focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                            />
+                          </div>
+
+                          {/* Karyakarta list preview */}
+                          <div className="max-h-48 overflow-y-auto space-y-1 pr-1 divide-y divide-zinc-100 dark:divide-zinc-800/60 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-1">
+                            {volunteers
+                              .filter(k => {
+                                if (!karyakartaSearchText.trim()) return true;
+                                const q = karyakartaSearchText.toLowerCase();
+                                return (
+                                  k.name.toLowerCase().includes(q) ||
+                                  (k.mobile || '').includes(q) ||
+                                  (k.voterId || '').toLowerCase().includes(q) ||
+                                  (k.assignedBoothName || '').toLowerCase().includes(q) ||
+                                  (k.village || '').toLowerCase().includes(q)
+                                );
+                              })
+                              .slice(0, 30)
+                              .map(k => (
+                                <button
+                                  key={k.id}
+                                  type="button"
+                                  onClick={() => handleSelectKaryakarta(k)}
+                                  className="w-full text-left p-2.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/40 transition-colors flex items-center justify-between group"
+                                >
+                                  <div className="flex items-center gap-2.5">
+                                    <div className="h-7 w-7 rounded-full bg-emerald-100 dark:bg-emerald-900/60 text-emerald-800 dark:text-emerald-200 flex items-center justify-center text-xs font-bold">
+                                      {k.name.charAt(0).toUpperCase()}
+                                    </div>
+                                    <div>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="font-bold text-xs text-zinc-800 dark:text-zinc-200 group-hover:text-emerald-600 dark:group-hover:text-emerald-400">
+                                          {k.name}
+                                        </span>
+                                        <span className="px-1 py-0.2 rounded text-[8px] font-bold bg-emerald-100 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300">
+                                          Karyakarta
+                                        </span>
+                                      </div>
+                                      <div className="flex items-center gap-2 text-[10px] text-zinc-400 mt-0.5">
+                                        {k.mobile && <span>{k.mobile}</span>}
+                                        {k.voterId && <span>EPIC: <strong className="font-mono text-zinc-500">{k.voterId}</strong></span>}
+                                        {(k.assignedBoothName || k.village) && <span>📍 {k.assignedBoothName || k.village}</span>}
+                                      </div>
+                                    </div>
+                                  </div>
+                                  <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    Select +
+                                  </span>
+                                </button>
+                              ))}
+
+                            {volunteers.length === 0 && (
+                              <div className="p-4 text-center text-xs text-zinc-400">
+                                No volunteers enrolled yet. You can search from Voter Roll or enter manually.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* TAB 2: CONSTITUENCY VOTER ROLL LINKING */}
+                  {!editingMember && memberModalTab === 'voter' && (
                     <div className="bg-zinc-50 dark:bg-zinc-950 border border-zinc-150 dark:border-zinc-800/40 p-4 rounded-xl space-y-3">
                       <p className="text-xs font-bold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
                         Constituency Voters Quick Link
@@ -1089,17 +2243,37 @@ export default function MandalManagement() {
                   </div>
 
                   <div>
-                    <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider mb-1.5">
-                      Official Designation / Title
-                    </label>
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="block text-xs font-semibold text-zinc-600 dark:text-zinc-400 uppercase tracking-wider">
+                        Official Designation / Title
+                      </label>
+                      <span className="text-[10px] text-zinc-400">Click a preset below or type custom</span>
+                    </div>
                     <input
                       id="member-form-designation-input"
                       type="text"
-                      placeholder="e.g. Mandal Secretary"
+                      placeholder="e.g. संयोजक (Convenor) / मंडल अध्यक्ष"
                       value={memberFormDesignation}
                       onChange={(e) => setMemberFormDesignation(e.target.value)}
                       className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 text-sm text-zinc-900 dark:text-zinc-100 rounded-lg focus:outline-none focus:ring-1 focus:ring-zinc-400"
                     />
+                    {/* Designation Quick Presets */}
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {DESIGNATION_PRESETS.map(preset => (
+                        <button
+                          key={preset}
+                          type="button"
+                          onClick={() => setMemberFormDesignation(preset)}
+                          className={`text-[10px] px-2 py-0.5 rounded-md border transition-colors ${
+                            memberFormDesignation === preset
+                              ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900 border-transparent font-bold'
+                              : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
                   </div>
 
                   {/* Footer Actions */}
@@ -1135,14 +2309,9 @@ export default function MandalManagement() {
       {/* Minimalistic Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-5 border-b border-zinc-200 dark:border-zinc-800">
         <div className="space-y-1">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
-              Mandals
-            </h1>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-teal-500/10 text-teal-600 dark:text-teal-400 border border-teal-500/20">
-              {mandals.length} Mandals
-            </span>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+            Mandals
+          </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Administrative blocks and committee management.
           </p>
@@ -1174,7 +2343,7 @@ export default function MandalManagement() {
       )}
 
       {/* KPI Dashboard */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Total Mandals</span>
@@ -1184,20 +2353,38 @@ export default function MandalManagement() {
         </div>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Presidents</span>
-            <User className="h-4 w-4 text-zinc-400" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Total Committees</span>
+            <FolderPlus className="h-4 w-4 text-indigo-500" />
           </div>
-          <p className="text-xl font-bold mt-1 text-zinc-900 dark:text-zinc-50">
-            {mandals.filter(m => m.presidentName).length}
+          <p className="text-xl font-bold mt-1 text-indigo-600 dark:text-indigo-400">
+            {mandals.reduce((acc, curr) => acc + getMandalCommitteeCount(curr), 0)}
           </p>
         </div>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <div className="flex items-center justify-between">
-            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Voters</span>
-            <Users className="h-4 w-4 text-zinc-400" />
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Committee Members</span>
+            <Shield className="h-4 w-4 text-emerald-500" />
           </div>
-          <p className="text-xl font-bold mt-1 text-zinc-900 dark:text-zinc-50">
-            {mandals.reduce((acc, curr) => acc + (curr.voterCount || 0), 0).toLocaleString()}
+          <p className="text-xl font-bold mt-1 text-emerald-600 dark:text-emerald-400">
+            {mandals.reduce((acc, curr) => acc + (curr.memberCount || 0), 0)}
+          </p>
+        </div>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Total Electors</span>
+            <Users className="h-4 w-4 text-blue-500" />
+          </div>
+          <p className="text-xl font-bold mt-1 text-blue-600 dark:text-blue-400">
+            {mandals.reduce((acc, curr) => acc + (curr.realVoterCount || curr.voterCount || 0), 0).toLocaleString()}
+          </p>
+        </div>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Polling Booths</span>
+            <Building2 className="h-4 w-4 text-purple-500" />
+          </div>
+          <p className="text-xl font-bold mt-1 text-purple-600 dark:text-purple-400">
+            {mandals.reduce((acc, curr) => acc + (curr.boothCount || 0), 0)}
           </p>
         </div>
       </div>
@@ -1394,11 +2581,17 @@ export default function MandalManagement() {
 
                     {/* Voters / Population */}
                     <td className="py-3 px-4 text-center">
-                      <div className="text-xs font-bold font-mono text-zinc-900 dark:text-white">
-                        {mandal.voterCount !== undefined && mandal.voterCount !== null ? mandal.voterCount.toLocaleString() : '-'}
-                      </div>
-                      <div className="text-[10px] text-zinc-400">
-                        Pop: {mandal.population !== undefined && mandal.population !== null ? mandal.population.toLocaleString() : '-'}
+                      <button
+                        type="button"
+                        onClick={() => openMandalVoters(mandal)}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200/50 hover:bg-blue-100 transition-all cursor-pointer"
+                        title="Click to view electors registered in this Mandal"
+                      >
+                        <Users size={12} />
+                        <span>{(mandal.realVoterCount || mandal.voterCount || 0).toLocaleString()}</span>
+                      </button>
+                      <div className="text-[10px] text-zinc-400 mt-0.5">
+                        {mandal.boothCount ? `${mandal.boothCount} Booths` : ''}
                       </div>
                     </td>
 
@@ -1408,10 +2601,10 @@ export default function MandalManagement() {
                         id={`manage-lists-table-btn-${mandal.id}`}
                         onClick={() => handleSelectMandalForMembers(mandal)}
                         className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-zinc-100 hover:bg-blue-50 dark:bg-zinc-800 dark:hover:bg-blue-900/20 text-zinc-700 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-blue-400 text-[11px] font-bold rounded-lg border border-zinc-200 dark:border-zinc-700 transition-colors cursor-pointer"
-                        title="Manage 8 Core Committee Lists"
+                        title={`Manage ${getMandalCommitteeCount(mandal)} Committee Lists for ${mandal.name}`}
                       >
                         <Layers className="h-3.5 w-3.5 text-blue-500" />
-                        <span>Manage 8 Lists</span>
+                        <span>{getMandalCommitteeCount(mandal)} Committees</span>
                       </button>
                     </td>
 
@@ -1543,30 +2736,60 @@ export default function MandalManagement() {
                 </div>
               </div>
 
-              {/* Roster & Directory lists quick button */}
-              <div className="mt-5">
+              {/* Action Buttons: View Voters & 8 Core Lists */}
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button
+                  id={`view-mandal-voters-btn-${mandal.id}`}
+                  onClick={() => openMandalVoters(mandal)}
+                  className="flex items-center justify-center gap-1.5 py-2.5 bg-blue-50 hover:bg-blue-100 dark:bg-blue-950/40 dark:hover:bg-blue-900/40 text-blue-700 dark:text-blue-300 border border-blue-200/60 dark:border-blue-800/40 text-xs font-bold rounded-xl transition-all"
+                  title="Inspect all electors in this Mandal"
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  <span>Voters ({(mandal.realVoterCount !== undefined && mandal.realVoterCount > 0 ? mandal.realVoterCount : (mandal.voterCount || 0)).toLocaleString()})</span>
+                </button>
                 <button
                   id={`manage-lists-btn-${mandal.id}`}
                   onClick={() => handleSelectMandalForMembers(mandal)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700/80 text-zinc-800 dark:text-zinc-200 text-xs font-bold rounded-xl transition-all"
+                  className="flex items-center justify-center gap-1.5 py-2.5 bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700/80 text-zinc-800 dark:text-zinc-200 text-xs font-bold rounded-xl transition-all"
+                  title={`Manage ${getMandalCommitteeCount(mandal)} Committees and member rosters`}
                 >
-                  <Layers className="h-4 w-4" />
-                  Manage 8 Core Lists
+                  <Layers className="h-3.5 w-3.5 text-blue-500" />
+                  <span>{getMandalCommitteeCount(mandal)} Committees ({mandal.memberCount || 0})</span>
                 </button>
               </div>
 
-              {/* Stats / Numbers */}
-              <div className="mt-5 pt-4 border-t border-zinc-100 dark:border-zinc-800/60 grid grid-cols-2 gap-4 text-center">
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 uppercase">Registered Voters</p>
-                  <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5">
-                    {mandal.voterCount !== undefined && mandal.voterCount !== null ? mandal.voterCount.toLocaleString() : 'N/A'}
+              {/* Stats / Synchronized Metrics */}
+              <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800/60 grid grid-cols-4 gap-1.5 text-center">
+                <div 
+                  onClick={() => openMandalVoters(mandal)}
+                  className="cursor-pointer hover:bg-blue-50/60 dark:hover:bg-blue-950/30 p-1.5 rounded-lg transition-colors"
+                  title="Click to view electors"
+                >
+                  <p className="text-[9px] font-medium text-zinc-400 dark:text-zinc-500 uppercase">Electors</p>
+                  <p className="text-xs font-bold text-blue-600 dark:text-blue-400 mt-0.5 truncate">
+                    {(mandal.realVoterCount !== undefined && mandal.realVoterCount > 0 ? mandal.realVoterCount : (mandal.voterCount || 0)).toLocaleString()}
                   </p>
                 </div>
-                <div>
-                  <p className="text-[10px] font-medium text-zinc-400 dark:text-zinc-500 uppercase">Population</p>
-                  <p className="text-sm font-bold text-zinc-800 dark:text-zinc-200 mt-0.5">
-                    {mandal.population !== undefined && mandal.population !== null ? mandal.population.toLocaleString() : 'N/A'}
+                <div className="p-1.5">
+                  <p className="text-[9px] font-medium text-zinc-400 dark:text-zinc-500 uppercase">Booths</p>
+                  <p className="text-xs font-bold text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    {mandal.boothCount ? mandal.boothCount.toLocaleString() : '0'}
+                  </p>
+                </div>
+                <div 
+                  onClick={() => handleSelectMandalForMembers(mandal)}
+                  className="cursor-pointer hover:bg-purple-50/60 dark:hover:bg-purple-950/30 p-1.5 rounded-lg transition-colors"
+                  title="Click to view committees"
+                >
+                  <p className="text-[9px] font-medium text-zinc-400 dark:text-zinc-500 uppercase">Committees</p>
+                  <p className="text-xs font-bold text-indigo-600 dark:text-indigo-400 mt-0.5">
+                    {getMandalCommitteeCount(mandal)}
+                  </p>
+                </div>
+                <div className="p-1.5">
+                  <p className="text-[9px] font-medium text-zinc-400 dark:text-zinc-500 uppercase">Members</p>
+                  <p className="text-xs font-bold text-purple-600 dark:text-purple-400 mt-0.5">
+                    {mandal.memberCount ? mandal.memberCount.toLocaleString() : '0'}
                   </p>
                 </div>
               </div>
@@ -1909,6 +3132,247 @@ export default function MandalManagement() {
                   </button>
                 </div>
               </form>
+            </motion.div>
+          </div>
+        )}
+        {/* MANDAL VOTERS INSPECTION MODAL */}
+        {selectedMandalForVoters && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 overflow-y-auto">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 w-full max-w-5xl max-h-[90vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            >
+              {/* Modal Header */}
+              <div className="p-5 sm:p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Building2 size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-100 dark:bg-indigo-950 text-indigo-700 dark:text-indigo-300">
+                        {selectedMandalForVoters.mandalCode || 'MANDAL'}
+                      </span>
+                      <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white">
+                        {selectedMandalForVoters.name}
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 font-medium mt-0.5">
+                      {selectedMandalForVoters.constituencyName && `Constituency: ${selectedMandalForVoters.constituencyName} • `}
+                      {selectedMandalForVoters.districtName && `District: ${selectedMandalForVoters.districtName} • `}
+                      {selectedMandalForVoters.stateName || 'State'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  <a
+                    href={`/voters?mandalId=${selectedMandalForVoters.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer"
+                  >
+                    <ExternalLink size={13} />
+                    <span>Open in Directory</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMandalForVoters(null)}
+                    className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Subheader KPI & Search Controls */}
+              <div className="px-6 py-3 border-b border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/40 dark:bg-zinc-900/20 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    onClick={() => setMandalVoterFilter('all')}
+                    className={`px-2.5 py-1 rounded-lg font-extrabold border transition-colors ${
+                      mandalVoterFilter === 'all'
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 border-zinc-200 dark:border-zinc-700'
+                    }`}
+                  >
+                    Total: {mandalVoters.length} Voters
+                  </button>
+                  <button
+                    onClick={() => setMandalVoterFilter('karyakarta')}
+                    className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                      mandalVoterFilter === 'karyakarta'
+                        ? 'bg-amber-600 text-white border-amber-600'
+                        : 'bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-300 border-amber-200/50'
+                    }`}
+                  >
+                    ⭐ {mandalVoters.filter(v => v.isKaryakarta || v.is_karyakarta).length} Karyakartas
+                  </button>
+                  <button
+                    onClick={() => setMandalVoterFilter('beneficiary')}
+                    className={`px-2.5 py-1 rounded-lg font-bold border transition-colors ${
+                      mandalVoterFilter === 'beneficiary'
+                        ? 'bg-purple-600 text-white border-purple-600'
+                        : 'bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border-purple-200/50'
+                    }`}
+                  >
+                    🎁 {mandalVoters.filter(v => (v.benefitsCount || 0) > 0 || (v.benefits_count || 0) > 0).length} Beneficiaries
+                  </button>
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative min-w-[220px]">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={mandalVoterSearch}
+                    onChange={e => setMandalVoterSearch(e.target.value)}
+                    placeholder="Search Name, EPIC, Mobile..."
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+
+              {/* Voter List Content */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                {loadingMandalVoters ? (
+                  <div className="py-16 text-center">
+                    <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                    <p className="text-xs font-bold text-zinc-400">Loading voters registered in this Mandal...</p>
+                  </div>
+                ) : (() => {
+                  const query = mandalVoterSearch.toLowerCase().trim();
+                  const filtered = mandalVoters.filter(v => {
+                    if (mandalVoterFilter === 'karyakarta' && !v.isKaryakarta && !v.is_karyakarta) return false;
+                    if (mandalVoterFilter === 'beneficiary' && (v.benefitsCount || 0) === 0 && (v.benefits_count || 0) === 0) return false;
+                    if (mandalVoterFilter === 'voted' && !v.voted && v.votingStatus !== 'voted') return false;
+                    if (!query) return true;
+                    return (
+                      (v.name || '').toLowerCase().includes(query) ||
+                      (v.voterId || v.voter_id || '').toLowerCase().includes(query) ||
+                      (v.mobile || '').includes(query) ||
+                      (v.boothNumber || v.booth_number || '').toString().includes(query)
+                    );
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="py-16 text-center border-2 border-dashed border-zinc-200 dark:border-zinc-800 rounded-2xl">
+                        <Users className="mx-auto h-10 w-10 text-zinc-300 dark:text-zinc-700 mb-2" />
+                        <p className="text-sm font-bold text-zinc-700 dark:text-zinc-300">No voters found</p>
+                        <p className="text-xs text-zinc-400 mt-1">
+                          {mandalVoterSearch ? 'Try a different search term or filter' : 'No electors currently assigned to this Mandal or its polling booths'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-x-auto rounded-2xl border border-zinc-200 dark:border-zinc-800">
+                      <table className="w-full text-left text-xs">
+                        <thead className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 font-bold uppercase tracking-wider text-[10px]">
+                          <tr>
+                            <th className="px-4 py-3">Elector Info</th>
+                            <th className="px-4 py-3">Booth</th>
+                            <th className="px-4 py-3">Contact / Guardian</th>
+                            <th className="px-4 py-3">Karyakarta Status</th>
+                            <th className="px-4 py-3">Welfare Benefits</th>
+                            <th className="px-4 py-3">Voting Status</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800 font-medium">
+                          {filtered.map(v => (
+                            <tr key={v.id || v.voterId} className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40 transition-colors">
+                              <td className="px-4 py-3">
+                                <div className="font-bold text-zinc-900 dark:text-zinc-100 text-xs">
+                                  {v.name}
+                                </div>
+                                <div className="text-[11px] font-mono text-zinc-400 mt-0.5">
+                                  EPIC: {v.voterId || v.voter_id || 'N/A'}
+                                </div>
+                                <div className="text-[10px] text-zinc-400 mt-0.5">
+                                  {v.gender ? `${v.gender} • ` : ''}Age: {v.age || 'N/A'}
+                                </div>
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {v.boothNumber || v.booth_number ? (
+                                  <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-bold bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 border border-blue-200/50">
+                                    Booth #{v.boothNumber || v.booth_number}
+                                  </span>
+                                ) : (
+                                  <span className="text-zinc-400 text-[11px] italic">Not Assigned</span>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">
+                                <div className="flex items-center gap-1 font-mono text-xs">
+                                  <Phone size={11} className="text-zinc-400" />
+                                  <span>{v.mobile || 'No Mobile'}</span>
+                                </div>
+                                {v.relationName || v.relation_name ? (
+                                  <div className="text-[10px] text-zinc-400 mt-0.5">
+                                    S/o, D/o, W/o: {v.relationName || v.relation_name}
+                                  </div>
+                                ) : null}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {v.isKaryakarta || v.is_karyakarta ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[10px] font-black bg-amber-500 text-white shadow-sm">
+                                    <Star size={10} className="fill-white" />
+                                    <span>Active Karyakarta</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-zinc-400 text-[11px]">General Voter</span>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {(v.benefitsCount || 0) > 0 || (v.benefits_count || 0) > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200/60">
+                                    🎁 {v.benefitsCount || v.benefits_count} Schemes
+                                    {(v.benefitsTotalAmount || v.benefits_total_amount) > 0 && ` (₹${Number(v.benefitsTotalAmount || v.benefits_total_amount).toLocaleString()})`}
+                                  </span>
+                                ) : (
+                                  <span className="text-zinc-400 text-[11px]">None</span>
+                                )}
+                              </td>
+
+                              <td className="px-4 py-3">
+                                {v.voted || v.votingStatus === 'voted' ? (
+                                  <span className="inline-flex items-center gap-1 text-[11px] font-bold text-emerald-600 dark:text-emerald-400">
+                                    <CheckCircle size={12} />
+                                    <span>Voted</span>
+                                  </span>
+                                ) : (
+                                  <span className="text-[11px] text-zinc-400">Not Voted</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Footer */}
+              <div className="p-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-900/60 flex items-center justify-between">
+                <span className="text-xs text-zinc-500">
+                  Showing <strong className="text-zinc-800 dark:text-zinc-200">{mandalVoters.length}</strong> electors synchronized with Mandal
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMandalForVoters(null)}
+                  className="px-4 py-1.5 text-xs font-bold rounded-xl bg-zinc-200 hover:bg-zinc-300 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

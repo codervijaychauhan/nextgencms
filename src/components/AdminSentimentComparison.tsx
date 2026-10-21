@@ -552,14 +552,9 @@ export const AdminSentimentComparison: React.FC = () => {
       {/* Header & Actions */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 pb-5 border-b border-zinc-200 dark:border-zinc-800">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-white flex items-center gap-2">
-              Sentiment Comparison
-            </h1>
-            <span className="px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider bg-blue-500/10 text-blue-600 border border-blue-500/20 dark:bg-blue-950/50 dark:text-blue-400 dark:border-blue-900/50 rounded-full">
-              Auditing
-            </span>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-zinc-900 dark:text-white">
+            Sentiment Comparison
+          </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
             Compare voter sentiment ratings across administrators.
           </p>

@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   CheckCircle2, RefreshCw, MapPin, ShieldAlert, AlertCircle, X,
   Building2, UserMinus, Plus, Search, User, Eye, Trash2,
-  ChevronDown, ChevronRight
+  ChevronDown, ChevronRight, Users, ExternalLink, Vote, Gift, Shield
 } from 'lucide-react';
 import { api } from '../lib/api';
 import { useAuth } from '../AuthProvider';
@@ -22,6 +22,8 @@ interface PollingBooth {
   stateName?: string;
   mandalId?: string;
   mandalName?: string;
+  voterCount?: number;
+  totalVoters?: number;
 }
 
 interface Volunteer {
@@ -139,6 +141,30 @@ export default function BoothAgentManagement() {
   // Booth info & list of Karyakartas popup/drawer state (slides in from left)
   const [selectedBoothDetails, setSelectedBoothDetails] = useState<PollingBooth | null>(null);
 
+  // Dedicated Booth Voters Roll Modal state
+  const [selectedBoothForVoters, setSelectedBoothForVoters] = useState<PollingBooth | null>(null);
+  const [boothVoters, setBoothVoters] = useState<any[]>([]);
+  const [loadingBoothVoters, setLoadingBoothVoters] = useState(false);
+  const [boothVoterSearch, setBoothVoterSearch] = useState('');
+  const [boothVoterFilter, setBoothVoterFilter] = useState<'all' | 'karyakarta' | 'voted'>('all');
+
+  const openBoothVoters = async (b: PollingBooth) => {
+    setSelectedBoothForVoters(b);
+    setLoadingBoothVoters(true);
+    setBoothVoterSearch('');
+    setBoothVoterFilter('all');
+    try {
+      const res = await api.get<any>(`/api/voters?boothId=${encodeURIComponent(b.id)}&limit=500`);
+      const raw = Array.isArray(res) ? res : (res?.data || []);
+      setBoothVoters(raw);
+    } catch (err) {
+      console.error('Failed to load booth voters:', err);
+      setBoothVoters([]);
+    } finally {
+      setLoadingBoothVoters(false);
+    }
+  };
+
   // View mode switcher: 'table' (standard list) vs 'frame' (unified layout showing all Karyakartas per booth in one frame) vs 'detailed-roster' (detailed tables per booth)
   const [viewMode, setViewMode] = useState<'table' | 'frame' | 'detailed-roster'>('table');
 
@@ -217,7 +243,9 @@ export default function BoothAgentManagement() {
         stateId: normalizeId(data.stateId || data.state_id || ''),
         stateName: data.stateName || data.state_name || '',
         mandalId: normalizeId(data.mandalId || data.mandal_id || ''),
-        mandalName: data.mandalName || data.mandal_name || ''
+        mandalName: data.mandalName || data.mandal_name || '',
+        voterCount: Number(data.voter_count !== undefined ? data.voter_count : (data.voterCount !== undefined ? data.voterCount : (data.total_voters || data.totalVoters || 0))),
+        totalVoters: Number(data.total_voters || data.totalVoters || data.voter_count || 0)
       }));
 
       // Filter by Allowed ID scopes if not global super_admin
@@ -466,14 +494,9 @@ export default function BoothAgentManagement() {
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-zinc-200 dark:border-zinc-800">
         <div className="space-y-0.5">
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
-              Booths
-            </h1>
-            <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/20">
-              {totalBooths} Booths
-            </span>
-          </div>
+          <h1 className="text-2xl sm:text-3xl font-black text-zinc-900 dark:text-white tracking-tight">
+            Booths
+          </h1>
           <p className="text-xs text-zinc-500 dark:text-zinc-400">
             Polling station coverage and karyakarta assignments.
           </p>
@@ -508,10 +531,19 @@ export default function BoothAgentManagement() {
       )}
 
       {/* Metrics Panel */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <p className="text-[10px] font-bold uppercase text-zinc-400 tracking-wider">Total Booths</p>
           <h2 className="text-2xl font-bold text-zinc-900 dark:text-white mt-0.5">{totalBooths}</h2>
+        </div>
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
+          <p className="text-[10px] font-bold uppercase text-zinc-400 tracking-wider">Total Electors / Voters</p>
+          <div className="flex items-baseline gap-2 mt-0.5">
+            <h2 className="text-2xl font-bold text-blue-600 dark:text-blue-400">
+              {booths.reduce((acc, b) => acc + (b.voterCount || b.totalVoters || 0), 0).toLocaleString()}
+            </h2>
+            <span className="text-[10px] text-zinc-400 font-bold">in booths</span>
+          </div>
         </div>
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 p-4 rounded-xl shadow-xs">
           <p className="text-[10px] font-bold uppercase text-zinc-400 tracking-wider">Assigned</p>
@@ -654,7 +686,8 @@ export default function BoothAgentManagement() {
                     <th className="px-4 py-2 w-10">#</th>
                     <th className="px-4 py-2">Booth No</th>
                     <th className="px-4 py-2">Booth Name</th>
-                    <th className="px-4 py-2">Village / Ward</th>
+                    <th className="px-4 py-2">Village / Mandal</th>
+                    <th className="px-4 py-2 text-center">Voters</th>
                     <th className="px-4 py-2 text-center">Karyakarta Count</th>
                     <th className="px-4 py-2 text-right">Coverage actions</th>
                   </tr>
@@ -684,7 +717,23 @@ export default function BoothAgentManagement() {
                             <div className="font-bold text-zinc-900 dark:text-white truncate max-w-[200px]" title={b.name}>{b.name}</div>
                           </td>
                           <td className="px-4 py-2 text-zinc-650 dark:text-zinc-400 text-xs truncate max-w-[150px]">
-                            {b.village || 'General Sector'}
+                            <div>{b.village || 'General Sector'}</div>
+                            {b.mandalName && (
+                              <span className="inline-flex items-center gap-1 text-[10px] text-purple-600 dark:text-purple-400 font-semibold mt-0.5">
+                                <MapPin size={9} /> {b.mandalName}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-2 text-center">
+                            <button
+                              type="button"
+                              onClick={() => openBoothVoters(b)}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200/50 dark:border-blue-800/40 hover:bg-blue-100 hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                              title="Click to view full elector list in this booth"
+                            >
+                              <Users size={12} />
+                              <span>{(b.voterCount || b.totalVoters || 0).toLocaleString()}</span>
+                            </button>
                           </td>
                           <td className="px-4 py-2 text-center">
                             {boothAssignments.length > 0 ? (
@@ -874,6 +923,22 @@ export default function BoothAgentManagement() {
                           </span>
                           <h4 className="font-extrabold text-sm text-zinc-900 dark:text-white mt-1 leading-snug line-clamp-1">{b.name}</h4>
                           <span className="text-[10px] text-zinc-400 dark:text-zinc-500 font-medium block mt-0.5">{b.village || 'General Sector'}</span>
+                          <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                            <button
+                              type="button"
+                              onClick={() => openBoothVoters(b)}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-black bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200/50 hover:bg-blue-100 transition-all cursor-pointer"
+                              title="Inspect electors registered in this booth"
+                            >
+                              <Users size={10} />
+                              <span>{(b.voterCount || b.totalVoters || 0).toLocaleString()} Voters</span>
+                            </button>
+                            {b.mandalName && (
+                              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[9px] font-bold bg-purple-50 text-purple-700 dark:bg-purple-950/30 dark:text-purple-300">
+                                <MapPin size={8} /> {b.mandalName}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <button
                           onClick={() => setSelectedBoothDetails(b)}
@@ -977,6 +1042,19 @@ export default function BoothAgentManagement() {
                           <span className="inline-flex items-center px-2 py-0.5 rounded text-[10px] font-black bg-rose-50 dark:bg-rose-955/30 text-rose-600 dark:text-rose-400">
                             Booth #{b.boothNumber}
                           </span>
+                          <button
+                            type="button"
+                            onClick={() => openBoothVoters(b)}
+                            className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg text-[10px] font-black bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300 border border-blue-200/50 hover:bg-blue-100 transition-all cursor-pointer"
+                          >
+                            <Users size={11} />
+                            <span>{(b.voterCount || b.totalVoters || 0).toLocaleString()} Voters</span>
+                          </button>
+                          {b.mandalName && (
+                            <span className="inline-flex items-center gap-1 text-[10px] font-bold text-purple-600 dark:text-purple-400 bg-purple-50 dark:bg-purple-950/30 px-1.5 py-0.5 rounded">
+                              <MapPin size={9} /> {b.mandalName}
+                            </span>
+                          )}
                           {b.village && (
                             <span className="text-[10px] font-bold text-zinc-500 bg-zinc-100 dark:bg-zinc-800 px-1.5 py-0.5 rounded">
                               {b.village}
@@ -1183,6 +1261,34 @@ export default function BoothAgentManagement() {
                       </div>
                     )}
                   </div>
+                </div>
+
+                {/* Section: Elector Roll & Voter Count Sync */}
+                <div className="p-4 rounded-2xl bg-gradient-to-r from-blue-50/80 via-indigo-50/50 to-zinc-50 dark:from-blue-950/30 dark:via-indigo-950/20 dark:to-zinc-900 border border-blue-200/80 dark:border-blue-900/40 shadow-xs flex items-center justify-between gap-3">
+                  <div>
+                    <span className="text-[10px] font-black uppercase text-blue-600 dark:text-blue-400 tracking-wider block">
+                      Registered Electors
+                    </span>
+                    <div className="flex items-baseline gap-2 mt-0.5">
+                      <span className="text-2xl font-black text-zinc-900 dark:text-white">
+                        {(selectedBoothDetails.voterCount || selectedBoothDetails.totalVoters || 0).toLocaleString()}
+                      </span>
+                      <span className="text-xs font-bold text-zinc-500">Voters</span>
+                    </div>
+                    {selectedBoothDetails.mandalName && (
+                      <span className="text-[10px] text-purple-600 dark:text-purple-400 font-bold block mt-1">
+                        📍 Mandal: {selectedBoothDetails.mandalName}
+                      </span>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => openBoothVoters(selectedBoothDetails)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs font-black bg-blue-600 hover:bg-blue-700 text-white shadow-xs cursor-pointer active:scale-95 transition-all"
+                  >
+                    <Users size={13} />
+                    <span>View Voters</span>
+                  </button>
                 </div>
 
                 {/* Section: Deployed Karyakartas */}
@@ -1576,6 +1682,209 @@ export default function BoothAgentManagement() {
                   className="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-bold text-xs h-10 rounded-xl transition-all"
                 >
                   Dismiss
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Booth Voters Electorate Roll Inspection Modal */}
+      <AnimatePresence>
+        {selectedBoothForVoters && (
+          <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-3 sm:p-6 overflow-hidden">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="bg-white dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 w-full max-w-5xl max-h-[90vh] rounded-3xl overflow-hidden shadow-2xl flex flex-col"
+            >
+              {/* Modal Header */}
+              <div className="p-5 sm:p-6 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-900/50 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-sm">
+                    <Users size={22} />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-100 dark:bg-blue-950 text-blue-700 dark:text-blue-300">
+                        Booth #{selectedBoothForVoters.boothNumber}
+                      </span>
+                      <h3 className="text-base sm:text-lg font-black text-zinc-900 dark:text-white">
+                        {selectedBoothForVoters.name}
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-zinc-500 font-medium mt-0.5">
+                      {selectedBoothForVoters.constituencyName && `Constituency: ${selectedBoothForVoters.constituencyName} • `}
+                      {selectedBoothForVoters.mandalName && `Mandal: ${selectedBoothForVoters.mandalName} • `}
+                      {selectedBoothForVoters.village || 'General Area'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-end sm:self-center">
+                  <a
+                    href={`/voters?boothId=${selectedBoothForVoters.id}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-xl bg-zinc-100 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-zinc-800 dark:text-zinc-200 transition-all cursor-pointer"
+                  >
+                    <ExternalLink size={13} />
+                    <span>Open in Directory</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedBoothForVoters(null)}
+                    className="p-2 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-xl transition-all cursor-pointer"
+                  >
+                    <X size={20} />
+                  </button>
+                </div>
+              </div>
+
+              {/* Subheader KPI Chips */}
+              <div className="px-6 py-3 border-b border-zinc-100 dark:border-zinc-800/80 bg-zinc-50/40 dark:bg-zinc-900/20 flex flex-wrap items-center justify-between gap-3 text-xs">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-2.5 py-1 rounded-lg bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 font-extrabold border border-blue-200/50">
+                    Total: {boothVoters.length} Voters
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 font-bold border border-emerald-200/50">
+                    ⭐ {boothVoters.filter(v => v.isKaryakarta).length} Karyakartas
+                  </span>
+                  <span className="px-2.5 py-1 rounded-lg bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 font-bold border border-purple-200/50">
+                    🎁 {boothVoters.filter(v => (v.benefitsCount || 0) > 0).length} Beneficiaries
+                  </span>
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative min-w-[220px]">
+                  <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
+                  <input
+                    type="text"
+                    value={boothVoterSearch}
+                    onChange={e => setBoothVoterSearch(e.target.value)}
+                    placeholder="Search by Name, EPIC, Mobile..."
+                    className="w-full pl-8 pr-3 py-1.5 text-xs bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl outline-none focus:ring-1 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
+              {/* Voter List Content */}
+              <div className="flex-1 overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+                {loadingBoothVoters ? (
+                  <div className="py-16 text-center">
+                    <div className="w-8 h-8 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto mb-3"></div>
+                    <p className="text-xs font-bold text-zinc-400">Loading voters registered in this booth...</p>
+                  </div>
+                ) : (() => {
+                  const query = boothVoterSearch.toLowerCase().trim();
+                  const filtered = boothVoters.filter(v => {
+                    if (boothVoterFilter === 'karyakarta' && !v.isKaryakarta) return false;
+                    if (boothVoterFilter === 'voted' && !v.voted && v.votingStatus !== 'voted') return false;
+                    if (!query) return true;
+                    return (
+                      (v.name || '').toLowerCase().includes(query) ||
+                      (v.voterId || v.voter_id || '').toLowerCase().includes(query) ||
+                      (v.mobile || '').toLowerCase().includes(query) ||
+                      (v.houseNo || v.house_no || '').toLowerCase().includes(query)
+                    );
+                  });
+
+                  if (filtered.length === 0) {
+                    return (
+                      <div className="py-14 text-center">
+                        <Users size={32} className="mx-auto text-zinc-300 dark:text-zinc-700 mb-2" />
+                        <p className="text-sm font-bold text-zinc-400">No voters found matching criteria</p>
+                        <p className="text-xs text-zinc-500 mt-1">
+                          {boothVoters.length === 0 
+                            ? 'No electors are currently mapped to this booth in the voter directory.' 
+                            : 'Try adjusting your search query.'}
+                        </p>
+                      </div>
+                    );
+                  }
+
+                  return (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-left border-collapse text-xs whitespace-nowrap">
+                        <thead>
+                          <tr className="bg-zinc-50 dark:bg-zinc-900/60 text-[10px] font-black uppercase text-zinc-400 tracking-wider border-b border-zinc-100 dark:border-zinc-800">
+                            <th className="px-3 py-2 w-10">#</th>
+                            <th className="px-3 py-2">EPIC / Voter ID</th>
+                            <th className="px-3 py-2">Elector Name</th>
+                            <th className="px-3 py-2">Relative</th>
+                            <th className="px-3 py-2">Age / Gender</th>
+                            <th className="px-3 py-2">Contact</th>
+                            <th className="px-3 py-2 text-center">Karyakarta Status</th>
+                            <th className="px-3 py-2 text-center">Welfare / Benefits</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                          {filtered.map((v, idx) => (
+                            <tr key={v.id || v.voterId || idx} className="hover:bg-zinc-50/60 dark:hover:bg-zinc-900/40 transition-colors">
+                              <td className="px-3 py-2.5 font-bold text-zinc-400">{idx + 1}</td>
+                              <td className="px-3 py-2.5">
+                                <span className="font-mono font-bold text-blue-600 dark:text-blue-400 text-xs">
+                                  {v.voterId || v.voter_id || 'N/A'}
+                                </span>
+                              </td>
+                              <td className="px-3 py-2.5">
+                                <span className="font-bold text-zinc-900 dark:text-white block">{v.name}</span>
+                                {v.village && <span className="text-[10px] text-zinc-400">{v.village}</span>}
+                              </td>
+                              <td className="px-3 py-2.5 text-zinc-600 dark:text-zinc-400">
+                                {v.relationName || v.relation_name ? `${v.relationType || 'Relative'}: ${v.relationName || v.relation_name}` : '-'}
+                              </td>
+                              <td className="px-3 py-2.5 text-zinc-650 dark:text-zinc-400">
+                                {v.gender || 'Gen'}{v.age ? `, ${v.age}Y` : ''}
+                              </td>
+                              <td className="px-3 py-2.5">
+                                {v.mobile ? (
+                                  <a href={`tel:${v.mobile}`} className="font-mono font-bold text-zinc-700 dark:text-zinc-300 hover:text-blue-500">
+                                    📞 {v.mobile}
+                                  </a>
+                                ) : (
+                                  <span className="text-zinc-400">-</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-center">
+                                {v.isKaryakarta ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 border border-emerald-200/50">
+                                    ⭐ Karyakarta
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-zinc-400">Elector</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2.5 text-center">
+                                {(v.benefitsCount || 0) > 0 ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-black bg-purple-50 dark:bg-purple-950/40 text-purple-600 dark:text-purple-400 border border-purple-200/50">
+                                    🎁 {v.benefitsCount} Schemes (₹{(v.benefitsTotalAmount || 0).toLocaleString()})
+                                  </span>
+                                ) : (
+                                  <span className="text-[10px] text-zinc-400">-</span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 sm:p-5 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-900/20 flex justify-between items-center gap-3">
+                <span className="text-xs text-zinc-500">
+                  Showing <strong className="text-zinc-800 dark:text-zinc-200">{boothVoters.length}</strong> electors synced with Booth #{selectedBoothForVoters.boothNumber}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedBoothForVoters(null)}
+                  className="px-4 py-2 text-xs font-bold rounded-xl bg-zinc-900 dark:bg-zinc-100 text-white dark:text-zinc-900 hover:opacity-90 transition-all cursor-pointer"
+                >
+                  Close
                 </button>
               </div>
             </motion.div>
